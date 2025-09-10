@@ -2,9 +2,9 @@
 
 import * as React from 'react';
 import {
-  CaretSortIcon,
-  ChevronDownIcon,
-} from '@radix-ui/react-icons';
+  ChevronsUpDown,
+  ChevronDown,
+} from 'lucide-react';
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -68,7 +68,7 @@ export const columns: ColumnDef<Order>[] = [
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
       >
         Código
-        <CaretSortIcon className="ml-2 h-4 w-4" />
+        <ChevronsUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
     cell: ({ row }) => <div className="font-medium">{row.getValue('code')}</div>,
@@ -156,7 +156,7 @@ export function OrderTable({ orders }: { orders: Order[] }) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="ml-auto">
-              Colunas <ChevronDownIcon className="ml-2 h-4 w-4" />
+              Colunas <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

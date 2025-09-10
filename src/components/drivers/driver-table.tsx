@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { CaretSortIcon } from '@radix-ui/react-icons';
+import { ChevronsUpDown } from 'lucide-react';
 import {
   ColumnDef,
   SortingState,
@@ -82,7 +82,7 @@ export const columns: ColumnDef<Driver>[] = [
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
       >
         Avaliação
-        <CaretSortIcon className="ml-2 h-4 w-4" />
+        <ChevronsUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
     cell: ({ row }) => (
