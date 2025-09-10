@@ -1,3 +1,34 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "map1",
+      "description": "A placeholder map showing driver locations in a city.",
+      "imageUrl": "https://picsum.photos/seed/map1/1200/800",
+      "imageHint": "city map"
+    },
+    {
+      "id": "avatar1",
+      "description": "Avatar placeholder 1",
+      "imageUrl": "https://picsum.photos/seed/avatar1/100/100",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "avatar2",
+      "description": "Avatar placeholder 2",
+      "imageUrl": "https://picsum.photos/seed/avatar2/100/100",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "avatar3",
+      "description": "Avatar placeholder 3",
+      "imageUrl": "https://picsum.photos/seed/avatar3/100/100",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "avatar4",
+      "description": "Avatar placeholder 4",
+      "imageUrl": "https://picsum.photos/seed/avatar4/100/100",
+      "imageHint": "person portrait"
+    }
+  ]
 }

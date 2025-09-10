@@ -1,0 +1,138 @@
+import type { Driver, Order, ActivityEvent } from './types';
+
+export const drivers: Driver[] = [
+  {
+    id: 'driver-001',
+    name: 'Carlos Silva',
+    phone: '(62) 98765-4321',
+    status: 'available',
+    vehicle: { type: 'Moto', plate: 'ABC-1234' },
+    lastSeenAt: new Date(),
+    totalDeliveries: 128,
+    rating: 4.8,
+    avatarUrl: 'https://i.pravatar.cc/150?u=driver-001',
+  },
+  {
+    id: 'driver-002',
+    name: 'Ana Pereira',
+    phone: '(62) 91234-5678',
+    status: 'busy',
+    vehicle: { type: 'Moto', plate: 'DEF-5678' },
+    lastSeenAt: new Date(new Date().getTime() - 5 * 60000),
+    totalDeliveries: 256,
+    rating: 4.9,
+    avatarUrl: 'https://i.pravatar.cc/150?u=driver-002',
+  },
+  {
+    id: 'driver-003',
+    name: 'Lucas Martins',
+    phone: '(62) 99999-8888',
+    status: 'offline',
+    vehicle: { type: 'Carro', plate: 'GHI-9012' },
+    lastSeenAt: new Date(new Date().getTime() - 60 * 60000),
+    totalDeliveries: 89,
+    rating: 4.6,
+    avatarUrl: 'https://i.pravatar.cc/150?u=driver-003',
+  },
+  {
+    id: 'driver-004',
+    name: 'Juliana Costa',
+    phone: '(62) 98888-7777',
+    status: 'available',
+    vehicle: { type: 'Moto', plate: 'JKL-3456' },
+    lastSeenAt: new Date(new Date().getTime() - 2 * 60000),
+    totalDeliveries: 312,
+    rating: 5.0,
+    avatarUrl: 'https://i.pravatar.cc/150?u=driver-004',
+  },
+];
+
+export const orders: Order[] = [
+  {
+    id: 'order-001',
+    code: 'G01-A1B2',
+    status: 'in_route',
+    createdAt: new Date(new Date().getTime() - 30 * 60000),
+    customer: {
+      name: 'Farmácia Central',
+      address: 'Rua 8, 123, Setor Central, Goiânia-GO',
+    },
+    pickup: { address: 'Av. Anhanguera, 456, Centro, Goiânia-GO' },
+    assignedTo: 'driver-002',
+    price: { total: 15.5 },
+    notes: 'Entregar na recepção e pedir para falar com a Sra. Helena. Cuidado, frágil.',
+  },
+  {
+    id: 'order-002',
+    code: 'G01-C3D4',
+    status: 'assigned',
+    createdAt: new Date(new Date().getTime() - 10 * 60000),
+    customer: {
+      name: 'Escritório Advocacia XYZ',
+      address: 'Av. T-9, 789, Setor Marista, Goiânia-GO',
+    },
+    pickup: { address: 'Rua 22, 101, Setor Oeste, Goiânia-GO' },
+    assignedTo: 'driver-001',
+    price: { total: 22.0 },
+  },
+  {
+    id: 'order-003',
+    code: 'G01-E5F6',
+    status: 'delivered',
+    createdAt: new Date(new Date().getTime() - 2 * 60 * 60000),
+    customer: {
+      name: 'Restaurante Sabor Goiano',
+      address: 'Alameda Ricardo Paranhos, 10, Setor Marista, Goiânia-GO',
+    },
+    pickup: { address: 'Mercado Municipal, Rua 3, Centro, Goiânia-GO' },
+    assignedTo: 'driver-004',
+    price: { total: 12.75 },
+  },
+  {
+    id: 'order-004',
+    code: 'G02-G7H8',
+    status: 'created',
+    createdAt: new Date(new Date().getTime() - 5 * 60000),
+    customer: {
+      name: 'Cliente Particular',
+      address: 'Rua T-36, 1500, Setor Bueno, Goiânia-GO',
+    },
+    pickup: { address: 'Goiânia Shopping, Av. T-10, Setor Bueno, Goiânia-GO' },
+    price: { total: 18.0 },
+    notes: 'Portão branco, tocar interfone 302.',
+  },
+  {
+    id: 'order-005',
+    code: 'G02-I9J0',
+    status: 'canceled',
+    createdAt: new Date(new Date().getTime() - 5 * 60 * 60000),
+    customer: {
+      name: 'Loja de Roupas & Cia',
+      address: 'Rua 44, 200, Setor Norte Ferroviário, Goiânia-GO',
+    },
+    pickup: { address: 'Estação da Moda, Rua 67-A, Setor Norte Ferroviário, Goiânia-GO' },
+    price: { total: 9.5 },
+  },
+  {
+    id: 'order-006',
+    code: 'G03-K1L2',
+    status: 'picked_up',
+    createdAt: new Date(new Date().getTime() - 45 * 60000),
+    customer: {
+      name: 'Hospital das Clínicas',
+      address: '1ª Avenida, s/n, Setor Leste Universitário, Goiânia-GO',
+    },
+    pickup: { address: 'Laboratório Central, Av. Universitária, Setor Leste Universitário, Goiânia-GO' },
+    assignedTo: 'driver-001',
+    price: { total: 11.2 },
+    notes: 'Documentos urgentes. Entregar no setor de Patologia.',
+  },
+];
+
+export const activityFeed: ActivityEvent[] = [
+    { id: 'act-1', type: 'status_change', timestamp: new Date(new Date().getTime() - 2 * 60000), actor: { name: 'Ana Pereira', role: 'driver' }, details: 'Pedido G01-A1B2 está em rota.' },
+    { id: 'act-2', type: 'assignment', timestamp: new Date(new Date().getTime() - 10 * 60000), actor: { name: 'Sistema', role: 'admin' }, details: 'Pedido G01-C3D4 atribuído a Carlos Silva.' },
+    { id: 'act-3', type: 'status_change', timestamp: new Date(new Date().getTime() - 15 * 60000), actor: { name: 'Ana Pereira', role: 'driver' }, details: 'Coleta do pedido G01-A1B2 realizada.' },
+    { id: 'act-4', type: 'note', timestamp: new Date(new Date().getTime() - 25 * 60000), actor: { name: 'Admin', role: 'admin' }, details: 'Nota adicionada ao pedido G02-G7H8.' },
+    { id: 'act-5', type: 'status_change', timestamp: new Date(new Date().getTime() - 65 * 60000), actor: { name: 'Juliana Costa', role: 'driver' }, details: 'Pedido G01-E5F6 entregue com sucesso.' },
+];
