@@ -16,9 +16,11 @@ import {
 import {
   ChartConfig,
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 
 const deliveriesData = [
   { hour: '08:00', deliveries: 2 },
@@ -86,12 +88,21 @@ const statusData = [
   { name: 'Cancelado', value: 5, color: 'hsl(var(--chart-5))' },
 ];
 
+const statusChartConfig = {
+    "Em Rota": { label: "Em Rota" },
+    "Atribuído": { label: "Atribuído" },
+    "Entregue": { label: "Entregue" },
+    "Criado": { label: "Criado" },
+    "Cancelado": { label: "Cancelado" },
+} satisfies ChartConfig;
+
+
 export function StatusChart() {
   return (
-    <div className="h-[300px]">
+    <ChartContainer config={statusChartConfig} className="h-[300px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Tooltip
+          <ChartTooltip
             cursor={false}
             content={<ChartTooltipContent hideLabel />}
           />
@@ -110,16 +121,11 @@ export function StatusChart() {
               <Cell key={`cell-${index}`} fill={entry.color} />
             ))}
           </Pie>
-          <Legend
-            layout="vertical"
-            align="right"
-            verticalAlign="middle"
-            iconSize={10}
-            iconType="circle"
-            wrapperStyle={{ right: -10, top: '50%', transform: 'translate(0, -50%)' }}
+          <ChartLegend
+            content={<ChartLegendContent layout="vertical" align="right" verticalAlign="middle" />}
           />
         </PieChart>
       </ResponsiveContainer>
-    </div>
+    </ChartContainer>
   );
 }
