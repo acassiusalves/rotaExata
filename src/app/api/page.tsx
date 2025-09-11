@@ -14,15 +14,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal } from 'lucide-react';
+import { Terminal, CheckCircle } from 'lucide-react';
 
 export default function ApiPage() {
   const [apiKey, setApiKey] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isSaved, setIsSaved] = React.useState(false);
   const { toast } = useToast();
 
   const handleSave = async () => {
+    if (!apiKey) {
+      toast({
+        variant: 'destructive',
+        title: "Chave inválida",
+        description: "Por favor, insira uma chave de API.",
+      });
+      return;
+    }
     setIsLoading(true);
+    setIsSaved(false);
     try {
       const response = await fetch('/api/save-api-key', {
         method: 'POST',
@@ -33,19 +43,21 @@ export default function ApiPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Falha ao salvar a chave.');
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Falha ao salvar a chave.');
       }
 
+      setIsSaved(true);
       toast({
         title: "Chave Salva!",
-        description: "Sua chave de API do Google Maps foi salva com sucesso.",
+        description: "Sua chave de API do Google Maps foi salva com sucesso no servidor.",
       });
 
-    } catch (error) {
+    } catch (error: any) {
        toast({
         variant: 'destructive',
-        title: "Erro!",
-        description: "Não foi possível salvar a chave de API.",
+        title: "Erro ao salvar!",
+        description: error.message || "Não foi possível salvar a chave de API.",
       });
       console.error(error);
     } finally {
@@ -66,9 +78,9 @@ export default function ApiPage() {
 
        <Alert>
         <Terminal className="h-4 w-4" />
-        <AlertTitle>Ação Manual Necessária</AlertTitle>
+        <AlertTitle>Chave de API do Cliente (Navegador)</AlertTitle>
         <AlertDescription>
-          Para que a aplicação funcione corretamente, você deve configurar sua chave de API do Google Maps como uma variável de ambiente. O formulário abaixo simula o salvamento, mas a chave precisa ser adicionada manualmente ao arquivo <code className="font-semibold text-foreground">.env</code> na raiz do projeto.
+          Para que os mapas interativos funcionem no navegador, a chave de API também precisa estar disponível para o cliente. Por favor, adicione sua chave ao arquivo <code className="font-semibold text-foreground">.env</code> na raiz do projeto.
           <br /><br />
           1. Abra ou crie o arquivo <code className="font-semibold text-foreground">.env</code>.<br />
           2. Adicione a linha: <code className="font-semibold text-foreground">NEXT_PUBLIC_GMAPS_KEY="SUA_CHAVE_DE_API_AQUI"</code><br />
@@ -79,29 +91,37 @@ export default function ApiPage() {
 
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>API do Google Maps</CardTitle>
+          <CardTitle>Chave de API do Google Maps (Servidor)</CardTitle>
           <CardDescription>
-            Para habilitar o cálculo de rotas e os mapas, você precisa
-            configurar sua chave de API do Google Maps. A chave será usada tanto no cliente (mapas) quanto no servidor (rotas).
+            Insira sua chave de API do Google Maps aqui. Ela será armazenada de forma segura e usada para operações no servidor, como o cálculo de rotas.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-2">
             <Label htmlFor="gmaps-key">Chave de API do Google Maps</Label>
-            <Input
-              id="gmaps-key"
-              type="password"
-              placeholder="Cole sua chave de API aqui"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              disabled={isLoading}
-            />
+            <div className="relative">
+              <Input
+                id="gmaps-key"
+                type="password"
+                placeholder="Cole sua chave de API aqui"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setIsSaved(false);
+                }}
+                disabled={isLoading}
+                className={isSaved ? 'border-green-500 pr-10' : ''}
+              />
+              {isSaved && (
+                <CheckCircle className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500" />
+              )}
+            </div>
           </div>
         </CardContent>
         <CardFooter>
-          <Button onClick={handleSave} disabled={isLoading}>
-            {isLoading ? 'Salvando...' : 'Salvar Chave'}
-            </Button>
+          <Button onClick={handleSave} disabled={isLoading || !apiKey}>
+            {isLoading ? 'Salvando e Testando...' : 'Salvar e Testar Chave'}
+          </Button>
         </CardFooter>
       </Card>
     </div>
