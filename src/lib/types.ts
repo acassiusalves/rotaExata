@@ -8,6 +8,13 @@ export type NavItem = {
   label?: string;
 };
 
+export type PlaceValue = {
+  address: string;
+  placeId: string;
+  lat: number;
+  lng: number;
+};
+
 export type OrderStatus =
   | 'created'
   | 'assigned'
@@ -17,19 +24,12 @@ export type OrderStatus =
   | 'failed_attempt'
   | 'canceled';
 
-type Location = {
-  address: string;
-  placeId: string;
-  lat: number;
-  lng: number;
-};
-
 export type Order = {
   id: string; // Document id
   code: string;
   status: OrderStatus;
-  pickup: Location;
-  destination: Location;
+  pickup: PlaceValue;
+  destination: PlaceValue;
   distanceMeters: number;
   duration: string; // "1234s"
   encodedPolyline: string;
