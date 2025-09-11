@@ -4,9 +4,11 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  CardFooter,
 } from "@/components/ui/card";
-import { Terminal } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function ApiPage() {
   return (
@@ -27,32 +29,19 @@ export default function ApiPage() {
             configurar sua chave de API do Google Maps.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <Alert>
-            <Terminal className="h-4 w-4" />
-            <AlertTitle>Ação Manual Necessária</AlertTitle>
-            <AlertDescription>
-              <p>
-                Por segurança, sua chave de API deve ser adicionada
-                diretamente no arquivo de configuração de ambiente.
-              </p>
-              <ol className="list-decimal list-inside mt-2 space-y-1">
-                <li>
-                  Abra o arquivo <code>.env</code> na raiz do seu projeto.
-                </li>
-                <li>
-                  Cole sua chave de API do Google Maps nos valores das
-                  variáveis <code>GMAPS_SERVER_KEY</code> e{" "}
-                  <code>NEXT_PUBLIC_GMAPS_KEY</code>.
-                </li>
-                <li>
-                  Salve o arquivo. A aplicação será recarregada
-                  automaticamente.
-                </li>
-              </ol>
-            </AlertDescription>
-          </Alert>
+        <CardContent>
+          <div className="grid gap-2">
+            <Label htmlFor="gmaps-key">Chave de API do Google Maps</Label>
+            <Input
+              id="gmaps-key"
+              type="password"
+              placeholder="Cole sua chave de API aqui"
+            />
+          </div>
         </CardContent>
+        <CardFooter>
+          <Button>Salvar Chave</Button>
+        </CardFooter>
       </Card>
     </div>
   );
