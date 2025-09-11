@@ -1,7 +1,7 @@
-import {
-  Card,
-  CardContent,
-} from '@/components/ui/card';
+'use client';
+
+import { useState } from 'react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Image from 'next/image';
 import { placeholderImages } from '@/lib/placeholder-images';
@@ -17,6 +17,24 @@ import {
   Plus,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+
+const origins = [
+  {
+    id: 'sol-de-maria',
+    name: 'Sol de Maria',
+    address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia...',
+  },
+  {
+    id: 'investe-aqui',
+    name: 'InvesteAqui',
+    address: 'Rua da Alfandega, 200, Bras, Sao paulo, SP, Brasil',
+  },
+];
 
 function RouteConfigItem({
   icon: Icon,
@@ -45,6 +63,7 @@ function RouteConfigItem({
 
 export default function NewRoutePage() {
   const mapImage = placeholderImages.find((p) => p.id === 'map1');
+  const [selectedOrigin, setSelectedOrigin] = useState(origins[0]);
 
   return (
     <div className="flex-1 overflow-hidden">
@@ -59,8 +78,45 @@ export default function NewRoutePage() {
             <RouteConfigItem
               icon={Home}
               title="ORIGEM"
-              value="Sol de Maria"
-              action={<Button variant="ghost">EDITAR</Button>}
+              value={selectedOrigin.name}
+              action={
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost">EDITAR</Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-96" align="end">
+                    <div className="grid gap-4">
+                      <div className="space-y-2">
+                         <button className="flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted">
+                          <Plus className="mt-1 h-6 w-6" />
+                          <div>
+                            <p className="font-semibold">Adicionar nova origem</p>
+                            <p className="text-sm text-muted-foreground">
+                              Escolha essa opção caso queira cadastrar uma nova origem para utilizar em novas roteirizações
+                            </p>
+                          </div>
+                        </button>
+                      </div>
+                      <Separator />
+                      <div className="grid gap-2">
+                        {origins.map((origin) => (
+                          <button
+                            key={origin.id}
+                            onClick={() => setSelectedOrigin(origin)}
+                            className={`flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted ${selectedOrigin.id === origin.id ? 'bg-muted' : ''}`}
+                          >
+                            <Home className={`mt-1 h-6 w-6 ${selectedOrigin.id === origin.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                            <div>
+                               <p className={`font-medium ${selectedOrigin.id === origin.id ? 'text-foreground' : ''}`}>{origin.address}</p>
+                               <p className="text-sm text-muted-foreground">{origin.name}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              }
             />
             <Separator />
             <RouteConfigItem
@@ -100,7 +156,9 @@ export default function NewRoutePage() {
                   <p className="font-medium">SERVIÇOS (0)</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm">IMPORTAR EXCEL</Button>
+                  <Button variant="ghost" size="sm">
+                    IMPORTAR EXCEL
+                  </Button>
                   <Button variant="ghost" size="icon">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
@@ -111,10 +169,13 @@ export default function NewRoutePage() {
                 <p>Nenhum serviço adicionado ainda.</p>
               </div>
 
-               <Button variant="outline" className="w-full justify-start gap-2 border-dashed">
-                 <Plus className="h-4 w-4" />
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-2 border-dashed"
+              >
+                <Plus className="h-4 w-4" />
                 ADICIONAR NOVO SERVIÇO
-               </Button>
+              </Button>
             </div>
           </div>
           <div className="mt-8 flex gap-4">
