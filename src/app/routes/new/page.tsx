@@ -10,7 +10,7 @@ import {
   Calendar,
   Settings,
   Share2,
-  TruckOff,
+  Truck,
   MapPin,
   Pencil,
   MoreVertical,
@@ -85,7 +85,7 @@ export default function NewRoutePage() {
             />
             <Separator />
             <RouteConfigItem
-              icon={TruckOff}
+              icon={Truck}
               title="Regiões restritas"
               value="Nenhuma região selecionada"
               action={<Button variant="ghost">EDITAR</Button>}
