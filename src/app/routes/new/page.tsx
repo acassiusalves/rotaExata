@@ -22,7 +22,7 @@ export default function NewRoutePage() {
     <div className="grid h-full w-full grid-cols-[350px_1fr]">
       {/* Left Sidebar */}
       <div className="flex flex-col border-r bg-background">
-        <div className="flex h-16 items-center border-b px-6">
+        <div className="flex h-16 shrink-0 items-center border-b px-6">
           <h1 className="text-xl font-semibold">Nova Rota</h1>
         </div>
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
@@ -70,7 +70,7 @@ export default function NewRoutePage() {
         </div>
 
         {/* Footer Actions */}
-        <div className="mt-auto border-t p-6">
+        <div className="shrink-0 border-t p-6">
           <Button variant="outline" className="w-full justify-center gap-3">
             <Upload className="h-5 w-5" />
             Importar Serviços

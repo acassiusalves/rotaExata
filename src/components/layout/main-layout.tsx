@@ -10,12 +10,12 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Special layout for the new route page
+  // Special layout for the new route page to take full screen height
   if (pathname === '/routes/new') {
     return (
-      <div className="flex min-h-screen w-full flex-col">
+      <div className="flex h-screen w-full flex-col">
         <Header />
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 overflow-hidden">{children}</main>
       </div>
     );
   }
