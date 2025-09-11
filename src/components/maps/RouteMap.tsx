@@ -79,6 +79,8 @@ export function RouteMap({
     }
 
   }, [origin, destination, encodedPolyline]);
+  
+  const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 
-  return <div ref={divRef} style={{ height }} className="w-full rounded-lg border" />;
+  return <div ref={divRef} style={mapStyle} className="w-full rounded-lg border" />;
 }
