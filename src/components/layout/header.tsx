@@ -5,20 +5,11 @@ import {
   Home,
   LineChart,
   Package,
-  PanelLeft,
   Search,
   Users,
   Settings,
-  BotMessageSquare
+  BotMessageSquare,
 } from 'lucide-react';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -36,107 +27,115 @@ import {
 } from '@/components/ui/sheet';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useMemo } from 'react';
+import { cn } from '@/lib/utils';
 
 export function Header() {
   const pathname = usePathname();
-  const pageTitle = useMemo(() => {
-    if (pathname === '/') return 'Dashboard';
-    if (pathname.startsWith('/orders')) return 'Pedidos';
-    if (pathname.startsWith('/drivers')) return 'Motoristas';
-    if (pathname.startsWith('/reports')) return 'Relatórios';
-    if (pathname.startsWith('/settings')) return 'Configurações';
-    return 'RotaExata';
-  }, [pathname]);
+  const navItems = [
+    { href: '/', icon: Home, label: 'Dashboard' },
+    { href: '/orders', icon: Package, label: 'Pedidos' },
+    { href: '/drivers', icon: Users, label: 'Motoristas' },
+    { href: '/reports', icon: LineChart, label: 'Relatórios' },
+  ];
+
+  const isActive = (href: string) => {
+    return pathname === href;
+  };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6">
+      <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
+        <Link
+          href="/"
+          className="flex items-center gap-2 text-lg font-semibold md:text-base"
+        >
+          <BotMessageSquare className="h-6 w-6 text-primary" />
+          <span className="sr-only">RotaExata</span>
+        </Link>
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              'transition-colors hover:text-foreground',
+              isActive(item.href)
+                ? 'text-foreground'
+                : 'text-muted-foreground'
+            )}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
       <Sheet>
         <SheetTrigger asChild>
-          <Button size="icon" variant="outline" className="sm:hidden">
-            <PanelLeft className="h-5 w-5" />
-            <span className="sr-only">Toggle Menu</span>
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="left" className="sm:max-w-xs">
-          <nav className="grid gap-6 text-lg font-medium">
-            <Link
-              href="/"
-              className="group flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-full bg-primary text-lg font-semibold text-primary-foreground md:text-base"
-            >
-              <BotMessageSquare className="h-5 w-5 transition-all group-hover:scale-110" />
-              <span className="sr-only">RotaExata</span>
-            </Link>
-            <Link href="/" className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground">
-              <Home className="h-5 w-5" />
-              Dashboard
-            </Link>
-            <Link href="/orders" className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground">
-              <Package className="h-5 w-5" />
-              Pedidos
-            </Link>
-            <Link href="/drivers" className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground">
-              <Users className="h-5 w-5" />
-              Motoristas
-            </Link>
-            <Link href="/reports" className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground">
-              <LineChart className="h-5 w-5" />
-              Relatórios
-            </Link>
-            <Link href="/settings" className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground">
-              <Settings className="h-5 w-5" />
-              Configurações
-            </Link>
-          </nav>
-        </SheetContent>
-      </Sheet>
-      <Breadcrumb className="hidden md:flex">
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/">RotaExata</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{pageTitle}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-      <div className="relative ml-auto flex-1 md:grow-0">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder="Buscar..."
-          className="w-full rounded-lg bg-background pl-8 md:w-[200px] lg:w-[336px]"
-        />
-      </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="icon"
-            className="overflow-hidden rounded-full"
+            className="shrink-0 md:hidden"
           >
-            <Image
-              src="https://picsum.photos/seed/admin/36/36"
-              width={36}
-              height={36}
-              alt="Avatar"
-              className="overflow-hidden rounded-full"
-              data-ai-hint="person portrait"
-            />
+            <BotMessageSquare className="h-5 w-5" />
+            <span className="sr-only">Toggle navigation menu</span>
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>Perfil</DropdownMenuItem>
-          <DropdownMenuItem>Suporte</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>Sair</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </SheetTrigger>
+        <SheetContent side="left">
+          <nav className="grid gap-6 text-lg font-medium">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-lg font-semibold"
+            >
+              <BotMessageSquare className="h-6 w-6 text-primary" />
+              <span className="sr-only">RotaExata</span>
+            </Link>
+            {navItems.map((item) => (
+              <Link
+                 key={item.href}
+                href={item.href}
+                className={cn('hover:text-foreground', {
+                    'text-muted-foreground': !isActive(item.href)
+                })}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </SheetContent>
+      </Sheet>
+      <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4">
+        <form className="ml-auto flex-1 sm:flex-initial">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Buscar pedidos..."
+              className="pl-8 sm:w-[300px] md:w-[200px] lg:w-[300px]"
+            />
+          </div>
+        </form>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="secondary" size="icon" className="rounded-full">
+              <Image
+                src="https://picsum.photos/seed/admin/36/36"
+                width={36}
+                height={36}
+                alt="Avatar"
+                className="rounded-full"
+                data-ai-hint="person portrait"
+              />
+              <span className="sr-only">Toggle user menu</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild><Link href="/settings">Configurações</Link></DropdownMenuItem>
+            <DropdownMenuItem>Suporte</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>Sair</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
   );
 }
