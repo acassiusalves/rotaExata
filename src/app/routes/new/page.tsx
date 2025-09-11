@@ -10,6 +10,7 @@ import {
   Home,
   Plus,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -36,6 +37,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useToast } from '@/hooks/use-toast';
+import { extractAddressesFromText } from '@/ai/flows/extract-addresses-from-text';
 
 const savedOrigins = [
   {
@@ -67,10 +70,15 @@ export default function NewRoutePage() {
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
+  
+  const [isImporting, setIsImporting] = React.useState(false);
 
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
@@ -78,7 +86,6 @@ export default function NewRoutePage() {
   };
   
   const handleAddStop = () => {
-    // Add a placeholder for a new stop. The user will fill it in.
     setStops([...stops, {} as PlaceValue]);
   };
 
@@ -94,11 +101,84 @@ export default function NewRoutePage() {
       setStops(newStops);
     }
   };
+
+  const geocodeAddress = React.useCallback((address: string): Promise<PlaceValue | null> => {
+    return new Promise((resolve, reject) => {
+      try {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ address, region: 'BR' }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            const place = results[0];
+            const location = place.geometry.location;
+            resolve({
+              address: place.formatted_address,
+              placeId: place.place_id,
+              lat: location.lat(),
+              lng: location.lng(),
+            });
+          } else {
+             console.warn(`Geocoding failed for "${address}": ${status}`);
+            resolve(null);
+          }
+        });
+      } catch (e) {
+        console.error('Geocoding error:', e);
+        reject(e);
+      }
+    });
+  }, []);
+  
+  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    toast({
+      title: 'Importando endereços...',
+      description: 'A IA está lendo e processando o arquivo.',
+    });
+
+    try {
+      const text = await file.text();
+      const result = await extractAddressesFromText({ text });
+      
+      const geocodedStopsPromises = result.addresses.map(addr => geocodeAddress(addr));
+      const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
+
+      setStops(prevStops => [...prevStops, ...newStops]);
+      
+      toast({
+        title: 'Importação Concluída!',
+        description: `${newStops.length} de ${result.addresses.length} endereços foram adicionados à rota.`,
+      });
+
+    } catch (error) {
+      console.error('Import failed', error);
+      toast({
+        variant: 'destructive',
+        title: 'Falha na Importação',
+        description: 'Não foi possível processar o arquivo. Verifique o formato e tente novamente.',
+      });
+    } finally {
+      setIsImporting(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
   
   const mapStops = React.useMemo(() => stops.filter(s => s.lat && s.lng), [stops]);
 
   return (
     <>
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        onChange={handleFileImport}
+        accept=".txt,.csv"
+      />
       <div className="grid h-full w-full grid-cols-[350px_1fr]">
         {/* Left Sidebar */}
         <div className="flex flex-col border-r bg-background">
@@ -209,6 +289,7 @@ export default function NewRoutePage() {
                   <AutocompleteInput
                     id={`stop-${index}`}
                     placeholder="Endereço da parada..."
+                    value={stop}
                     onChange={(place) => handleStopChange(index, place)}
                   />
                 </div>
@@ -226,9 +307,18 @@ export default function NewRoutePage() {
 
           {/* Footer Actions */}
           <div className="shrink-0 border-t p-6">
-            <Button variant="outline" className="w-full justify-center gap-3">
-              <Upload className="h-5 w-5" />
-              Importar Serviços
+            <Button
+              variant="outline"
+              className="w-full justify-center gap-3"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+            >
+              {isImporting ? (
+                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <Upload className="h-5 w-5" />
+              )}
+              {isImporting ? 'Importando...' : 'Importar Serviços'}
             </Button>
           </div>
         </div>

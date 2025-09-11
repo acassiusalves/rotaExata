@@ -26,10 +26,16 @@ export function AutocompleteInput({
   const acRef = React.useRef<google.maps.places.Autocomplete | null>(null);
 
   React.useEffect(() => {
+    if (inputRef.current && value && value.address) {
+      inputRef.current.value = value.address;
+    }
+  }, [value]);
+
+  React.useEffect(() => {
     let mounted = true;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
-      libraries: ["places", "geometry"],
+      libraries: ["places", "geometry", "geocoding"],
       language: "pt-BR",
       region: "BR",
     });
