@@ -16,8 +16,12 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { orders as allOrders } from '@/lib/data';
+// import { orders as allOrders } from '@/lib/data';
 import { OrderTable } from '@/components/orders/order-table';
+import { Order } from '@/lib/types';
+
+// Mock data, em um app real isso viria do Firestore
+const allOrders: Order[] = [];
 
 export default function OrdersPage() {
   return (

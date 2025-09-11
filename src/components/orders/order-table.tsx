@@ -56,7 +56,7 @@ const statusMap: Record<
 
 const getDriverName = (driverId: string | undefined) => {
   if (!driverId) return <span className="text-muted-foreground">N/A</span>;
-  return drivers.find((d) => d.id === driverId)?.name ?? 'Desconhecido';
+  return 'N/A' //drivers.find((d) => d.id === driverId)?.name ?? 'Desconhecido';
 };
 
 export const columns: ColumnDef<Order>[] = [
@@ -83,21 +83,21 @@ export const columns: ColumnDef<Order>[] = [
     },
   },
   {
-    accessorKey: 'customer.name',
-    header: 'Cliente',
-    cell: ({ row }) => <div>{row.original.customer.name}</div>,
+    accessorKey: 'pickup.address',
+    header: 'Coleta',
+    cell: ({ row }) => <div>{row.original.pickup.address}</div>,
   },
   {
-    accessorKey: 'assignedTo',
-    header: 'Motorista',
-    cell: ({ row }) => getDriverName(row.getValue('assignedTo')),
+    accessorKey: 'destination.address',
+    header: 'Entrega',
+    cell: ({ row }) => <div>{row.original.destination.address}</div>,
   },
   {
     accessorKey: 'createdAt',
     header: 'Criado em',
     cell: ({ row }) => (
       <div>
-        {format(new Date(row.getValue('createdAt')), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+        {format(new Date(row.getValue('createdAt') as any), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
       </div>
     ),
   },

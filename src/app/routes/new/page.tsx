@@ -1,303 +1,177 @@
-'use client';
+"use client";
+import * as React from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { AutocompleteInput } from "@/components/maps/AutocompleteInput";
+import { RouteMap } from "@/components/maps/RouteMap";
+import { getFirestore, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { initializeApp } from "firebase/app";
+import { KpiCard } from "@/components/dashboard/kpi-card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import { Package } from "lucide-react";
 
-import { useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import Image from 'next/image';
-import { placeholderImages } from '@/lib/placeholder-images';
-import {
-  Home,
-  Calendar,
-  Settings,
-  Share2,
-  Truck,
-  MapPin,
-  Pencil,
-  MoreVertical,
-  Plus,
-} from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+// --- Firebase client init (ajuste com seu config) ---
+const firebaseApp = initializeApp({
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+});
+const db = getFirestore(firebaseApp);
 
-const origins = [
-  {
-    id: 'sol-de-maria',
-    name: 'Sol de Maria',
-    address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia...',
-  },
-  {
-    id: 'investe-aqui',
-    name: 'InvesteAqui',
-    address: 'Rua da Alfandega, 200, Bras, Sao paulo, SP, Brasil',
-  },
-];
+// --- Schema do formulário ---
+const placeSchema = z.object({
+  address: z.string().min(5, "Endereço deve ter pelo menos 5 caracteres"),
+  placeId: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+}).nullable();
 
-function RouteConfigItem({
-  icon: Icon,
-  title,
-  value,
-  action,
-}: {
-  icon: React.ElementType;
-  title: string;
-  value: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between py-4">
-      <div className="flex items-center gap-4">
-        <Icon className="h-6 w-6 text-muted-foreground" />
-        <div>
-          <p className="font-medium text-foreground">{title}</p>
-          <p className="text-sm text-muted-foreground">{value}</p>
-        </div>
-      </div>
-      {action}
-    </div>
-  );
-}
+
+const schema = z.object({
+  pickup: placeSchema.refine(val => val !== null, { message: "Campo de coleta é obrigatório" }),
+  destination: placeSchema.refine(val => val !== null, { message: "Campo de entrega é obrigatório" }),
+  base: z.coerce.number().min(0).default(5),   // tarifa base
+  perKm: z.coerce.number().min(0).default(2.5) // R$/km
+});
+
+type FormData = z.infer<typeof schema>;
 
 export default function NewRoutePage() {
-  const mapImage = placeholderImages.find((p) => p.id === 'map1');
-  const [selectedOrigin, setSelectedOrigin] = useState(origins[0]);
+  const { register, setValue, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: { base: 5, perKm: 2.5, pickup: null, destination: null }
+  });
+
+  const { toast } = useToast();
+
+  const pickup = watch("pickup");
+  const destination = watch("destination");
+  const base = watch("base");
+  const perKm = watch("perKm");
+
+  const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [encodedPolyline, setEncodedPolyline] = React.useState<string | null>(null);
+  const [distanceMeters, setDistanceMeters] = React.useState<number>(0);
+  const [duration, setDuration] = React.useState<string>("");
+
+  async function onComputeRoute() {
+    if (!pickup || !destination) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/compute-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origin: { lat: pickup.lat, lng: pickup.lng },
+          destination: { lat: destination.lat, lng: destination.lng }
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail || "Erro ao calcular rota");
+      setEncodedPolyline(data.encodedPolyline || null);
+      setDistanceMeters(data.distanceMeters || 0);
+      setDuration(data.duration || "0s");
+      toast({ title: 'Rota calculada!', description: 'Distância e preço foram estimados.'});
+    } catch (e: any) {
+       toast({ variant: 'destructive', title: 'Falha ao calcular rota', description: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function priceTotal() {
+    const km = distanceMeters / 1000;
+    return Number(base || 0) + Number(perKm || 0) * (isFinite(km) ? km : 0);
+  }
+
+  const onSubmit = async (data: FormData) => {
+    if (!distanceMeters || !encodedPolyline) {
+      toast({ variant: 'destructive', title: 'Calcule a rota antes de salvar.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const ref = await addDoc(collection(db, "orders"), {
+        code: `OR-${Date.now()}`,
+        status: "created",
+        pickup: data.pickup,
+        destination: data.destination,
+        distanceMeters,
+        duration,
+        encodedPolyline,
+        price: { base: data.base, perKm: data.perKm, total: Number(priceTotal().toFixed(2)) },
+        createdAt: serverTimestamp(),
+      });
+      toast({ title: 'Pedido salvo com sucesso!', description: `ID do pedido: ${ref.id}` });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Erro ao salvar pedido', description: e.message });
+    } finally {
+        setSaving(false);
+    }
+  };
 
   return (
-    <div className="flex-1 overflow-hidden">
-      <div className="grid h-full grid-cols-1 md:grid-cols-3">
-        {/* Left Panel: Route Configuration */}
-        <div className="flex h-full flex-col bg-card p-6">
-          <h2 className="mb-6 text-2xl font-bold tracking-tight text-foreground">
-            Criar Nova Rota
-          </h2>
+    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
+      <h1 className="text-2xl font-semibold">Lançar nova rota</h1>
+      <p className="text-muted-foreground">Preencha os dados abaixo para calcular e salvar um novo pedido de entrega.</p>
 
-          <div className="flex-1 space-y-2">
-            <RouteConfigItem
-              icon={Home}
-              title="ORIGEM"
-              value={selectedOrigin.name}
-              action={
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost">EDITAR</Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-96" align="end">
-                    <div className="grid gap-4">
-                      <div className="space-y-2">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <button className="flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted">
-                              <Plus className="mt-1 h-6 w-6" />
-                              <div>
-                                <p className="font-semibold">
-                                  Adicionar nova origem
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  Escolha essa opção caso queira cadastrar uma
-                                  nova origem para utilizar em novas
-                                  roteirizações
-                                </p>
-                              </div>
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className="sm:max-w-[625px]">
-                            <DialogHeader>
-                              <DialogTitle>Cadastrar Nova Origem</DialogTitle>
-                              <DialogDescription>
-                                Preencha os dados do endereço de origem.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="grid gap-4 py-4">
-                              <div className="grid grid-cols-4 items-center gap-4">
-                                <Label htmlFor="cep" className="text-right">
-                                  CEP
-                                </Label>
-                                <Input id="cep" className="col-span-3" />
-                              </div>
-                              <div className="flex justify-end">
-                                <Button variant="link">BUSCAR POR CEP</Button>
-                              </div>
-                              <div className="grid grid-cols-4 items-center gap-4">
-                                <Label
-                                  htmlFor="logradouro"
-                                  className="text-right"
-                                >
-                                  Logradouro
-                                </Label>
-                                <Input
-                                  id="logradouro"
-                                  className="col-span-3"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label htmlFor="numero" className="text-right">
-                                    Número
-                                  </Label>
-                                  <Input id="numero" />
-                                </div>
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label
-                                    htmlFor="complemento"
-                                    className="text-right"
-                                  >
-                                    Complemento
-                                  </Label>
-                                  <Input id="complemento" />
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label
-                                    htmlFor="municipio"
-                                    className="text-right"
-                                  >
-                                    Município
-                                  </Label>
-                                  <Input id="municipio" />
-                                </div>
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label htmlFor="bairro" className="text-right">
-                                    Bairro
-                                  </Label>
-                                  <Input id="bairro" />
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label htmlFor="estado" className="text-right">
-                                    Estado
-                                  </Label>
-                                  <Input id="estado" />
-                                </div>
-                                <div className="grid grid-cols-2 items-center gap-4">
-                                  <Label htmlFor="pais" className="text-right">
-                                    País
-                                  </Label>
-                                  <Input id="pais" />
-                                </div>
-                              </div>
-                            </div>
-                            <DialogFooter>
-                              <Button type="submit">Salvar Endereço</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      </div>
-                      <Separator />
-                      <div className="grid gap-2">
-                        {origins.map((origin) => (
-                          <button
-                            key={origin.id}
-                            onClick={() => setSelectedOrigin(origin)}
-                            className={`flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted ${selectedOrigin.id === origin.id ? 'bg-muted' : ''}`}
-                          >
-                            <Home
-                              className={`mt-1 h-6 w-6 ${selectedOrigin.id === origin.id ? 'text-primary' : 'text-muted-foreground'}`}
-                            />
-                            <div>
-                              <p
-                                className={`font-medium ${selectedOrigin.id === origin.id ? 'text-foreground' : ''}`}
-                              >
-                                {origin.address}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {origin.name}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              }
-            />
-            <Separator />
-            <RouteConfigItem
-              icon={Calendar}
-              title="Início da Rota"
-              value="10/09/2025 - 12:30"
-              action={<Button variant="ghost">EDITAR</Button>}
-            />
-            <Separator />
-            <RouteConfigItem
-              icon={Settings}
-              title="OPÇÕES"
-              value="7 Configurações ligadas"
-              action={<Button variant="ghost">EDITAR</Button>}
-            />
-            <Separator />
-            <RouteConfigItem
-              icon={Share2}
-              title="REGIÃO"
-              value="Regiões listadas"
-              action={<Button variant="ghost">EDITAR</Button>}
-            />
-            <Separator />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <AutocompleteInput
+          label="Endereço de Coleta"
+          value={pickup}
+          onChange={(v) => setValue("pickup", v, { shouldValidate: true })}
+        />
+        <AutocompleteInput
+          label="Endereço de Entrega"
+          value={destination}
+          onChange={(v) => setValue("destination", v, { shouldValidate: true })}
+        />
+      </div>
+      {(errors.pickup || errors.destination) && (
+        <p className="text-sm text-destructive">É necessário preencher os endereços de coleta e entrega.</p>
+      )}
 
-            {/* Services Section */}
-            <div className="pt-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <MapPin className="h-6 w-6 text-muted-foreground" />
-                  <p className="font-medium">SERVIÇOS (0)</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm">
-                    IMPORTAR EXCEL
-                  </Button>
-                  <Button variant="ghost" size="icon">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="py-8 text-center text-muted-foreground">
-                <p>Nenhum serviço adicionado ainda.</p>
-              </div>
-
-              <Button
-                variant="outline"
-                className="w-full justify-start gap-2 border-dashed"
-              >
-                <Plus className="h-4 w-4" />
-                ADICIONAR NOVO SERVIÇO
-              </Button>
-            </div>
-          </div>
-          <div className="mt-8 flex gap-4">
-            <Button className="flex-1">Salvar Rascunho</Button>
-            <Button className="flex-1">Otimizar e Enviar Rota</Button>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+        <div>
+          <label className="block text-sm font-medium mb-1">Tarifa base (R$)</label>
+          <Input type="number" step="0.01" {...register("base")} />
         </div>
-
-        {/* Right Panel: Map */}
-        <div className="relative col-span-2 hidden h-full md:block">
-          {mapImage && (
-            <Image
-              src={mapImage.imageUrl}
-              alt="Mapa mostrando a origem e a área de serviço"
-              fill
-              className="object-cover"
-              data-ai-hint="city map"
-            />
-          )}
+        <div>
+          <label className="block text-sm font-medium mb-1">Preço por km (R$)</label>
+          <Input type="number" step="0.01" {...register("perKm")} />
         </div>
+        <Button
+          onClick={onComputeRoute}
+          disabled={loading || !watch("pickup") || !watch("destination")}
+        >
+          {loading ? "Calculando..." : "Calcular Rota"}
+        </Button>
+      </div>
+
+      <RouteMap
+        origin={pickup ? { lat: pickup.lat, lng: pickup.lng } : null}
+        destination={destination ? { lat: destination.lat, lng: destination.lng } : null}
+        encodedPolyline={encodedPolyline}
+        height={420}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <KpiCard title="Distância" value={`${(distanceMeters/1000).toFixed(2)} km`} icon={Package} />
+        <KpiCard title="Duração Estimada" value={duration.replace("s","s")} icon={Package} />
+        <KpiCard title="Preço Estimado" value={`R$ ${priceTotal().toFixed(2)}`} icon={Package} />
+      </div>
+
+      <div className="flex gap-3 pt-4 border-t">
+        <Button onClick={handleSubmit(onSubmit)} disabled={saving || !encodedPolyline}>
+          {saving ? 'Salvando...' : 'Salvar Pedido'}
+        </Button>
+        <Button variant="outline" onClick={() => { setEncodedPolyline(null); setDistanceMeters(0); setDuration("0s"); }}>
+          Limpar Rota
+        </Button>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import type { Timestamp } from 'firebase/firestore';
 
 export type NavItem = {
   title: string;
@@ -16,24 +17,28 @@ export type OrderStatus =
   | 'failed_attempt'
   | 'canceled';
 
+type Location = {
+  address: string;
+  placeId: string;
+  lat: number;
+  lng: number;
+};
+
 export type Order = {
-  id: string;
+  id: string; // Document id
   code: string;
   status: OrderStatus;
-  createdAt: Date;
-  customer: {
-    name: string;
-    address: string;
-    phone?: string;
-  };
-  pickup: {
-    address: string;
-    name?: string;
-  };
-  assignedTo?: string; // driverId
+  pickup: Location;
+  destination: Location;
+  distanceMeters: number;
+  duration: string; // "1234s"
+  encodedPolyline: string;
   price: {
+    base: number;
+    perKm: number;
     total: number;
   };
+  createdAt: Date | Timestamp;
   notes?: string;
 };
 

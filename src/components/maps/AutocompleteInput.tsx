@@ -1,0 +1,68 @@
+"use client";
+import * as React from "react";
+import { Loader } from "@googlemaps/js-api-loader";
+
+type PlaceValue = {
+  address: string;
+  placeId: string;
+  lat: number;
+  lng: number;
+};
+
+export function AutocompleteInput({
+  label,
+  value,
+  onChange,
+  placeholder = "Digite o endereço",
+}: {
+  label: string;
+  value?: PlaceValue;
+  onChange: (v: PlaceValue | null) => void;
+  placeholder?: string;
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const acRef = React.useRef<google.maps.places.Autocomplete | null>(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const loader = new Loader({
+      apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
+      libraries: ["places"],
+      language: "pt-BR",
+      region: "BR",
+    });
+
+    loader.load().then(() => {
+      if (!mounted || !inputRef.current) return;
+      acRef.current = new google.maps.places.Autocomplete(inputRef.current!, {
+        fields: ["place_id", "formatted_address", "geometry"],
+        componentRestrictions: { country: ["br"] },
+      });
+      acRef.current.addListener("place_changed", () => {
+        const p = acRef.current!.getPlace();
+        const loc = p.geometry?.location;
+        if (!loc || !p.place_id) return;
+        onChange({
+          placeId: p.place_id,
+          address: p.formatted_address ?? "",
+          lat: loc.lat(),
+          lng: loc.lng(),
+        });
+      });
+    });
+
+    return () => { mounted = false; };
+  }, [onChange]);
+
+  return (
+    <div className="w-full">
+      <label className="block text-sm font-medium mb-1">{label}</label>
+      <input
+        ref={inputRef}
+        defaultValue={value?.address}
+        placeholder={placeholder}
+        className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring"
+      />
+    </div>
+  );
+}

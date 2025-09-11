@@ -35,8 +35,6 @@ export function OrderActions({ order }: { order: Order }) {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const { toast } = useToast();
 
-  const driver = drivers.find((d) => d.id === order.assignedTo);
-
   const handleSummarize = async () => {
     if (!order.notes) {
       toast({
@@ -68,10 +66,12 @@ export function OrderActions({ order }: { order: Order }) {
   const handleOptimizeRoute = async () => {
     setIsOptimizing(true);
     try {
+      // Note: This uses a mocked current location.
+      // In a real app, this would come from the driver's device.
       const result = await optimizeDeliveryRoutes({
-        currentLocationLat: -16.6869, // Mock Goiânia
-        currentLocationLng: -49.2648,
-        deliveryLocations: [{ lat: -16.70, lng: -49.25, orderId: order.id }],
+        currentLocationLat: order.pickup.lat,
+        currentLocationLng: order.pickup.lng,
+        deliveryLocations: [{ ...order.destination, orderId: order.id }],
       });
       setOptimizedRoute(result);
       toast({
@@ -104,7 +104,7 @@ export function OrderActions({ order }: { order: Order }) {
           <DropdownMenuItem onClick={() => setIsSheetOpen(true)}>
             Ver detalhes
           </DropdownMenuItem>
-          <DropdownMenuItem>Reatribuir</DropdownMenuItem>
+          <DropdownMenuItem>Atribuir Motorista</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem className="text-destructive">
             Cancelar pedido
@@ -116,25 +116,23 @@ export function OrderActions({ order }: { order: Order }) {
           <SheetHeader>
             <SheetTitle>Pedido #{order.code}</SheetTitle>
             <SheetDescription>
-              Detalhes completos do pedido e do cliente.
+              Detalhes completos do pedido.
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-                <h4 className="font-semibold">Cliente</h4>
-                <p className="text-sm text-muted-foreground">{order.customer.name}</p>
-                <p className="text-sm text-muted-foreground">{order.customer.address}</p>
-            </div>
-            <Separator />
             <div className="space-y-2">
                 <h4 className="font-semibold">Coleta</h4>
                 <p className="text-sm text-muted-foreground">{order.pickup.address}</p>
             </div>
              <Separator />
             <div className="space-y-2">
+                <h4 className="font-semibold">Entrega</h4>
+                <p className="text-sm text-muted-foreground">{order.destination.address}</p>
+            </div>
+             <Separator />
+            <div className="space-y-2">
                 <h4 className="font-semibold">Motorista</h4>
-                <p className="text-sm text-muted-foreground">{driver?.name ?? 'Não atribuído'}</p>
-                {driver && <Badge variant="secondary">{driver.status}</Badge>}
+                <p className="text-sm text-muted-foreground">Não atribuído</p>
             </div>
             <Separator />
             <div className="space-y-2">
