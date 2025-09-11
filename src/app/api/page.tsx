@@ -21,45 +21,31 @@ export default function ApiPage() {
           Conecte seu sistema com serviços externos e gerencie suas chaves.
         </p>
       </div>
-      <Card className="max-w-3xl">
+      <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>API do Google Maps</CardTitle>
           <CardDescription>
-            Insira suas chaves de API para habilitar o cálculo de rotas,
-            autocompletar de endereços e visualização de mapas.
+            Insira sua chave de API para habilitar o cálculo de rotas,
+            autocompletar de endereços e visualização de mapas no sistema.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="gmaps-server-key">
-              Chave de API para Servidor (Server Key)
+            <Label htmlFor="gmaps-key">
+              Chave de API do Google Maps
             </Label>
             <Input
-              id="gmaps-server-key"
+              id="gmaps-key"
               type="password"
-              placeholder="Cole sua chave aqui"
+              placeholder="Cole sua chave de API unificada aqui"
             />
             <p className="text-sm text-muted-foreground">
-              Usada para serviços de backend, como o cálculo de rotas. Mantenha
-              esta chave em segredo.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="gmaps-client-key">
-              Chave de API para Cliente (Browser Key)
-            </Label>
-            <Input
-              id="gmaps-client-key"
-              placeholder="Cole sua chave aqui"
-            />
-            <p className="text-sm text-muted-foreground">
-              Usada para exibir mapas no navegador e para o recurso de
-              autocompletar.
+              Esta chave será usada para os serviços de mapas e rotas.
             </p>
           </div>
         </CardContent>
         <CardFooter>
-          <Button>Salvar Configurações</Button>
+          <Button>Salvar Chave</Button>
         </CardFooter>
       </Card>
     </div>
