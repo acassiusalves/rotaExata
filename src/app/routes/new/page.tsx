@@ -3,7 +3,7 @@
 import * as React from 'react';
 import {
   MapPin,
-  Calendar,
+  Calendar as CalendarIcon,
   PlusCircle,
   Upload,
   Edit,
@@ -22,12 +22,19 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import type { PlaceValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 const savedOrigins = [
   {
@@ -38,7 +45,7 @@ const savedOrigins = [
       placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
       lat: -16.6786,
       lng: -49.2552,
-    }
+    },
   },
   {
     id: 'origin-2',
@@ -48,25 +55,25 @@ const savedOrigins = [
       placeId: 'ChIJR9QCMf5ZzpQR4iS2PS52rCk',
       lat: -23.5410,
       lng: -46.6262,
-    }
-  }
-]
-
+    },
+  },
+];
 
 export default function NewRoutePage() {
-  const [origin, setOrigin] = React.useState<PlaceValue | null>(savedOrigins[0].value);
-  
-  const routeDate = '12/12/2025';
-  const routeTime = '18:10';
+  const [origin, setOrigin] = React.useState<PlaceValue | null>(
+    savedOrigins[0].value
+  );
+  const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
+  const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
+  const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
 
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
     setIsOriginDialogOpen(false);
   };
-
 
   return (
     <>
@@ -84,12 +91,19 @@ export default function NewRoutePage() {
                   <MapPin className="h-5 w-5 text-muted-foreground" />
                   <h3 className="font-semibold">Origem da Rota</h3>
                 </div>
-                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setIsOriginDialogOpen(true)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setIsOriginDialogOpen(true)}
+                >
                   <Edit className="mr-1 h-3 w-3" />
                   Editar
                 </Button>
               </div>
-              <p className="pl-8 text-sm text-muted-foreground">{origin?.address ?? 'Não definida'}</p>
+              <p className="pl-8 text-sm text-muted-foreground">
+                {origin?.address ?? 'Não definida'}
+              </p>
             </div>
 
             <Separator />
@@ -97,14 +111,63 @@ export default function NewRoutePage() {
             {/* Route Start */}
             <div className="space-y-2">
               <div className="flex items-center gap-3">
-                <Calendar className="h-5 w-5 text-muted-foreground" />
+                <CalendarIcon className="h-5 w-5 text-muted-foreground" />
                 <h3 className="font-semibold">Início da Rota</h3>
               </div>
               <div className="pl-8">
                 <p className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{routeDate}</span>
+                  <Popover
+                    open={isDatePopoverOpen}
+                    onOpenChange={setIsDatePopoverOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={'link'}
+                        className={cn(
+                          'p-0 font-medium text-foreground hover:no-underline',
+                          !routeDate && 'text-muted-foreground'
+                        )}
+                      >
+                        {routeDate ? (
+                          format(routeDate, 'PPP', { locale: ptBR })
+                        ) : (
+                          <span>Selecione uma data</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={routeDate}
+                        onSelect={(date) => {
+                          setRouteDate(date);
+                          setIsDatePopoverOpen(false);
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+
                   <span className="mx-2 text-muted-foreground">às</span>
-                  <span className="font-medium text-foreground">{routeTime}</span>
+
+                   <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={'link'}
+                        className="p-0 font-medium text-foreground hover:no-underline"
+                      >
+                         {routeTime}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Input
+                        type="time"
+                        value={routeTime}
+                        onChange={(e) => setRouteTime(e.target.value)}
+                        className="border-none"
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </p>
               </div>
             </div>
@@ -130,7 +193,7 @@ export default function NewRoutePage() {
         </div>
 
         {/* Right Content - Map */}
-        <div className="w-full h-full">
+        <div className="h-full w-full">
           <RouteMap height={-1} origin={origin} />
         </div>
       </div>
@@ -145,13 +208,13 @@ export default function NewRoutePage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 pt-4">
-             <button 
-                className="flex w-full items-center gap-4 rounded-md p-3 text-left transition-colors hover:bg-muted"
-                onClick={() => {
-                  setIsOriginDialogOpen(false);
-                  setIsNewOriginDialogOpen(true);
-                }}
-              >
+            <button
+              className="flex w-full items-center gap-4 rounded-md p-3 text-left transition-colors hover:bg-muted"
+              onClick={() => {
+                setIsOriginDialogOpen(false);
+                setIsNewOriginDialogOpen(true);
+              }}
+            >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-background">
                 <Plus className="h-5 w-5" />
               </div>
@@ -164,7 +227,7 @@ export default function NewRoutePage() {
             </button>
             <Separator />
             <div className="max-h-[300px] overflow-y-auto">
-              {savedOrigins.map(saved => {
+              {savedOrigins.map((saved) => {
                 const isSelected = origin?.placeId === saved.value.placeId;
                 return (
                   <button
@@ -172,22 +235,38 @@ export default function NewRoutePage() {
                     className="flex w-full items-center gap-4 rounded-md p-3 text-left transition-colors hover:bg-muted"
                     onClick={() => handleSelectOrigin(saved.value)}
                   >
-                     <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border", isSelected ? "bg-primary text-primary-foreground" : "bg-background")}>
-                       <Home className="h-5 w-5" />
-                     </div>
+                    <div
+                      className={cn(
+                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border',
+                        isSelected
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background'
+                      )}
+                    >
+                      <Home className="h-5 w-5" />
+                    </div>
                     <div>
-                      <p className={cn("font-medium", isSelected && "text-primary")}>{saved.value.address}</p>
-                      <p className="text-sm text-muted-foreground">{saved.name}</p>
+                      <p
+                        className={cn(
+                          'font-medium',
+                          isSelected && 'text-primary'
+                        )}
+                      >
+                        {saved.value.address}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {saved.name}
+                      </p>
                     </div>
                   </button>
-                )
+                );
               })}
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-       {/* New Origin Dialog */}
+      {/* New Origin Dialog */}
       <Dialog open={isNewOriginDialogOpen} onOpenChange={setIsNewOriginDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -197,23 +276,28 @@ export default function NewRoutePage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-             <div className="grid gap-2">
-                <Label htmlFor="origin-name">Nome do Local</Label>
-                <Input id="origin-name" placeholder="Ex: Matriz, Depósito Central" />
+            <div className="grid gap-2">
+              <Label htmlFor="origin-name">Nome do Local</Label>
+              <Input
+                id="origin-name"
+                placeholder="Ex: Matriz, Depósito Central"
+              />
             </div>
             <div className="grid gap-2">
-                 <AutocompleteInput
-                    label="Endereço Completo"
-                    placeholder="Pesquise o endereço..."
-                    onChange={() => {}}
-                />
+              <AutocompleteInput
+                label="Endereço Completo"
+                placeholder="Pesquise o endereço..."
+                onChange={() => {}}
+              />
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
-            <Button onClick={() => setIsNewOriginDialogOpen(false)}>Salvar Origem</Button>
+            <Button onClick={() => setIsNewOriginDialogOpen(false)}>
+              Salvar Origem
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
