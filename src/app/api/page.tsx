@@ -1,14 +1,12 @@
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Terminal } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function ApiPage() {
   return (
@@ -25,28 +23,36 @@ export default function ApiPage() {
         <CardHeader>
           <CardTitle>API do Google Maps</CardTitle>
           <CardDescription>
-            Insira sua chave de API para habilitar o cálculo de rotas,
-            autocompletar de endereços e visualização de mapas no sistema.
+            Para habilitar o cálculo de rotas e os mapas, você precisa
+            configurar sua chave de API do Google Maps.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="gmaps-key">
-              Chave de API do Google Maps
-            </Label>
-            <Input
-              id="gmaps-key"
-              type="password"
-              placeholder="Cole sua chave de API unificada aqui"
-            />
-            <p className="text-sm text-muted-foreground">
-              Esta chave será usada para os serviços de mapas e rotas.
-            </p>
-          </div>
+          <Alert>
+            <Terminal className="h-4 w-4" />
+            <AlertTitle>Ação Manual Necessária</AlertTitle>
+            <AlertDescription>
+              <p>
+                Por segurança, sua chave de API deve ser adicionada
+                diretamente no arquivo de configuração de ambiente.
+              </p>
+              <ol className="list-decimal list-inside mt-2 space-y-1">
+                <li>
+                  Abra o arquivo <code>.env</code> na raiz do seu projeto.
+                </li>
+                <li>
+                  Cole sua chave de API do Google Maps nos valores das
+                  variáveis <code>GMAPS_SERVER_KEY</code> e{" "}
+                  <code>NEXT_PUBLIC_GMAPS_KEY</code>.
+                </li>
+                <li>
+                  Salve o arquivo. A aplicação será recarregada
+                  automaticamente.
+                </li>
+              </ol>
+            </AlertDescription>
+          </Alert>
         </CardContent>
-        <CardFooter>
-          <Button>Salvar Chave</Button>
-        </CardFooter>
       </Card>
     </div>
   );
