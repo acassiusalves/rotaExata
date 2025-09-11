@@ -16,7 +16,7 @@ export function AutocompleteInput({
   placeholder = "Digite o endereço",
 }: {
   label: string;
-  value?: PlaceValue;
+  value?: PlaceValue | null;
   onChange: (v: PlaceValue | null) => void;
   placeholder?: string;
 }) {
@@ -27,7 +27,7 @@ export function AutocompleteInput({
     let mounted = true;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
-      libraries: ["places"],
+      libraries: ["places", "geometry"],
       language: "pt-BR",
       region: "BR",
     });
