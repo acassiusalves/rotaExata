@@ -1,7 +1,5 @@
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Route, PlusCircle } from "lucide-react";
-import Link from "next/link";
+import { Route } from "lucide-react";
 
 export default function RoutesPage() {
   return (
@@ -10,15 +8,9 @@ export default function RoutesPage() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Rotas</h2>
           <p className="text-muted-foreground">
-            Otimize e gerencie as rotas de entrega.
+            Visualize e gerencie as rotas de entrega existentes.
           </p>
         </div>
-        <Button asChild>
-          <Link href="/routes/new">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Nova Rota
-          </Link>
-        </Button>
       </div>
       <Card className="min-h-[400px] flex items-center justify-center">
         <CardContent className="text-center">

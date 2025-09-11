@@ -7,9 +7,9 @@ import {
   Package,
   Search,
   Users,
-  Settings,
   BotMessageSquare,
   Route,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,13 +19,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-} from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -36,11 +33,15 @@ export function Header() {
     { href: '/', icon: Home, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
-    { href: '/routes', icon: Route, label: 'Rotas' },
+    // { href: '/routes', icon: Route, label: 'Rotas' }, // Will be handled separately as a dropdown
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
   ];
 
   const isActive = (href: string) => {
+    // Make parent 'Rotas' active if on any sub-route
+    if (href.startsWith('/routes')) {
+      return pathname.startsWith('/routes');
+    }
     return pathname === href;
   };
 
@@ -68,14 +69,36 @@ export function Header() {
             {item.label}
           </Link>
         ))}
+        {/* Routes Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              className={cn(
+                'gap-1 px-3 py-2 transition-colors hover:text-foreground md:flex',
+                isActive('/routes')
+                  ? 'text-foreground font-semibold'
+                  : 'text-muted-foreground'
+              )}
+            >
+              <Route className="h-4 w-4" />
+              Rotas
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem asChild>
+              <Link href="/routes">Visualizar Rotas</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/routes/new">Criar Nova Rota</Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </nav>
       <Sheet>
         <SheetTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="shrink-0 md:hidden"
-          >
+          <Button variant="outline" size="icon" className="shrink-0 md:hidden">
             <BotMessageSquare className="h-5 w-5" />
             <span className="sr-only">Toggle navigation menu</span>
           </Button>
@@ -91,15 +114,23 @@ export function Header() {
             </Link>
             {navItems.map((item) => (
               <Link
-                 key={item.href}
+                key={item.href}
                 href={item.href}
                 className={cn('hover:text-foreground', {
-                    'text-muted-foreground': !isActive(item.href)
+                  'text-muted-foreground': !isActive(item.href),
                 })}
               >
                 {item.label}
               </Link>
             ))}
+             <Link
+                href="/routes"
+                className={cn('hover:text-foreground', {
+                  'text-muted-foreground': !isActive('/routes'),
+                })}
+              >
+                Rotas
+              </Link>
           </nav>
         </SheetContent>
       </Sheet>
@@ -131,7 +162,9 @@ export function Header() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild><Link href="/settings">Configurações</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings">Configurações</Link>
+            </DropdownMenuItem>
             <DropdownMenuItem>Suporte</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem>Sair</DropdownMenuItem>
