@@ -22,6 +22,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const origins = [
   {
@@ -87,15 +98,105 @@ export default function NewRoutePage() {
                   <PopoverContent className="w-96" align="end">
                     <div className="grid gap-4">
                       <div className="space-y-2">
-                         <button className="flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted">
-                          <Plus className="mt-1 h-6 w-6" />
-                          <div>
-                            <p className="font-semibold">Adicionar nova origem</p>
-                            <p className="text-sm text-muted-foreground">
-                              Escolha essa opção caso queira cadastrar uma nova origem para utilizar em novas roteirizações
-                            </p>
-                          </div>
-                        </button>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <button className="flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted">
+                              <Plus className="mt-1 h-6 w-6" />
+                              <div>
+                                <p className="font-semibold">
+                                  Adicionar nova origem
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  Escolha essa opção caso queira cadastrar uma
+                                  nova origem para utilizar em novas
+                                  roteirizações
+                                </p>
+                              </div>
+                            </button>
+                          </DialogTrigger>
+                          <DialogContent className="sm:max-w-[625px]">
+                            <DialogHeader>
+                              <DialogTitle>Cadastrar Nova Origem</DialogTitle>
+                              <DialogDescription>
+                                Preencha os dados do endereço de origem.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                              <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="cep" className="text-right">
+                                  CEP
+                                </Label>
+                                <Input id="cep" className="col-span-3" />
+                              </div>
+                              <div className="flex justify-end">
+                                <Button variant="link">BUSCAR POR CEP</Button>
+                              </div>
+                              <div className="grid grid-cols-4 items-center gap-4">
+                                <Label
+                                  htmlFor="logradouro"
+                                  className="text-right"
+                                >
+                                  Logradouro
+                                </Label>
+                                <Input
+                                  id="logradouro"
+                                  className="col-span-3"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label htmlFor="numero" className="text-right">
+                                    Número
+                                  </Label>
+                                  <Input id="numero" />
+                                </div>
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label
+                                    htmlFor="complemento"
+                                    className="text-right"
+                                  >
+                                    Complemento
+                                  </Label>
+                                  <Input id="complemento" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label
+                                    htmlFor="municipio"
+                                    className="text-right"
+                                  >
+                                    Município
+                                  </Label>
+                                  <Input id="municipio" />
+                                </div>
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label htmlFor="bairro" className="text-right">
+                                    Bairro
+                                  </Label>
+                                  <Input id="bairro" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label htmlFor="estado" className="text-right">
+                                    Estado
+                                  </Label>
+                                  <Input id="estado" />
+                                </div>
+                                <div className="grid grid-cols-2 items-center gap-4">
+                                  <Label htmlFor="pais" className="text-right">
+                                    País
+                                  </Label>
+                                  <Input id="pais" />
+                                </div>
+                              </div>
+                            </div>
+                            <DialogFooter>
+                              <Button type="submit">Salvar Endereço</Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
                       </div>
                       <Separator />
                       <div className="grid gap-2">
@@ -105,10 +206,18 @@ export default function NewRoutePage() {
                             onClick={() => setSelectedOrigin(origin)}
                             className={`flex w-full items-start gap-4 rounded-md p-2 text-left transition-colors hover:bg-muted ${selectedOrigin.id === origin.id ? 'bg-muted' : ''}`}
                           >
-                            <Home className={`mt-1 h-6 w-6 ${selectedOrigin.id === origin.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                            <Home
+                              className={`mt-1 h-6 w-6 ${selectedOrigin.id === origin.id ? 'text-primary' : 'text-muted-foreground'}`}
+                            />
                             <div>
-                               <p className={`font-medium ${selectedOrigin.id === origin.id ? 'text-foreground' : ''}`}>{origin.address}</p>
-                               <p className="text-sm text-muted-foreground">{origin.name}</p>
+                              <p
+                                className={`font-medium ${selectedOrigin.id === origin.id ? 'text-foreground' : ''}`}
+                              >
+                                {origin.address}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {origin.name}
+                              </p>
                             </div>
                           </button>
                         ))}
