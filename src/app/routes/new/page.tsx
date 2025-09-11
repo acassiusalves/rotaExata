@@ -9,6 +9,7 @@ import {
   Edit,
   Home,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -63,6 +64,7 @@ export default function NewRoutePage() {
   const [origin, setOrigin] = React.useState<PlaceValue | null>(
     savedOrigins[0].value
   );
+  const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
 
@@ -74,6 +76,26 @@ export default function NewRoutePage() {
     setOrigin(placeValue);
     setIsOriginDialogOpen(false);
   };
+  
+  const handleAddStop = () => {
+    // Add a placeholder for a new stop. The user will fill it in.
+    setStops([...stops, {} as PlaceValue]);
+  };
+
+  const handleRemoveStop = (index: number) => {
+    const newStops = stops.filter((_, i) => i !== index);
+    setStops(newStops);
+  };
+  
+  const handleStopChange = (index: number, place: PlaceValue | null) => {
+    const newStops = [...stops];
+    if (place) {
+      newStops[index] = place;
+      setStops(newStops);
+    }
+  };
+  
+  const mapStops = React.useMemo(() => stops.filter(s => s.lat && s.lng), [stops]);
 
   return (
     <>
@@ -173,10 +195,29 @@ export default function NewRoutePage() {
             </div>
 
             <Separator />
+            
+            {/* Services/Stops */}
+            <div className="space-y-4">
+              {stops.map((stop, index) => (
+                 <div key={index} className="space-y-2">
+                   <div className="flex items-center justify-between">
+                      <Label htmlFor={`stop-${index}`}>Parada ${index + 1}</Label>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveStop(index)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                   </div>
+                  <AutocompleteInput
+                    id={`stop-${index}`}
+                    placeholder="Endereço da parada..."
+                    onChange={(place) => handleStopChange(index, place)}
+                  />
+                </div>
+              ))}
+            </div>
 
             {/* Add Service */}
             <div>
-              <Button variant="ghost" className="w-full justify-start gap-3">
+              <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
                 <PlusCircle className="h-5 w-5" />
                 Adicionar novo serviço
               </Button>
@@ -194,7 +235,7 @@ export default function NewRoutePage() {
 
         {/* Right Content - Map */}
         <div className="h-full w-full">
-          <RouteMap height={-1} origin={origin} />
+          <RouteMap height={-1} origin={origin} stops={mapStops} />
         </div>
       </div>
 
@@ -285,6 +326,7 @@ export default function NewRoutePage() {
             </div>
             <div className="grid gap-2">
               <AutocompleteInput
+                id="origin-address"
                 label="Endereço Completo"
                 placeholder="Pesquise o endereço..."
                 onChange={() => {}}

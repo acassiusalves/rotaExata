@@ -10,12 +10,14 @@ type PlaceValue = {
 };
 
 export function AutocompleteInput({
+  id,
   label,
   value,
   onChange,
   placeholder = "Digite o endereço",
 }: {
-  label: string;
+  id?: string;
+  label?: string;
   value?: PlaceValue | null;
   onChange: (v: PlaceValue | null) => void;
   placeholder?: string;
@@ -56,8 +58,9 @@ export function AutocompleteInput({
 
   return (
     <div className="w-full">
-      <label className="block text-sm font-medium mb-1">{label}</label>
+      {label && <label htmlFor={id} className="block text-sm font-medium mb-1">{label}</label>}
       <input
+        id={id}
         ref={inputRef}
         defaultValue={value?.address}
         placeholder={placeholder}
