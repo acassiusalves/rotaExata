@@ -249,13 +249,6 @@ export default function NewRoutePage() {
               action={<Button variant="ghost">EDITAR</Button>}
             />
             <Separator />
-            <RouteConfigItem
-              icon={Truck}
-              title="Regiões restritas"
-              value="Nenhuma região selecionada"
-              action={<Button variant="ghost">EDITAR</Button>}
-            />
-            <Separator />
 
             {/* Services Section */}
             <div className="pt-4">
