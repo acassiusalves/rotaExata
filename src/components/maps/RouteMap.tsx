@@ -27,7 +27,7 @@ export function RouteMap({
     let canceled = false;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
-      libraries: ["places", "geometry"],
+      libraries: ["places", "geometry", "geocoding"],
       language: "pt-BR",
       region: "BR",
     });
