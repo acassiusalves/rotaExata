@@ -88,9 +88,6 @@ export function Header() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuItem asChild>
-              <Link href="/routes">Visualizar Rotas</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
               <Link href="/routes/new">Criar Nova Rota</Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
