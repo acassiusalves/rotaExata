@@ -9,6 +9,7 @@ import {
   Users,
   Settings,
   BotMessageSquare,
+  Route,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,6 +36,7 @@ export function Header() {
     { href: '/', icon: Home, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
+    { href: '/routes', icon: Route, label: 'Rotas' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
   ];
 
@@ -59,7 +61,7 @@ export function Header() {
             className={cn(
               'transition-colors hover:text-foreground',
               isActive(item.href)
-                ? 'text-foreground'
+                ? 'text-foreground font-semibold'
                 : 'text-muted-foreground'
             )}
           >
