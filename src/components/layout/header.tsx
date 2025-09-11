@@ -10,6 +10,7 @@ import {
   BotMessageSquare,
   Route,
   ChevronDown,
+  Code,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,8 +19,8 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
   DropdownMenuGroup,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -35,6 +36,7 @@ export function Header() {
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     // { href: '/routes', icon: Route, label: 'Rotas' }, // Will be handled separately as a dropdown
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
+    { href: '/api', icon: Code, label: 'API' },
   ];
 
   const isActive = (href: string) => {
