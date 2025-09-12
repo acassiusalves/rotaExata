@@ -179,7 +179,7 @@ export default function NewRoutePage() {
         onChange={handleFileImport}
         accept=".txt,.csv"
       />
-      <div className="grid h-full w-full grid-cols-[350px_1fr]">
+      <div className="grid h-full w-full grid-cols-[minmax(350px,30%)_1fr]">
         {/* Left Sidebar */}
         <div className="flex flex-col border-r bg-background">
           <div className="flex h-16 shrink-0 items-center border-b px-6">
