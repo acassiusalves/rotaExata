@@ -187,6 +187,7 @@ export default function NewRoutePage() {
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
           <div className="flex flex-1 flex-col overflow-y-hidden">
+            {/* Top section - not scrolling */}
             <div className='p-6 space-y-6'>
               {/* Route Origin */}
               <div className="space-y-2">
@@ -279,9 +280,9 @@ export default function NewRoutePage() {
               <Separator />
             </div>
 
-            <ScrollArea className="h-full flex-1 pb-6 pl-6 pr-4">
-              {/* Services/Stops */}
-              <div className="space-y-4 pr-2">
+            {/* Scrolling section */}
+            <ScrollArea className="flex-1">
+              <div className="px-6 pb-6 space-y-4">
                 {stops.map((stop, index) => (
                   <div key={index} className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -298,14 +299,14 @@ export default function NewRoutePage() {
                     />
                   </div>
                 ))}
-              </div>
-
-              {/* Add Service */}
-              <div className="mt-4 pr-2">
-                <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
-                  <PlusCircle className="h-5 w-5" />
-                  Adicionar novo serviço
-                </Button>
+              
+                {/* Add Service */}
+                <div className="mt-4">
+                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
+                    <PlusCircle className="h-5 w-5" />
+                    Adicionar novo serviço
+                  </Button>
+                </div>
               </div>
             </ScrollArea>
           </div>
