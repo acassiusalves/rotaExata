@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ImportAssistantDialogProps {
   isOpen: boolean;
@@ -78,37 +79,39 @@ export function ImportAssistantDialog({
             importar os endereços corretamente.
           </DialogDescription>
         </DialogHeader>
-        <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-4">
-          {/* Header Titles */}
-          <h4 className="font-semibold">Cabeçalhos encontrados</h4>
-          <h4 className="font-semibold">Campos disponíveis para atribuição</h4>
+        <ScrollArea className="max-h-[60vh] pr-4">
+            <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-4">
+            {/* Header Titles */}
+            <h4 className="font-semibold">Cabeçalhos encontrados</h4>
+            <h4 className="font-semibold">Campos disponíveis para atribuição</h4>
 
-          {/* Mapping Rows */}
-          {headers.map((header) => (
-            <React.Fragment key={header}>
-              <div className="flex items-center">
-                <p className="text-sm text-muted-foreground">{header}</p>
-              </div>
-              <div>
-                <Select
-                  value={mapping[header]}
-                  onValueChange={(value) => handleMappingChange(header, value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um campo..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableFields.map((field) => (
-                      <SelectItem key={field} value={field}>
-                        {field}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </React.Fragment>
-          ))}
-        </div>
+            {/* Mapping Rows */}
+            {headers.map((header) => (
+                <React.Fragment key={header}>
+                <div className="flex items-center">
+                    <p className="text-sm text-muted-foreground truncate" title={header}>{header}</p>
+                </div>
+                <div>
+                    <Select
+                    value={mapping[header]}
+                    onValueChange={(value) => handleMappingChange(header, value)}
+                    >
+                    <SelectTrigger>
+                        <SelectValue placeholder="Selecione um campo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {availableFields.map((field) => (
+                        <SelectItem key={field} value={field}>
+                            {field}
+                        </SelectItem>
+                        ))}
+                    </SelectContent>
+                    </Select>
+                </div>
+                </React.Fragment>
+            ))}
+            </div>
+        </ScrollArea>
         <DialogFooter className="mt-6 flex-col items-start gap-4 sm:flex-row sm:justify-between">
           <div className="flex items-center space-x-2">
             <Checkbox id="save-mapping" />
