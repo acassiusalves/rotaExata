@@ -75,8 +75,7 @@ export default function NewRoutePage() {
   const [isImporting, setIsImporting] = React.useState(false);
 
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
-  const [isNewOriginDialogOpen, setIsNewOriginDialogOpen]
-useState(false);
+  const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
