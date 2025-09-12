@@ -119,7 +119,7 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-              <div className="grid grid-cols-3 gap-6">
+              <div className="grid grid-cols-2 gap-6">
                 {/* Coluna de Lista de Paradas */}
                 <div className="col-span-1">
                   <h4 className="mb-2 font-semibold">Ordem das Paradas</h4>
@@ -136,22 +136,6 @@ export default function OrganizeRoutePage() {
                       ))}
                     </div>
                   </ScrollArea>
-                </div>
-                {/* Coluna de Configurações */}
-                <div className="col-span-1">
-                  <h4 className="mb-2 font-semibold">
-                    Preferências de Otimização
-                  </h4>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between rounded-lg border p-3">
-                      <Label htmlFor="avoid-tolls">Evitar Pedágios</Label>
-                      <Switch id="avoid-tolls" />
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border p-3">
-                      <Label htmlFor="avoid-highways">Evitar Rodovias</Label>
-                      <Switch id="avoid-highways" defaultChecked />
-                    </div>
-                  </div>
                 </div>
                 {/* Coluna de Ações */}
                 <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
