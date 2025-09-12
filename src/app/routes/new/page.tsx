@@ -11,6 +11,7 @@ import {
   Plus,
   Trash2,
   Loader2,
+  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -41,6 +42,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
+import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 
 
 const savedOrigins = [
@@ -73,6 +75,7 @@ export default function NewRoutePage() {
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
+  const [isOptimizing, setIsOptimizing] = React.useState(false);
 
   const [isImporting, setIsImporting] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
@@ -239,6 +242,68 @@ export default function NewRoutePage() {
     });
   };
 
+  const handleOptimizeRoute = async () => {
+    if (!origin) {
+      toast({
+        variant: 'destructive',
+        title: 'Origem não definida',
+        description: 'Por favor, defina um ponto de origem antes de otimizar.',
+      });
+      return;
+    }
+    if (stops.length < 2) {
+      toast({
+        variant: 'destructive',
+        title: 'Paradas insuficientes',
+        description: 'Adicione pelo menos duas paradas para otimizar a rota.',
+      });
+      return;
+    }
+
+    setIsOptimizing(true);
+    toast({
+      title: 'Otimizando rota...',
+      description: 'A IA está calculando a melhor sequência de paradas.',
+    });
+
+    try {
+      const result = await optimizeDeliveryRoutes({
+        currentLocationLat: origin.lat,
+        currentLocationLng: origin.lng,
+        deliveryLocations: stops.map((stop, index) => ({
+          lat: stop.lat,
+          lng: stop.lng,
+          orderId: stop.placeId || `stop-${index}`, // Use placeId as a unique identifier
+        })),
+      });
+
+      // Reorder stops based on the optimized route
+      const optimizedStops = result.optimizedRoutes.map(optimizedStop => {
+        return stops.find(
+          originalStop => 
+            (originalStop.placeId && originalStop.placeId === optimizedStop.orderId) ||
+            (originalStop.lat === optimizedStop.lat && originalStop.lng === optimizedStop.lng)
+        ) as PlaceValue;
+      }).filter(Boolean); // Filter out any potential undefined values
+
+      setStops(optimizedStops);
+
+      toast({
+        title: 'Rota Otimizada!',
+        description: 'A ordem das paradas foi atualizada para a rota mais eficiente.',
+      });
+    } catch (error) {
+      console.error('Route optimization error:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro na Otimização',
+        description: 'Não foi possível otimizar a rota. Tente novamente.',
+      });
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
   const mapStops = React.useMemo(() => stops.filter((s) => s.lat && s.lng), [
     stops,
   ]);
@@ -263,8 +328,16 @@ export default function NewRoutePage() {
       />
       <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
         <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
-          <div className="shrink-0 border-b px-6 py-4">
+          <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
+             <Button variant="outline" onClick={handleOptimizeRoute} disabled={isOptimizing || stops.length < 2}>
+              {isOptimizing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="mr-2 h-4 w-4" />
+              )}
+              {isOptimizing ? 'Otimizando...' : 'Organizar'}
+            </Button>
           </div>
           
           <div className='shrink-0 p-6 space-y-6'>
