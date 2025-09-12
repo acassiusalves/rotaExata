@@ -186,126 +186,126 @@ export default function NewRoutePage() {
           <div className="flex h-16 shrink-0 items-center border-b px-6">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
-          <div className="flex-1 overflow-hidden p-6">
-            <ScrollArea className="h-full">
-              <div className="space-y-6 pr-6">
-                {/* Route Origin */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <MapPin className="h-5 w-5 text-muted-foreground" />
-                      <h3 className="font-semibold">Origem da Rota</h3>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => setIsOriginDialogOpen(true)}
-                    >
-                      <Edit className="mr-1 h-3 w-3" />
-                      Editar
-                    </Button>
-                  </div>
-                  <p className="pl-8 text-sm text-muted-foreground">
-                    {origin?.address ?? 'Não definida'}
-                  </p>
-                </div>
-
-                <Separator />
-
-                {/* Route Start */}
-                <div className="space-y-2">
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className='p-6 space-y-6'>
+              {/* Route Origin */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-                    <h3 className="font-semibold">Início da Rota</h3>
+                    <MapPin className="h-5 w-5 text-muted-foreground" />
+                    <h3 className="font-semibold">Origem da Rota</h3>
                   </div>
-                  <div className="pl-8">
-                    <p className="text-sm text-muted-foreground">
-                      <Popover
-                        open={isDatePopoverOpen}
-                        onOpenChange={setIsDatePopoverOpen}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant={'link'}
-                            className={cn(
-                              'p-0 font-medium text-foreground hover:no-underline',
-                              !routeDate && 'text-muted-foreground'
-                            )}
-                          >
-                            {routeDate ? (
-                              format(routeDate, 'PPP', { locale: ptBR })
-                            ) : (
-                              <span>Selecione uma data</span>
-                            )}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={routeDate}
-                            onSelect={(date) => {
-                              setRouteDate(date);
-                              setIsDatePopoverOpen(false);
-                            }}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-
-                      <span className="mx-2 text-muted-foreground">às</span>
-
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant={'link'}
-                            className="p-0 font-medium text-foreground hover:no-underline"
-                          >
-                            {routeTime}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Input
-                            type="time"
-                            value={routeTime}
-                            onChange={(e) => setRouteTime(e.target.value)}
-                            className="border-none"
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-                
-                {/* Services/Stops */}
-                <div className="space-y-4">
-                  {stops.map((stop, index) => (
-                    <div key={index} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                          <Label htmlFor={`stop-${index}`}>Parada ${index + 1}</Label>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveStop(index)}>
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                      </div>
-                      <AutocompleteInput
-                        id={`stop-${index}`}
-                        placeholder="Endereço da parada..."
-                        value={stop}
-                        onChange={(place) => handleStopChange(index, place)}
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                {/* Add Service */}
-                <div>
-                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
-                    <PlusCircle className="h-5 w-5" />
-                    Adicionar novo serviço
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setIsOriginDialogOpen(true)}
+                  >
+                    <Edit className="mr-1 h-3 w-3" />
+                    Editar
                   </Button>
                 </div>
+                <p className="pl-8 text-sm text-muted-foreground">
+                  {origin?.address ?? 'Não definida'}
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* Route Start */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-semibold">Início da Rota</h3>
+                </div>
+                <div className="pl-8">
+                  <p className="text-sm text-muted-foreground">
+                    <Popover
+                      open={isDatePopoverOpen}
+                      onOpenChange={setIsDatePopoverOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={'link'}
+                          className={cn(
+                            'p-0 font-medium text-foreground hover:no-underline',
+                            !routeDate && 'text-muted-foreground'
+                          )}
+                        >
+                          {routeDate ? (
+                            format(routeDate, 'PPP', { locale: ptBR })
+                          ) : (
+                            <span>Selecione uma data</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={routeDate}
+                          onSelect={(date) => {
+                            setRouteDate(date);
+                            setIsDatePopoverOpen(false);
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+
+                    <span className="mx-2 text-muted-foreground">às</span>
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={'link'}
+                          className="p-0 font-medium text-foreground hover:no-underline"
+                        >
+                          {routeTime}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Input
+                          type="time"
+                          value={routeTime}
+                          onChange={(e) => setRouteTime(e.target.value)}
+                          className="border-none"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+            </div>
+
+            <ScrollArea className="flex-1 px-6">
+              {/* Services/Stops */}
+              <div className="space-y-4">
+                {stops.map((stop, index) => (
+                  <div key={index} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                        <Label htmlFor={`stop-${index}`}>Parada ${index + 1}</Label>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveStop(index)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                    </div>
+                    <AutocompleteInput
+                      id={`stop-${index}`}
+                      placeholder="Endereço da parada..."
+                      value={stop}
+                      onChange={(place) => handleStopChange(index, place)}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Add Service */}
+              <div className="mt-4">
+                <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
+                  <PlusCircle className="h-5 w-5" />
+                  Adicionar novo serviço
+                </Button>
               </div>
             </ScrollArea>
           </div>
