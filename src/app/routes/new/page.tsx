@@ -44,6 +44,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
+import { Switch } from '@/components/ui/switch';
 
 
 const savedOrigins = [
@@ -81,6 +82,7 @@ export default function NewRoutePage() {
   const [isImporting, setIsImporting] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
+  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
 
   // States for Import Assistant
@@ -344,7 +346,7 @@ export default function NewRoutePage() {
                 )}
                 {isOptimizing ? 'Otimizando...' : 'Organizar'}
               </Button>
-              <Button variant="outline" size="icon" aria-label="Configurar critérios de otimização">
+              <Button variant="outline" size="icon" aria-label="Configurar critérios de otimização" onClick={() => setIsSettingsDialogOpen(true)}>
                   <Settings className="h-4 w-4" />
               </Button>
             </div>
@@ -589,6 +591,44 @@ export default function NewRoutePage() {
             </DialogClose>
             <Button onClick={() => setIsNewOriginDialogOpen(false)}>
               Salvar Origem
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Optimization Settings Dialog */}
+      <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Configurar Otimização</DialogTitle>
+            <DialogDescription>
+              Ajuste os critérios para a organização da rota de acordo com suas
+              preferências.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+             <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
+              <Label htmlFor="avoid-tolls" className="flex flex-col space-y-1">
+                <span>Evitar Pedágios</span>
+                <span className="font-normal leading-snug text-muted-foreground">
+                  Tentar encontrar rotas que não passem por pedágios.
+                </span>
+              </Label>
+              <Switch id="avoid-tolls" />
+            </div>
+             <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
+              <Label htmlFor="avoid-highways" className="flex flex-col space-y-1">
+                <span>Evitar Rodovias</span>
+                 <span className="font-normal leading-snug text-muted-foreground">
+                  Priorizar vias locais e urbanas.
+                </span>
+              </Label>
+              <Switch id="avoid-highways" />
+            </div>
+          </div>
+          <DialogFooter>
+             <Button onClick={() => setIsSettingsDialogOpen(false)}>
+              Salvar Preferências
             </Button>
           </DialogFooter>
         </DialogContent>
