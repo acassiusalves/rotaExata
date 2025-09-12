@@ -6,13 +6,12 @@ import {
   Calendar as CalendarIcon,
   PlusCircle,
   Upload,
-  Edit,
-  Home,
-  Plus,
   Trash2,
   Loader2,
   Wand2,
-  Settings,
+  Home,
+  Plus,
+  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -43,9 +42,6 @@ import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
-import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
-import { Switch } from '@/components/ui/switch';
-
 
 const savedOrigins = [
   {
@@ -77,12 +73,10 @@ export default function NewRoutePage() {
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
-  const [isOptimizing, setIsOptimizing] = React.useState(false);
 
   const [isImporting, setIsImporting] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
-  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
 
   // States for Import Assistant
@@ -143,7 +137,7 @@ export default function NewRoutePage() {
     },
     []
   );
-  
+
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -179,12 +173,12 @@ export default function NewRoutePage() {
       }
     });
 
-     // Reset file input
+    // Reset file input
     if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      fileInputRef.current.value = '';
     }
   };
-  
+
   const handleImportConfirm = (mapping: Record<string, string>) => {
     setIsAssistantOpen(false);
     if (!fileToProcess) return;
@@ -195,121 +189,61 @@ export default function NewRoutePage() {
     });
 
     Papa.parse(fileToProcess, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-            const data = results.data as Record<string, string>[];
-            
-            const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const data = results.data as Record<string, string>[];
 
-            const addressesToGeocode = data.map(row => {
-                const addressParts: Record<string, string> = {};
-                for(const header in mapping) {
-                    const systemField = mapping[header];
-                    if(systemField !== 'Ignorar' && row[header]) {
-                        addressParts[systemField] = row[header];
-                    }
-                }
-                
-                // Assemble the address string based on a preferred order
-                return fieldOrder
-                    .map(field => addressParts[field])
-                    .filter(Boolean)
-                    .join(', ') + ', Brasil'; // Add country for better accuracy
-            }).filter(Boolean);
+        const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
 
+        const addressesToGeocode = data.map(row => {
+          const addressParts: Record<string, string> = {};
+          for (const header in mapping) {
+            const systemField = mapping[header];
+            if (systemField !== 'Ignorar' && row[header]) {
+              addressParts[systemField] = row[header];
+            }
+          }
 
-            const geocodedStopsPromises = addressesToGeocode.map(addr => geocodeAddress(addr));
-            const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
+          // Assemble the address string based on a preferred order
+          return fieldOrder
+            .map(field => addressParts[field])
+            .filter(Boolean)
+            .join(', ') + ', Brasil'; // Add country for better accuracy
+        }).filter(Boolean);
 
-            setStops(prevStops => [...prevStops, ...newStops]);
-            
-            toast({
-                title: 'Importação Concluída!',
-                description: `${newStops.length} de ${addressesToGeocode.length} endereços foram adicionados à rota.`,
-            });
-            setIsImporting(false);
-            setFileToProcess(null);
-        },
-        error: (error) => {
-             console.error('Full CSV parsing error:', error);
-            toast({
-                variant: 'destructive',
-                title: 'Erro ao Processar Arquivo',
-                description: 'Houve um problema ao ler os dados do arquivo.',
-            });
-            setIsImporting(false);
-            setFileToProcess(null);
-        }
+        const geocodedStopsPromises = addressesToGeocode.map(addr => geocodeAddress(addr));
+        const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
+
+        setStops(prevStops => [...prevStops, ...newStops]);
+
+        toast({
+          title: 'Importação Concluída!',
+          description: `${newStops.length} de ${addressesToGeocode.length} endereços foram adicionados à rota.`,
+        });
+        setIsImporting(false);
+        setFileToProcess(null);
+      },
+      error: (error) => {
+        console.error('Full CSV parsing error:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao Processar Arquivo',
+          description: 'Houve um problema ao ler os dados do arquivo.',
+        });
+        setIsImporting(false);
+        setFileToProcess(null);
+      }
     });
   };
-
-  const handleOptimizeRoute = async () => {
-    if (!origin) {
-      toast({
-        variant: 'destructive',
-        title: 'Origem não definida',
-        description: 'Por favor, defina um ponto de origem antes de otimizar.',
-      });
-      return;
-    }
-    const validStops = stops.filter(s => s.lat && s.lng);
-    if (validStops.length < 2) {
-      toast({
-        variant: 'destructive',
-        title: 'Paradas insuficientes',
-        description: 'Adicione pelo menos duas paradas válidas para otimizar a rota.',
-      });
-      return;
-    }
-
-    setIsOptimizing(true);
+  
+  const handleNextStep = () => {
+    // Logic to navigate to the new screen will go here
     toast({
-      title: 'Otimizando rota...',
-      description: 'A IA está calculando a melhor sequência de paradas.',
-    });
-
-    try {
-      // Create a temporary map to hold original stop data with a guaranteed unique ID
-      const stopsWithTempIds = new Map(
-        validStops.map((stop, index) => {
-          const id = stop.placeId || `temp-${index}`;
-          return [id, stop];
-        })
-      );
-
-      const result = await optimizeDeliveryRoutes({
-        currentLocationLat: origin.lat,
-        currentLocationLng: origin.lng,
-        deliveryLocations: Array.from(stopsWithTempIds.entries()).map(([id, stop]) => ({
-          lat: stop.lat,
-          lng: stop.lng,
-          orderId: id,
-        })),
-      });
-
-      // Reorder stops based on the optimized route using the temporary map
-      const optimizedStops = result.optimizedRoutes
-        .map(optimizedStop => stopsWithTempIds.get(optimizedStop.orderId))
-        .filter((s): s is PlaceValue => !!s);
-
-      setStops(optimizedStops);
-
-      toast({
-        title: 'Rota Otimizada!',
-        description: 'A ordem das paradas foi atualizada para a rota mais eficiente.',
-      });
-    } catch (error) {
-      console.error('Route optimization error:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro na Otimização',
-        description: 'Não foi possível otimizar a rota. Tente novamente.',
-      });
-    } finally {
-      setIsOptimizing(false);
-    }
-  };
+        title: "Em desenvolvimento",
+        description: "A próxima tela de otimização ainda será criada."
+    })
+  }
 
   const mapStops = React.useMemo(() => stops.filter((s) => s.lat && s.lng), [
     stops,
@@ -327,8 +261,8 @@ export default function NewRoutePage() {
       <ImportAssistantDialog
         isOpen={isAssistantOpen}
         onClose={() => {
-            setIsAssistantOpen(false);
-            setIsImporting(false);
+          setIsAssistantOpen(false);
+          setIsImporting(false);
         }}
         headers={csvHeaders}
         onConfirm={handleImportConfirm}
@@ -337,151 +271,141 @@ export default function NewRoutePage() {
         <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
-            <div className="flex items-center gap-2">
-               <Button variant="outline" onClick={handleOptimizeRoute} disabled={isOptimizing || stops.length < 2}>
-                {isOptimizing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Wand2 className="mr-2 h-4 w-4" />
-                )}
-                {isOptimizing ? 'Otimizando...' : 'Organizar'}
-              </Button>
-              <Button variant="outline" size="icon" aria-label="Configurar critérios de otimização" onClick={() => setIsSettingsDialogOpen(true)}>
-                  <Settings className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          
-          <div className='shrink-0 p-6 space-y-6'>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <MapPin className="h-5 w-5 text-muted-foreground" />
-                  <h3 className="font-semibold">Origem da Rota</h3>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => setIsOriginDialogOpen(true)}
-                >
-                  <Edit className="mr-1 h-3 w-3" />
-                  Editar
-                </Button>
-              </div>
-              <p className="pl-8 text-sm text-muted-foreground">
-                {origin?.address ?? 'Não definida'}
-              </p>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-                <h3 className="font-semibold">Início da Rota</h3>
-              </div>
-              <div className="pl-8">
-                <p className="text-sm text-muted-foreground">
-                  <Popover
-                    open={isDatePopoverOpen}
-                    onOpenChange={setIsDatePopoverOpen}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant={'link'}
-                        className={cn(
-                          'p-0 font-medium text-foreground hover:no-underline',
-                          !routeDate && 'text-muted-foreground'
-                        )}
-                      >
-                        {routeDate ? (
-                          format(routeDate, 'PPP', { locale: ptBR })
-                        ) : (
-                          <span>Selecione uma data</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={routeDate}
-                        onSelect={(date) => {
-                          setRouteDate(date);
-                          setIsDatePopoverOpen(false);
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-
-                  <span className="mx-2 text-muted-foreground">às</span>
-
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant={'link'}
-                        className="p-0 font-medium text-foreground hover:no-underline"
-                      >
-                        {routeTime}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Input
-                        type="time"
-                        value={routeTime}
-                        onChange={(e) => setRouteTime(e.target.value)}
-                        className="border-none"
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </p>
-              </div>
-            </div>
-            <Separator />
           </div>
 
           <ScrollArea className="flex-1 min-h-0">
-             <div className="px-6 pb-6 space-y-4">
-              {stops.map((stop, index) => (
-                <div key={index} className="space-y-2">
-                  <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
-                  <div className="flex items-center gap-2">
-                    <AutocompleteInput
-                      id={`stop-${index}`}
-                      placeholder="Endereço da parada..."
-                      value={stop}
-                      onChange={(place) => handleStopChange(index, place)}
-                    />
-                    <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+            <div className='p-6 space-y-6'>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <MapPin className="h-5 w-5 text-muted-foreground" />
+                    <h3 className="font-semibold">Origem da Rota</h3>
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => setIsOriginDialogOpen(true)}
+                  >
+                    <Wand2 className="mr-1 h-3 w-3" />
+                    Alterar
+                  </Button>
                 </div>
-              ))}
-            
-              <div className="mt-4">
-                <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
-                  <PlusCircle className="h-5 w-5" />
-                  Adicionar novo serviço
-                </Button>
+                <p className="pl-8 text-sm text-muted-foreground">
+                  {origin?.address ?? 'Não definida'}
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-semibold">Início da Rota</h3>
+                </div>
+                <div className="pl-8">
+                  <p className="text-sm text-muted-foreground">
+                    <Popover
+                      open={isDatePopoverOpen}
+                      onOpenChange={setIsDatePopoverOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={'link'}
+                          className={cn(
+                            'p-0 font-medium text-foreground hover:no-underline',
+                            !routeDate && 'text-muted-foreground'
+                          )}
+                        >
+                          {routeDate ? (
+                            format(routeDate, 'PPP', { locale: ptBR })
+                          ) : (
+                            <span>Selecione uma data</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={routeDate}
+                          onSelect={(date) => {
+                            setRouteDate(date);
+                            setIsDatePopoverOpen(false);
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+
+                    <span className="mx-2 text-muted-foreground">às</span>
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={'link'}
+                          className="p-0 font-medium text-foreground hover:no-underline"
+                        >
+                          {routeTime}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Input
+                          type="time"
+                          value={routeTime}
+                          onChange={(e) => setRouteTime(e.target.value)}
+                          className="border-none"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </p>
+                </div>
+              </div>
+              <Separator />
+               <div className="space-y-4">
+                {stops.map((stop, index) => (
+                  <div key={index} className="space-y-2">
+                    <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
+                    <div className="flex items-center gap-2">
+                      <AutocompleteInput
+                        id={`stop-${index}`}
+                        placeholder="Endereço da parada..."
+                        value={stop}
+                        onChange={(place) => handleStopChange(index, place)}
+                      />
+                      <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              
+                <div className="mt-4">
+                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
+                    <PlusCircle className="h-5 w-5" />
+                    Adicionar novo serviço
+                  </Button>
+                </div>
               </div>
             </div>
           </ScrollArea>
 
-          <div className="shrink-0 border-t p-6">
-            <Button
+          <div className="shrink-0 border-t p-4 flex items-center gap-3">
+             <Button
               variant="outline"
-              className="w-full justify-center gap-3"
+              className="flex-1 justify-center gap-3"
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
             >
               {isImporting ? (
-                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
                 <Upload className="h-5 w-5" />
               )}
-              {isImporting ? 'Importando...' : 'Importar Serviços'}
+              {isImporting ? 'Importando...' : 'Importar CSV'}
+            </Button>
+            <Button className="flex-1" onClick={handleNextStep}>
+                Avançar para Organização
+                <ArrowRight className='ml-2 h-4 w-4' />
             </Button>
           </div>
         </div>
@@ -595,44 +519,8 @@ export default function NewRoutePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Optimization Settings Dialog */}
-      <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Configurar Otimização</DialogTitle>
-            <DialogDescription>
-              Ajuste os critérios para a organização da rota de acordo com suas
-              preferências.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-6 py-4">
-             <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
-              <Label htmlFor="avoid-tolls" className="flex flex-col space-y-1">
-                <span>Evitar Pedágios</span>
-                <span className="font-normal leading-snug text-muted-foreground">
-                  Tentar encontrar rotas que não passem por pedágios.
-                </span>
-              </Label>
-              <Switch id="avoid-tolls" />
-            </div>
-             <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
-              <Label htmlFor="avoid-highways" className="flex flex-col space-y-1">
-                <span>Evitar Rodovias</span>
-                 <span className="font-normal leading-snug text-muted-foreground">
-                  Priorizar vias locais e urbanas.
-                </span>
-              </Label>
-              <Switch id="avoid-highways" />
-            </div>
-          </div>
-          <DialogFooter>
-             <Button onClick={() => setIsSettingsDialogOpen(false)}>
-              Salvar Preferências
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
+
+    
