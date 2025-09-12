@@ -38,8 +38,10 @@ import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { extractAddressesFromText } from '@/ai/flows/extract-addresses-from-text';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
+import Papa from 'papaparse';
+
 
 const savedOrigins = [
   {
@@ -71,12 +73,17 @@ export default function NewRoutePage() {
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
-  
-  const [isImporting, setIsImporting] = React.useState(false);
 
+  const [isImporting, setIsImporting] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
+
+  // States for Import Assistant
+  const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
+  const [csvHeaders, setCsvHeaders] = React.useState<string[]>([]);
+  const [csvData, setCsvData] = React.useState<Record<string, string>[]>([]);
+  const [fileToProcess, setFileToProcess] = React.useState<File | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -85,7 +92,7 @@ export default function NewRoutePage() {
     setOrigin(placeValue);
     setIsOriginDialogOpen(false);
   };
-  
+
   const handleAddStop = () => {
     setStops([...stops, {} as PlaceValue]);
   };
@@ -94,7 +101,7 @@ export default function NewRoutePage() {
     const newStops = stops.filter((_, i) => i !== index);
     setStops(newStops);
   };
-  
+
   const handleStopChange = (index: number, place: PlaceValue | null) => {
     const newStops = [...stops];
     if (place) {
@@ -103,73 +110,138 @@ export default function NewRoutePage() {
     }
   };
 
-  const geocodeAddress = React.useCallback((address: string): Promise<PlaceValue | null> => {
-    return new Promise((resolve, reject) => {
-      try {
-        const geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ address, region: 'BR' }, (results, status) => {
-          if (status === 'OK' && results && results[0]) {
-            const place = results[0];
-            const location = place.geometry.location;
-            resolve({
-              address: place.formatted_address,
-              placeId: place.place_id,
-              lat: location.lat(),
-              lng: location.lng(),
-            });
-          } else {
-             console.warn(`Geocoding failed for "${address}": ${status}`);
-            resolve(null);
-          }
-        });
-      } catch (e) {
-        console.error('Geocoding error:', e);
-        reject(e);
-      }
-    });
-  }, []);
+  const geocodeAddress = React.useCallback(
+    (address: string): Promise<PlaceValue | null> => {
+      return new Promise((resolve, reject) => {
+        try {
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ address, region: 'BR' }, (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              const place = results[0];
+              const location = place.geometry.location;
+              resolve({
+                address: place.formatted_address,
+                placeId: place.place_id,
+                lat: location.lat(),
+                lng: location.lng(),
+              });
+            } else {
+              console.warn(`Geocoding failed for "${address}": ${status}`);
+              resolve(null);
+            }
+          });
+        } catch (e) {
+          console.error('Geocoding error:', e);
+          reject(e);
+        }
+      });
+    },
+    []
+  );
   
-  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setFileToProcess(file);
     setIsImporting(true);
-    toast({
-      title: 'Importando endereços...',
-      description: 'A IA está lendo e processando o arquivo.',
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      preview: 1, // Only read the first row to get headers
+      complete: (results) => {
+        if (results.meta.fields) {
+          setCsvHeaders(results.meta.fields);
+          setIsAssistantOpen(true);
+        } else {
+          toast({
+            variant: 'destructive',
+            title: 'Falha na Importação',
+            description: 'Não foi possível ler os cabeçalhos do arquivo CSV.',
+          });
+          setIsImporting(false);
+        }
+      },
+      error: (error) => {
+        console.error('CSV parsing error:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao Ler Arquivo',
+          description: 'Verifique se o arquivo é um CSV válido.',
+        });
+        setIsImporting(false);
+      }
     });
 
-    try {
-      const text = await file.text();
-      const result = await extractAddressesFromText({ text });
-      
-      const geocodedStopsPromises = result.addresses.map(addr => geocodeAddress(addr));
-      const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
-
-      setStops(prevStops => [...prevStops, ...newStops]);
-      
-      toast({
-        title: 'Importação Concluída!',
-        description: `${newStops.length} de ${result.addresses.length} endereços foram adicionados à rota.`,
-      });
-
-    } catch (error) {
-      console.error('Import failed', error);
-      toast({
-        variant: 'destructive',
-        title: 'Falha na Importação',
-        description: 'Não foi possível processar o arquivo. Verifique o formato e tente novamente.',
-      });
-    } finally {
-      setIsImporting(false);
-      // Reset file input
-      if (fileInputRef.current) {
+     // Reset file input
+    if (fileInputRef.current) {
         fileInputRef.current.value = '';
-      }
     }
   };
   
-  const mapStops = React.useMemo(() => stops.filter(s => s.lat && s.lng), [stops]);
+  const handleImportConfirm = (mapping: Record<string, string>) => {
+    setIsAssistantOpen(false);
+    if (!fileToProcess) return;
+
+    toast({
+      title: 'Processando endereços...',
+      description: 'A geocodificação pode levar alguns instantes.',
+    });
+
+    Papa.parse(fileToProcess, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results) => {
+            const data = results.data as Record<string, string>[];
+            
+            const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
+
+            const addressesToGeocode = data.map(row => {
+                const addressParts: Record<string, string> = {};
+                for(const header in mapping) {
+                    const systemField = mapping[header];
+                    if(systemField !== 'Ignorar' && row[header]) {
+                        addressParts[systemField] = row[header];
+                    }
+                }
+                
+                // Assemble the address string based on a preferred order
+                return fieldOrder
+                    .map(field => addressParts[field])
+                    .filter(Boolean)
+                    .join(', ') + ', Brasil'; // Add country for better accuracy
+            }).filter(Boolean);
+
+
+            const geocodedStopsPromises = addressesToGeocode.map(addr => geocodeAddress(addr));
+            const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
+
+            setStops(prevStops => [...prevStops, ...newStops]);
+            
+            toast({
+                title: 'Importação Concluída!',
+                description: `${newStops.length} de ${addressesToGeocode.length} endereços foram adicionados à rota.`,
+            });
+            setIsImporting(false);
+            setFileToProcess(null);
+        },
+        error: (error) => {
+             console.error('Full CSV parsing error:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Erro ao Processar Arquivo',
+                description: 'Houve um problema ao ler os dados do arquivo.',
+            });
+            setIsImporting(false);
+            setFileToProcess(null);
+        }
+    });
+  };
+
+  const mapStops = React.useMemo(() => stops.filter((s) => s.lat && s.lng), [
+    stops,
+  ]);
 
   return (
     <>
@@ -177,8 +249,17 @@ export default function NewRoutePage() {
         type="file"
         ref={fileInputRef}
         className="hidden"
-        onChange={handleFileImport}
-        accept=".txt,.csv"
+        onChange={handleFileSelected}
+        accept=".csv,.txt"
+      />
+      <ImportAssistantDialog
+        isOpen={isAssistantOpen}
+        onClose={() => {
+            setIsAssistantOpen(false);
+            setIsImporting(false);
+        }}
+        headers={csvHeaders}
+        onConfirm={handleImportConfirm}
       />
       <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
         <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
