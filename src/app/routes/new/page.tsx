@@ -12,6 +12,7 @@ import {
   Home,
   Plus,
   ArrowRight,
+  Settings2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -42,6 +43,8 @@ import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
+import { useRouter } from 'next/navigation';
+import { Switch } from '@/components/ui/switch';
 
 const savedOrigins = [
   {
@@ -67,6 +70,7 @@ const savedOrigins = [
 ];
 
 export default function NewRoutePage() {
+  const router = useRouter();
   const [origin, setOrigin] = React.useState<PlaceValue | null>(
     savedOrigins[0].value
   );
@@ -78,7 +82,7 @@ export default function NewRoutePage() {
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
-
+  
   // States for Import Assistant
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
   const [csvHeaders, setCsvHeaders] = React.useState<string[]>([]);
@@ -238,12 +242,32 @@ export default function NewRoutePage() {
   };
   
   const handleNextStep = () => {
-    // Logic to navigate to the new screen will go here
-    toast({
-        title: "Em desenvolvimento",
-        description: "A próxima tela de otimização ainda será criada."
-    })
-  }
+    if (!origin) {
+      toast({
+        variant: 'destructive',
+        title: 'Origem não definida',
+        description: 'Por favor, defina um ponto de origem para a rota.',
+      });
+      return;
+    }
+    if (stops.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Nenhuma parada adicionada',
+        description: 'Por favor, adicione pelo menos um endereço de parada.',
+      });
+      return;
+    }
+    // Save data to session storage to pass to the next page
+    const routeData = {
+      origin,
+      stops,
+      routeDate: routeDate?.toISOString(),
+      routeTime,
+    };
+    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+    router.push('/routes/organize');
+  };
 
   const mapStops = React.useMemo(() => stops.filter((s) => s.lat && s.lng), [
     stops,
@@ -256,7 +280,7 @@ export default function NewRoutePage() {
         ref={fileInputRef}
         className="hidden"
         onChange={handleFileSelected}
-        accept=".csv,.txt"
+        accept=".csv"
       />
       <ImportAssistantDialog
         isOpen={isAssistantOpen}
@@ -522,5 +546,3 @@ export default function NewRoutePage() {
     </>
   );
 }
-
-    

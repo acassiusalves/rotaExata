@@ -8,7 +8,6 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardFooter,
 } from '@/components/ui/card';
 import {
   Tabs,
@@ -19,7 +18,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   List,
   Wand2,
@@ -41,39 +39,44 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { drivers } from '@/lib/data';
+import type { PlaceValue } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
-// Mock data, in a real scenario this would come from the previous page
-const mockOrigin = {
-  address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-  placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-  lat: -16.6786,
-  lng: -49.2552,
-};
-const mockStops = [
-  {
-    address: 'R. 2, 110 - St. Oeste, Goiânia - GO, 74110-130, Brazil',
-    lat: -16.6799,
-    lng: -49.2673,
-    placeId: 'stop1',
-  },
-  {
-    address:
-      'Av. T-10, 1300 - St. Bueno, Goiânia - GO, 74223-060, Brazil',
-    lat: -16.702,
-    lng: -49.287,
-    placeId: 'stop2',
-  },
-  {
-    address:
-      'Av. T-63, 1296 - St. Nova Suica, Goiânia - GO, 74280-235, Brazil',
-    lat: -16.711,
-    lng: -49.282,
-    placeId: 'stop3',
-  },
-];
+interface RouteData {
+  origin: PlaceValue;
+  stops: PlaceValue[];
+  routeDate: string;
+  routeTime: string;
+}
 
 export default function OrganizeRoutePage() {
+  const router = useRouter();
+  const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState(false);
+
+  React.useEffect(() => {
+    const storedData = sessionStorage.getItem('newRouteData');
+    if (storedData) {
+      const parsedData: RouteData = JSON.parse(storedData);
+      setRouteData(parsedData);
+    } else {
+      // If no data, maybe redirect back or show a message
+      router.push('/routes/new');
+    }
+  }, [router]);
+
+  if (!routeData) {
+    // You can show a loading spinner here
+    return (
+      <div className="flex h-screen items-center justify-center">
+        Carregando dados da rota...
+      </div>
+    );
+  }
+
+  const { origin, stops, routeDate, routeTime } = routeData;
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
@@ -81,8 +84,8 @@ export default function OrganizeRoutePage() {
       <div className="flex-1 bg-muted">
         <RouteMap
           height={-1} // -1 for 100% height
-          origin={mockOrigin}
-          stops={mockStops}
+          origin={origin}
+          stops={stops}
         />
       </div>
 
@@ -123,9 +126,9 @@ export default function OrganizeRoutePage() {
                   <ScrollArea className="h-40 rounded-md border">
                     <div className="p-4">
                       <p className="text-sm">
-                        <span className="font-bold">O.</span> Origem
+                        <span className="font-bold">O.</span> {origin.address.split(',')[0]}
                       </p>
-                      {mockStops.map((stop, index) => (
+                      {stops.map((stop, index) => (
                         <p key={index} className="mt-2 text-sm">
                           <span className="font-bold">{index + 1}.</span>{' '}
                           {stop.address.split(',')[0]}
@@ -219,12 +222,12 @@ export default function OrganizeRoutePage() {
                  <div className="col-span-2 space-y-4">
                    <h4 className="font-semibold">Resumo da Rota</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" /> Data: <span className="font-semibold text-foreground">25/07/2024</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Horário: <span className="font-semibold text-foreground">18:10</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Milestone className="h-4 w-4" /> Distância Total: <span className="font-semibold text-foreground">22.5 km</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Tempo Estimado: <span className="font-semibold text-foreground">48 min</span></div>
-                       <div className="flex items-center gap-2 text-muted-foreground"><List className="h-4 w-4" /> Total de Paradas: <span className="font-semibold text-foreground">3</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><User className="h-4 w-4" /> Motorista: <span className="font-semibold text-foreground">Carlos Silva</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" /> Data: <span className="font-semibold text-foreground">{format(new Date(routeDate), 'dd/MM/yyyy', { locale: ptBR })}</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Horário: <span className="font-semibold text-foreground">{routeTime}</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Milestone className="h-4 w-4" /> Distância Total: <span className="font-semibold text-foreground">-- km</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Tempo Estimado: <span className="font-semibold text-foreground">-- min</span></div>
+                       <div className="flex items-center gap-2 text-muted-foreground"><List className="h-4 w-4" /> Total de Paradas: <span className="font-semibold text-foreground">{stops.length}</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><User className="h-4 w-4" /> Motorista: <span className="font-semibold text-foreground">--</span></div>
                     </div>
                  </div>
                  <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
@@ -247,4 +250,3 @@ export default function OrganizeRoutePage() {
     </div>
   );
 }
-
