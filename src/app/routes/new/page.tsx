@@ -12,6 +12,7 @@ import {
   Trash2,
   Loader2,
   Wand2,
+  Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -334,14 +335,19 @@ export default function NewRoutePage() {
         <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
-             <Button variant="outline" onClick={handleOptimizeRoute} disabled={isOptimizing || stops.length < 2}>
-              {isOptimizing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Wand2 className="mr-2 h-4 w-4" />
-              )}
-              {isOptimizing ? 'Otimizando...' : 'Organizar'}
-            </Button>
+            <div className="flex items-center gap-2">
+               <Button variant="outline" onClick={handleOptimizeRoute} disabled={isOptimizing || stops.length < 2}>
+                {isOptimizing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-2 h-4 w-4" />
+                )}
+                {isOptimizing ? 'Otimizando...' : 'Organizar'}
+              </Button>
+              <Button variant="outline" size="icon" aria-label="Configurar critérios de otimização">
+                  <Settings className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
           
           <div className='shrink-0 p-6 space-y-6'>
