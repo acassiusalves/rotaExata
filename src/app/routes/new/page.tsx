@@ -180,17 +180,13 @@ export default function NewRoutePage() {
         onChange={handleFileImport}
         accept=".txt,.csv"
       />
-      {/* Grid raiz (prende à viewport e evita vazamento) */}
       <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
-        {/* Left Sidebar - Coluna esquerda (pode encolher e cria área de scroll no miolo) */}
         <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
           <div className="shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
           
-          {/* Top section - not scrolling */}
           <div className='shrink-0 p-6 space-y-6'>
-            {/* Route Origin */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -214,7 +210,6 @@ export default function NewRoutePage() {
 
             <Separator />
 
-            {/* Route Start */}
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <CalendarIcon className="h-5 w-5 text-muted-foreground" />
@@ -280,27 +275,25 @@ export default function NewRoutePage() {
             <Separator />
           </div>
 
-          {/* Scrolling section */}
           <ScrollArea className="flex-1 min-h-0">
              <div className="px-6 pb-6 space-y-4">
               {stops.map((stop, index) => (
                 <div key={index} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                      <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveStop(index)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                  <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
+                  <div className="flex items-center gap-2">
+                    <AutocompleteInput
+                      id={`stop-${index}`}
+                      placeholder="Endereço da parada..."
+                      value={stop}
+                      onChange={(place) => handleStopChange(index, place)}
+                    />
+                    <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
-                  <AutocompleteInput
-                    id={`stop-${index}`}
-                    placeholder="Endereço da parada..."
-                    value={stop}
-                    onChange={(place) => handleStopChange(index, place)}
-                  />
                 </div>
               ))}
             
-              {/* Add Service */}
               <div className="mt-4">
                 <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
                   <PlusCircle className="h-5 w-5" />
@@ -310,7 +303,6 @@ export default function NewRoutePage() {
             </div>
           </ScrollArea>
 
-          {/* Footer Actions */}
           <div className="shrink-0 border-t p-6">
             <Button
               variant="outline"
@@ -328,7 +320,6 @@ export default function NewRoutePage() {
           </div>
         </div>
 
-        {/* Right Content - Map */}
         <div className="h-full w-full overflow-hidden">
           <RouteMap height={-1} origin={origin} stops={mapStops} />
         </div>
