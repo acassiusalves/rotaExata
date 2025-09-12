@@ -85,7 +85,6 @@ export default function NewRoutePage() {
   // States for Import Assistant
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
   const [csvHeaders, setCsvHeaders] = React.useState<string[]>([]);
-  const [csvData, setCsvData] = React.useState<Record<string, string>[]>([]);
   const [fileToProcess, setFileToProcess] = React.useState<File | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -251,11 +250,12 @@ export default function NewRoutePage() {
       });
       return;
     }
-    if (stops.length < 2) {
+    const validStops = stops.filter(s => s.lat && s.lng);
+    if (validStops.length < 2) {
       toast({
         variant: 'destructive',
         title: 'Paradas insuficientes',
-        description: 'Adicione pelo menos duas paradas para otimizar a rota.',
+        description: 'Adicione pelo menos duas paradas válidas para otimizar a rota.',
       });
       return;
     }
@@ -267,24 +267,28 @@ export default function NewRoutePage() {
     });
 
     try {
+      // Create a temporary map to hold original stop data with a guaranteed unique ID
+      const stopsWithTempIds = new Map(
+        validStops.map((stop, index) => {
+          const id = stop.placeId || `temp-${index}`;
+          return [id, stop];
+        })
+      );
+
       const result = await optimizeDeliveryRoutes({
         currentLocationLat: origin.lat,
         currentLocationLng: origin.lng,
-        deliveryLocations: stops.map((stop, index) => ({
+        deliveryLocations: Array.from(stopsWithTempIds.entries()).map(([id, stop]) => ({
           lat: stop.lat,
           lng: stop.lng,
-          orderId: stop.placeId || `stop-${index}`, // Use placeId as a unique identifier
+          orderId: id,
         })),
       });
 
-      // Reorder stops based on the optimized route
-      const optimizedStops = result.optimizedRoutes.map(optimizedStop => {
-        return stops.find(
-          originalStop => 
-            (originalStop.placeId && originalStop.placeId === optimizedStop.orderId) ||
-            (originalStop.lat === optimizedStop.lat && originalStop.lng === optimizedStop.lng)
-        ) as PlaceValue;
-      }).filter(Boolean); // Filter out any potential undefined values
+      // Reorder stops based on the optimized route using the temporary map
+      const optimizedStops = result.optimizedRoutes
+        .map(optimizedStop => stopsWithTempIds.get(optimizedStop.orderId))
+        .filter((s): s is PlaceValue => !!s);
 
       setStops(optimizedStops);
 
