@@ -180,9 +180,10 @@ export default function NewRoutePage() {
         onChange={handleFileImport}
         accept=".txt,.csv"
       />
-      <div className="grid h-full w-full grid-cols-[minmax(350px,30%)_1fr]">
-        {/* Left Sidebar */}
-        <div className="flex flex-col border-r bg-background">
+      {/* Grid raiz (prende à viewport e evita vazamento) */}
+      <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
+        {/* Left Sidebar - Coluna esquerda (pode encolher e cria área de scroll no miolo) */}
+        <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
           <div className="shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
@@ -280,12 +281,12 @@ export default function NewRoutePage() {
           </div>
 
           {/* Scrolling section */}
-          <ScrollArea className="flex-1">
-            <div className="px-6 pb-6 space-y-4">
+          <ScrollArea className="flex-1 min-h-0">
+             <div className="px-6 pb-6 space-y-4">
               {stops.map((stop, index) => (
                 <div key={index} className="space-y-2">
                   <div className="flex items-center justify-between">
-                      <Label htmlFor={`stop-${index}`}>Parada ${index + 1}</Label>
+                      <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveStop(index)}>
                           <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -328,7 +329,7 @@ export default function NewRoutePage() {
         </div>
 
         {/* Right Content - Map */}
-        <div className="h-full w-full">
+        <div className="h-full w-full overflow-hidden">
           <RouteMap height={-1} origin={origin} stops={mapStops} />
         </div>
       </div>
