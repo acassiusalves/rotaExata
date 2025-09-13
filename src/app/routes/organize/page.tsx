@@ -56,11 +56,21 @@ export default function OrganizeRoutePage() {
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState(false);
 
+  const [routeAStops, setRouteAStops] = React.useState<PlaceValue[]>([]);
+  const [routeBStops, setRouteBStops] = React.useState<PlaceValue[]>([]);
+
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
       setRouteData(parsedData);
+      
+      // Dividir as paradas em duas rotas
+      const allStops = parsedData.stops;
+      const midPoint = Math.ceil(allStops.length / 2);
+      setRouteAStops(allStops.slice(0, midPoint));
+      setRouteBStops(allStops.slice(midPoint));
+
     } else {
       // If no data, maybe redirect back or show a message
       router.push('/routes/new');
@@ -85,7 +95,7 @@ export default function OrganizeRoutePage() {
         <RouteMap
           height={-1} // -1 for 100% height
           origin={origin}
-          stops={stops}
+          stops={stops} // Passar todas as paradas para o mapa
         />
       </div>
 
@@ -119,37 +129,56 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-              <div className="grid grid-cols-2 gap-6">
-                {/* Coluna de Lista de Paradas */}
-                <div className="col-span-1">
-                  <h4 className="mb-2 font-semibold">Ordem das Paradas</h4>
-                  <ScrollArea className="h-40 rounded-md border">
-                    <div className="p-4">
-                      <p className="text-sm">
-                        <span className="font-bold">O.</span> {origin.address.split(',')[0]}
-                      </p>
-                      {stops.map((stop, index) => (
-                        <p key={index} className="mt-2 text-sm">
-                          <span className="font-bold">{index + 1}.</span>{' '}
-                          {stop.address.split(',')[0]}
-                        </p>
-                      ))}
+               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                {/* Coluna de Ações e Lista de Paradas */}
+                <div className="space-y-4">
+                   <div className="flex flex-col justify-between rounded-lg border bg-muted/30 p-4 h-full">
+                     <div>
+                       <h4 className="font-semibold">Otimização Automática</h4>
+                       <p className="mt-1 text-sm text-muted-foreground">
+                         Deixe a IA encontrar a melhor sequência para cada rota.
+                       </p>
+                     </div>
+                     <Button disabled={isOptimizing} className="w-full mt-4">
+                       <Wand2 className="mr-2 h-4 w-4" />
+                       {isOptimizing ? 'Otimizando...' : 'Otimizar Ambas as Rotas'}
+                     </Button>
+                   </div>
+                 </div>
+                {/* Coluna com as duas rotas */}
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <h4 className="mb-2 font-semibold text-center">Rota A</h4>
+                        <ScrollArea className="h-40 rounded-md border">
+                            <div className="p-4">
+                            <p className="text-sm">
+                                <span className="font-bold">O.</span> {origin.address.split(',')[0]}
+                            </p>
+                            {routeAStops.map((stop, index) => (
+                                <p key={index} className="mt-2 text-sm">
+                                <span className="font-bold">{index + 1}.</span>{' '}
+                                {stop.address.split(',')[0]}
+                                </p>
+                            ))}
+                            </div>
+                        </ScrollArea>
                     </div>
-                  </ScrollArea>
-                </div>
-                {/* Coluna de Ações */}
-                <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                  <div>
-                    <h4 className="font-semibold">Otimização Automática</h4>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Deixe a IA encontrar a melhor sequência para economizar
-                      tempo e distância.
-                    </p>
-                  </div>
-                  <Button disabled={isOptimizing} className="w-full">
-                    <Wand2 className="mr-2 h-4 w-4" />
-                    {isOptimizing ? 'Otimizando...' : 'Organizar com IA'}
-                  </Button>
+                     <div>
+                        <h4 className="mb-2 font-semibold text-center">Rota B</h4>
+                        <ScrollArea className="h-40 rounded-md border">
+                            <div className="p-4">
+                            <p className="text-sm">
+                                <span className="font-bold">O.</span> {origin.address.split(',')[0]}
+                            </p>
+                            {routeBStops.map((stop, index) => (
+                                <p key={index} className="mt-2 text-sm">
+                                <span className="font-bold">{index + 1}.</span>{' '}
+                                {stop.address.split(',')[0]}
+                                </p>
+                            ))}
+                            </div>
+                        </ScrollArea>
+                    </div>
                 </div>
               </div>
             </TabsContent>
@@ -234,3 +263,5 @@ export default function OrganizeRoutePage() {
     </div>
   );
 }
+
+    
