@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -112,7 +113,7 @@ export default function NewRoutePage() {
   const handleStopChange = (index: number, place: PlaceValue | null) => {
     const newStops = [...stops];
     if (place) {
-      newStops[index] = { ...newStops[index], ...place }; // Preserve the ID
+      newStops[index] = { ...newStops[index], ...place, id: place.id || `${place.placeId}-${Date.now()}` }; 
       setStops(newStops);
     }
   };
@@ -534,7 +535,11 @@ export default function NewRoutePage() {
                 id="origin-address"
                 label="Endereço Completo"
                 placeholder="Pesquise o endereço..."
-                onChange={() => {}}
+                onChange={(place) => {
+                  if (place) {
+                     setOrigin({...place, id: `${place.placeId}-${Date.now()}`});
+                  }
+                }}
               />
             </div>
           </div>
@@ -551,3 +556,5 @@ export default function NewRoutePage() {
     </>
   );
 }
+
+    
