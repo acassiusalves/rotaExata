@@ -114,6 +114,19 @@ const formatDuration = (durationString: string) => {
   return `${minutes}m`;
 };
 
+const calculateFreightCost = (distanceMeters: number): string => {
+  const BASE_PRICE = 5.00; // R$ 5,00
+  const PRICE_PER_KM = 1.20; // R$ 1,20
+  
+  const distanceKm = distanceMeters / 1000;
+  const cost = BASE_PRICE + (distanceKm * PRICE_PER_KM);
+
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(cost);
+};
+
 // Simple Euclidean distance for clustering (good enough for this purpose)
 const getDistance = (p1: {lat: number, lng: number}, p2: {lat: number, lng: number}) => {
     return Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
@@ -430,7 +443,8 @@ export default function OrganizeRoutePage() {
                                 <TableHead>Paradas</TableHead>
                                 <TableHead>Distância</TableHead>
                                 <TableHead>Tempo</TableHead>
-                                <TableHead className='w-[40%]'>Linha do Tempo</TableHead>
+                                <TableHead>Frete R$</TableHead>
+                                <TableHead className='w-[35%]'>Linha do Tempo</TableHead>
                                 <TableHead className='w-32 text-right'>Ações</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -446,6 +460,7 @@ export default function OrganizeRoutePage() {
                                 <TableCell>{routeItem.data.stops.length}</TableCell>
                                 <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
                                 <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
+                                <TableCell>{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                 <TableCell>
                                     <RouteTimeline routeKey={routeItem.key} stops={routeItem.data.stops} color={routeItem.data.color} />
                                 </TableCell>
