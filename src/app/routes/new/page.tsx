@@ -75,6 +75,7 @@ const savedOrigins = [
 const initialManualServiceState = {
   customerName: '',
   phone: '',
+  locationLink: '',
   cep: '',
   rua: '',
   numero: '',
@@ -191,9 +192,62 @@ export default function NewRoutePage() {
     []
   );
 
+  const reverseGeocode = React.useCallback(
+    (lat: number, lng: number): Promise<Partial<typeof initialManualServiceState> | null> => {
+      return new Promise((resolve, reject) => {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            const place = results[0];
+            const address: Partial<typeof initialManualServiceState> = {};
+            
+            const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
+            
+            address.rua = get('route');
+            address.numero = get('street_number');
+            address.bairro = get('sublocality_level_1') || get('political');
+            address.cidade = get('administrative_area_level_2');
+            address.cep = get('postal_code');
+
+            resolve(address);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    },
+    []
+  );
+
+
   const handleManualServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
     setManualService(prev => ({...prev, [id]: value}));
+
+    if (id === 'locationLink') {
+      handleLocationLinkPaste(value);
+    }
+  }
+
+  const handleLocationLinkPaste = async (url: string) => {
+      const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (!match) return;
+
+      const lat = parseFloat(match[1]);
+      const lng = parseFloat(match[2]);
+      
+      toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
+
+      const addressDetails = await reverseGeocode(lat, lng);
+      if (addressDetails) {
+        setManualService(prev => ({
+          ...prev,
+          ...addressDetails,
+        }));
+        toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
+      } else {
+         toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+      }
   }
 
   const handleSaveManualService = async () => {
@@ -799,12 +853,12 @@ export default function NewRoutePage() {
               Preencha os detalhes do serviço. O endereço será validado.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-6">
-            <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2 space-y-2">
-                    <Label htmlFor="customerName">Nome do Cliente</Label>
-                    <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
-                </div>
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
+            <div className="col-span-2 space-y-2">
+                <Label htmlFor="customerName">Nome do Cliente</Label>
+                <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
                 <div className="space-y-2">
                     <Label htmlFor="phone">Telefone</Label>
                     <Input id="phone" value={manualService.phone} onChange={handleManualServiceChange} placeholder="(00) 90000-0000" />
@@ -814,11 +868,16 @@ export default function NewRoutePage() {
                     <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
                 </div>
             </div>
+             <div className="col-span-2 space-y-2 mt-4">
+                <Label htmlFor="locationLink">Link Localização (Google Maps)</Label>
+                <Input id="locationLink" value={manualService.locationLink} onChange={handleManualServiceChange} placeholder="Cole o link do Google Maps aqui" />
+            </div>
+            <Separator className="my-4" />
             <div className="space-y-2">
                 <Label htmlFor="rua">Rua</Label>
                 <Input id="rua" value={manualService.rua} onChange={handleManualServiceChange} placeholder="Avenida, Rua, etc." />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-4 mt-4">
                 <div className="col-span-1 space-y-2">
                     <Label htmlFor="numero">Número</Label>
                     <Input id="numero" value={manualService.numero} onChange={handleManualServiceChange} placeholder="123" />
@@ -828,7 +887,7 @@ export default function NewRoutePage() {
                     <Input id="complemento" value={manualService.complemento} onChange={handleManualServiceChange} placeholder="Apto, Bloco, etc." />
                 </div>
             </div>
-             <div className="grid grid-cols-2 gap-4">
+             <div className="grid grid-cols-2 gap-4 mt-4">
                 <div className="space-y-2">
                     <Label htmlFor="bairro">Bairro</Label>
                     <Input id="bairro" value={manualService.bairro} onChange={handleManualServiceChange} placeholder="Setor, Bairro" />
@@ -838,7 +897,7 @@ export default function NewRoutePage() {
                     <Input id="cidade" value={manualService.cidade} onChange={handleManualServiceChange} placeholder="Goiânia" />
                 </div>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 mt-4">
                 <Label htmlFor="notes">Observações</Label>
                 <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
             </div>
@@ -854,7 +913,3 @@ export default function NewRoutePage() {
     </>
   );
 }
-
-    
-
-    
