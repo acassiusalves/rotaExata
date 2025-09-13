@@ -47,12 +47,41 @@ const availableFields = [
 ];
 
 const normalizeString = (str: string) => {
+  if (!str) return '';
   return str
-    .normalize('NFD') // Decomposes accented characters into base characters and combining marks
-    .replace(/[\u0300-\u036f]/g, '') // Removes the combining marks
+    .replace(/^\uFEFF/, '')      // BOM
+    .replace(/\uFFFD/g, '')      // replacement char 
+    .normalize('NFKC')
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '') // remove acentos
     .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ') // tira símbolos/espaços extras
     .trim();
 };
+
+const fieldSynonyms: Record<string, string[]> = {
+  'Nome do Cliente': ['nome cliente', 'cliente', 'destinatario', 'contato'],
+  'Observações':     ['observacao', 'observacoes', 'obs', 'comentario', 'nota'],
+  'Número Pedido':   ['numero pedido', 'n pedido', 'pedido', 'order id', 'id pedido'],
+  'Início do intervalo permitido': ['inicio intervalo', 'janela inicio', 'inicio janela', 'inicio permitido'],
+  'Fim do intervalo permitido':    ['fim intervalo', 'janela fim', 'fim janela', 'fim permitido'],
+  'Rua': ['logradouro', 'endereco'],
+  'Município': ['cidade'],
+  'Estado': ['uf'],
+};
+
+const normalizedFieldBank: Array<{label:string; keys:string[]}> =
+  availableFields.map(lbl => ({
+    label: lbl,
+    keys: [normalizeString(lbl), ...(fieldSynonyms[lbl] ?? []).map(normalizeString)]
+  }));
+
+function autoMap(header: string) {
+  const H = normalizeString(header);
+  if (!H) return 'Ignorar';
+  // Encontra a melhor correspondência
+  const found = normalizedFieldBank.find(f => f.keys.some(k => H.includes(k) || k.includes(H)));
+  return found?.label ?? 'Ignorar';
+}
 
 
 export function ImportAssistantDialog({
@@ -64,20 +93,13 @@ export function ImportAssistantDialog({
   const [mapping, setMapping] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
-    // Tenta fazer um mapeamento automático inicial
+    if (!isOpen) return;
     const initialMapping: Record<string, string> = {};
-    headers.forEach((header) => {
-      const normalizedHeader = normalizeString(header);
-      const foundField = availableFields.find((field) => {
-        if (field === 'Ignorar') return false;
-        const normalizedField = normalizeString(field);
-        // Mapeamento mais flexível e robusto com normalização
-        return normalizedHeader.includes(normalizedField) || normalizedField.includes(normalizedHeader);
-      });
-      initialMapping[header] = foundField || 'Ignorar';
+    headers.forEach((header) => { 
+      initialMapping[header] = autoMap(header);
     });
     setMapping(initialMapping);
-  }, [headers, isOpen]); // Roda quando abre a dialog
+  }, [headers, isOpen]);
 
   const handleMappingChange = (header: string, field: string) => {
     setMapping((prev) => ({ ...prev, [header]: field }));

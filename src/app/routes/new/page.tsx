@@ -73,6 +73,31 @@ const savedOrigins = [
 
 let stopIdCounter = 0;
 
+async function readTextSmart(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+
+  // BOMs mais comuns
+  const hasUTF8BOM = bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+  const hasUTF16LE = bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE;
+  const hasUTF16BE = bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF;
+
+  if (hasUTF8BOM) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+  if (hasUTF16LE)  return new TextDecoder('utf-16le').decode(bytes);
+  if (hasUTF16BE)  return new TextDecoder('utf-16be').decode(bytes);
+
+  // Tenta UTF-8 primeiro
+  let text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+
+  // Heurística: se aparecer  (U+FFFD) ou padrões tipo "Ã§", redecodifica como Windows-1252
+  const hasReplacement = /\uFFFD/.test(text) || /Ã[\x80-\xBF]/.test(text);
+  if (hasReplacement) {
+    text = new TextDecoder('windows-1252').decode(bytes);
+  }
+  return text.replace(/^\uFEFF/, ''); // remove BOM residual
+}
+
+
 export default function NewRoutePage() {
   const router = useRouter();
   const [origin, setOrigin] = React.useState<PlaceValue | null>(
@@ -91,6 +116,7 @@ export default function NewRoutePage() {
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
   const [csvHeaders, setCsvHeaders] = React.useState<string[]>([]);
   const [fileToProcess, setFileToProcess] = React.useState<File | null>(null);
+  const [csvContent, setCsvContent] = React.useState<string>('');
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -106,7 +132,7 @@ export default function NewRoutePage() {
   };
 
   const handleAddStop = () => {
-    const newId = `manual-${Date.now()}-${stopIdCounter++}`;
+    const newId = `manual-${Date.now()}`;
     setStops([...stops, { id: newId } as PlaceValue]);
   };
 
@@ -118,7 +144,7 @@ export default function NewRoutePage() {
   const handleStopChange = (index: number, place: PlaceValue | null) => {
     const newStops = [...stops];
     if (place) {
-      const safeId = place.id || place.placeId || `${place.placeId || 'p'}-${index}`;
+      const safeId = place.id || place.placeId || `${place.placeId || 'p'}-${Date.now()}`;
       newStops[index] = { ...newStops[index], ...place, id: String(safeId) };
       setStops(newStops);
     }
@@ -154,57 +180,70 @@ export default function NewRoutePage() {
     []
   );
 
-  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setFileToProcess(file);
     setIsImporting(true);
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      preview: 1, // Only read the first row to get headers
-      complete: (results) => {
-        if (results.meta.fields) {
-          setCsvHeaders(results.meta.fields);
-          setIsAssistantOpen(true);
-        } else {
-          toast({
-            variant: 'destructive',
-            title: 'Falha na Importação',
-            description: 'Não foi possível ler os cabeçalhos do arquivo CSV.',
-          });
-          setIsImporting(false);
+    try {
+      const text = await readTextSmart(file);
+      setCsvContent(text); // Guardar o conteúdo decodificado
+
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        preview: 1, // Apenas a primeira linha de dados para os cabeçalhos
+        complete: (results) => {
+          if (results.meta.fields) {
+            setCsvHeaders(results.meta.fields);
+            setIsAssistantOpen(true);
+          } else {
+             toast({
+              variant: 'destructive',
+              title: 'Falha na Importação',
+              description: 'Não foi possível ler os cabeçalhos do arquivo CSV.',
+            });
+            setIsImporting(false);
+          }
+        },
+        error: (error) => {
+            console.error('CSV parsing error:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Erro ao Ler Arquivo',
+                description: `Verifique se o arquivo é um CSV válido. Detalhe: ${error.message}`,
+            });
+            setIsImporting(false);
         }
-      },
-      error: (error) => {
-        console.error('CSV parsing error:', error);
+      });
+
+    } catch (e) {
+       console.error('File reading error:', e);
         toast({
-          variant: 'destructive',
-          title: 'Erro ao Ler Arquivo',
-          description: 'Verifique se o arquivo é um CSV válido.',
+            variant: 'destructive',
+            title: 'Erro ao Ler Arquivo',
+            description: 'Não foi possível ler o arquivo. Verifique o formato e a codificação.',
         });
         setIsImporting(false);
-      }
-    });
-
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    } finally {
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
     }
   };
 
   const handleImportConfirm = (mapping: Record<string, string>) => {
     setIsAssistantOpen(false);
-    if (!fileToProcess) return;
+    if (!csvContent) return;
 
     toast({
       title: 'Processando endereços...',
       description: 'A geocodificação pode levar alguns instantes.',
     });
 
-    Papa.parse(fileToProcess, {
+    Papa.parse(csvContent, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
@@ -218,7 +257,6 @@ export default function NewRoutePage() {
 
         const stopsToProcess = data.map((row, index) => {
             const addressParts: Record<string, string> = {};
-            const otherData: Partial<PlaceValue> = {};
 
             for (const header in mapping) {
                 const systemField = mapping[header];
@@ -271,6 +309,7 @@ export default function NewRoutePage() {
         });
         setIsImporting(false);
         setFileToProcess(null);
+        setCsvContent('');
       },
       error: (error) => {
         console.error('Full CSV parsing error:', error);
@@ -281,6 +320,7 @@ export default function NewRoutePage() {
         });
         setIsImporting(false);
         setFileToProcess(null);
+        setCsvContent('');
       }
     });
   };
@@ -324,7 +364,7 @@ export default function NewRoutePage() {
         ref={fileInputRef}
         className="hidden"
         onChange={handleFileSelected}
-        accept=".csv"
+        accept=".csv, text/csv"
       />
       <ImportAssistantDialog
         isOpen={isAssistantOpen}
