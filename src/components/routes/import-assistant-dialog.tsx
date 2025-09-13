@@ -32,7 +32,6 @@ interface ImportAssistantDialogProps {
 const availableFields = [
   'Nome do Cliente',
   'Rua',
-  'Número',
   'Complemento',
   'Bairro',
   'Município',
@@ -43,6 +42,7 @@ const availableFields = [
   'Número Pedido',
   'Início do intervalo permitido',
   'Fim do intervalo permitido',
+  'Número',
   'Ignorar',
 ];
 
@@ -61,26 +61,55 @@ const normalizeString = (str: string) => {
 const fieldSynonyms: Record<string, string[]> = {
   'Nome do Cliente': ['nome cliente', 'cliente', 'destinatario', 'contato'],
   'Observações':     ['observacao', 'observacoes', 'obs', 'comentario', 'nota'],
-  'Número Pedido':   ['numero pedido', 'n pedido', 'pedido', 'order id', 'id pedido'],
+  'Número Pedido':   [
+    'numero pedido', 'n pedido', 'pedido numero', 'pedido n',
+    'nº pedido', 'n° pedido', 'no pedido', 'pedido', 'order id', 'id pedido'
+  ],
   'Início do intervalo permitido': ['inicio intervalo', 'janela inicio', 'inicio janela', 'inicio permitido'],
   'Fim do intervalo permitido':    ['fim intervalo', 'janela fim', 'fim janela', 'fim permitido'],
   'Rua': ['logradouro', 'endereco'],
   'Município': ['cidade'],
   'Estado': ['uf'],
+  'Número': ['numero', 'nº', 'n°', 'no', 'n', 'num', '#', 'numero casa', 'numero endereco'],
 };
+
 
 const normalizedFieldBank: Array<{label:string; keys:string[]}> =
   availableFields.map(lbl => ({
     label: lbl,
-    keys: [normalizeString(lbl), ...(fieldSynonyms[lbl] ?? []).map(normalizeString)]
+    keys: [normalizeString(lbl), ...(fieldSynonyms[lbl] ?? []).map(normalizeString)].filter(Boolean)
   }));
 
 function autoMap(header: string) {
   const H = normalizeString(header);
   if (!H) return 'Ignorar';
-  // Encontra a melhor correspondência
-  const found = normalizedFieldBank.find(f => f.keys.some(k => H.includes(k) || k.includes(H)));
-  return found?.label ?? 'Ignorar';
+
+  // 1) Igualdade exata com qualquer chave/sinônimo
+  for (const f of normalizedFieldBank) {
+    if (f.keys.some(k => k === H)) return f.label;
+  }
+
+  // 2) Tokens muito curtos (<=2) só mapeiam se forem sinônimos exatos
+  if (H.length <= 2) {
+    const tiny = normalizedFieldBank.find(f => f.keys.includes(H));
+    return tiny?.label ?? 'Ignorar';
+  }
+
+  // 3) Match por "palavra inteira"
+  for (const f of normalizedFieldBank) {
+    if (f.keys.some(k => new RegExp(`\\b${k}\\b`).test(H))) return f.label;
+  }
+
+  // 4) Substring: escolha o candidato com a chave MAIS LONGA
+  let best: { label: string; len: number } | undefined;
+  for (const f of normalizedFieldBank) {
+    for (const k of f.keys) {
+      if (k && (H.includes(k) || k.includes(H))) {
+        if (!best || k.length > best.len) best = { label: f.label, len: k.length };
+      }
+    }
+  }
+  return best?.label ?? 'Ignorar';
 }
 
 
