@@ -28,6 +28,7 @@ import {
   Loader2,
   Eye,
   GripVertical,
+  EyeOff,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
 import {
@@ -89,7 +90,7 @@ const computeRoute = async (
        throw new Error(errorText);
     }
     const data = await res.json();
-    return { ...data, stops }; // Ensure original stops are returned
+    return { ...data, stops, visible: true }; // Ensure original stops are returned
   } catch (error) {
     console.error('Failed to compute route:', error);
     return null;
@@ -174,8 +175,6 @@ export default function OrganizeRoutePage() {
       return;
     }
     
-    // active.data.current could be { routeKey: 'A', index: 0 }
-    // over.data.current could be { routeKey: 'A', index: 1 }
     const activeRouteKey = active.data.current?.routeKey;
     const overRouteKey = over.data.current?.routeKey;
 
@@ -203,6 +202,11 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const toggleRouteVisibility = (routeKey: 'A' | 'B') => {
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+    setter(prev => prev ? { ...prev, visible: !prev.visible } : null);
+  };
+
 
   if (isLoading && !routeData) {
     return (
@@ -228,7 +232,7 @@ export default function OrganizeRoutePage() {
   }
 
   const { origin, routeDate, routeTime } = routeData;
-  const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
+  const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r && !!r.visible);
 
   const totalStops = (routeA?.stops.length || 0) + (routeB?.stops.length || 0);
   const totalDistance =
@@ -305,8 +309,8 @@ export default function OrganizeRoutePage() {
                         {routesForTable.map(routeItem => routeItem.data && (
                              <TableRow key={routeItem.key}>
                                 <TableCell className="align-middle">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                                        <Eye className="h-4 w-4" />
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key as 'A' | 'B')}>
+                                        {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                     </Button>
                                 </TableCell>
                                 <TableCell className='font-medium'>{routeItem.name}</TableCell>
@@ -401,9 +405,9 @@ export default function OrganizeRoutePage() {
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Calendar className="h-4 w-4" /> Data:{' '}
                       <span className="font-semibold text-foreground">
-                        {format(new Date(routeDate), 'dd/MM/yyyy', {
+                        {routeDate ? format(new Date(routeDate), 'dd/MM/yyyy', {
                           locale: ptBR,
-                        })}
+                        }) : '--'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">

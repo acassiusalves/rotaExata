@@ -22,6 +22,7 @@ export type RouteInfo = {
   distanceMeters: number;
   duration: string;
   color?: string; // Optional color for rendering
+  visible?: boolean;
 };
 
 export type OrderStatus =
