@@ -114,7 +114,8 @@ export default function NewRoutePage() {
   const handleStopChange = (index: number, place: PlaceValue | null) => {
     const newStops = [...stops];
     if (place) {
-      newStops[index] = { ...newStops[index], ...place, id: place.id || `${place.placeId}-${Date.now()}` }; 
+      const safeId = place.id || place.placeId || `${place.placeId || 'p'}-${index}`;
+      newStops[index] = { ...newStops[index], ...place, id: String(safeId) };
       setStops(newStops);
     }
   };
@@ -394,7 +395,7 @@ export default function NewRoutePage() {
               <Separator />
                <div className="space-y-4">
                 {stops.map((stop, index) => (
-                  <div key={stop.id} className="space-y-2">
+                  <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
                     <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
                     <div className="flex items-center gap-2">
                       <AutocompleteInput
@@ -557,6 +558,3 @@ export default function NewRoutePage() {
     </>
   );
 }
-
-    
-    
