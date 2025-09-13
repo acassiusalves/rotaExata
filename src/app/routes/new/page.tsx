@@ -102,7 +102,8 @@ export default function NewRoutePage() {
   };
 
   const handleAddStop = () => {
-    setStops([...stops, { id: `manual-${stopIdCounter++}` } as PlaceValue]);
+    const newId = `manual-${Date.now()}-${stopIdCounter++}`;
+    setStops([...stops, { id: newId } as PlaceValue]);
   };
 
   const handleRemoveStop = (index: number) => {
@@ -557,4 +558,5 @@ export default function NewRoutePage() {
   );
 }
 
+    
     
