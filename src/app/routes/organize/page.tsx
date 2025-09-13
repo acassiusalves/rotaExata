@@ -26,6 +26,7 @@ import {
   Clock,
   Milestone,
   Loader2,
+  Eye,
   GripVertical,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
@@ -36,6 +37,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { drivers } from '@/lib/data';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { useRouter } from 'next/navigation';
@@ -51,13 +60,10 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
+  arrayMove,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { RouteTimeline } from '@/components/routes/route-timeline';
+
 
 interface RouteData {
   origin: PlaceValue;
@@ -78,9 +84,9 @@ const computeRoute = async (
       body: JSON.stringify({ origin, stops }),
     });
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error('API Error:', errorText);
-      throw new Error(errorText);
+       const errorText = await res.text();
+       console.error('API Error:', errorText);
+       throw new Error(errorText);
     }
     const data = await res.json();
     return { ...data, stops }; // Ensure original stops are returned
@@ -107,38 +113,6 @@ const formatDuration = (durationString: string) => {
 };
 
 
-// Sortable Item Component
-function SortableStopItem({ stop, index }: { stop: PlaceValue; index: number }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-  } = useSortable({ id: stop.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      className="flex items-center gap-4 rounded-md border bg-background p-3"
-    >
-      <div {...listeners} className="cursor-grab text-muted-foreground">
-        <GripVertical className="h-5 w-5" />
-      </div>
-      <div className="font-mono text-sm">{index + 1}</div>
-      <div className="flex-1 text-sm">{stop.address}</div>
-    </div>
-  );
-}
-
-
 export default function OrganizeRoutePage() {
   const router = useRouter();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
@@ -150,9 +124,7 @@ export default function OrganizeRoutePage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(KeyboardSensor)
   );
 
   React.useEffect(() => {
@@ -195,24 +167,31 @@ export default function OrganizeRoutePage() {
   }, [router]);
 
 
-  const handleDragEnd = async (event: DragEndEvent, routeKey: 'A' | 'B') => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (!over || active.id === over.id) {
       return;
     }
+    
+    // active.data.current could be { routeKey: 'A', index: 0 }
+    // over.data.current could be { routeKey: 'A', index: 1 }
+    const activeRouteKey = active.data.current?.routeKey;
+    const overRouteKey = over.data.current?.routeKey;
 
-    const currentRoute = routeKey === 'A' ? routeA : routeB;
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+    if (activeRouteKey !== overRouteKey) {
+        // Handle moving between routes if needed in the future
+        return;
+    }
+
+    const currentRoute = activeRouteKey === 'A' ? routeA : routeB;
+    const setter = activeRouteKey === 'A' ? setRouteA : setRouteB;
     if (!currentRoute || !routeData) return;
 
-    const oldIndex = currentRoute.stops.findIndex((s) => s.id === active.id);
-    const newIndex = currentRoute.stops.findIndex((s) => s.id === over.id);
+    const oldIndex = active.data.current?.index as number;
+    const newIndex = over.data.current?.index as number;
     
-    // Create new sorted array
-    const newStops = Array.from(currentRoute.stops);
-    const [movedItem] = newStops.splice(oldIndex, 1);
-    newStops.splice(newIndex, 0, movedItem);
+    const newStops = arrayMove(currentRoute.stops, oldIndex, newIndex);
 
     // Update state optimistically
     setter((prev) => (prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null));
@@ -263,6 +242,11 @@ export default function OrganizeRoutePage() {
     : 0;
   const totalDurationSeconds = durationA + durationB;
 
+  const routesForTable = [
+      { key: 'A', name: 'Rota 1', data: routeA },
+      { key: 'B', name: 'Rota 2', data: routeB },
+  ].filter(r => r.data);
+
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
       <div className="flex-1 bg-muted">
@@ -300,52 +284,45 @@ export default function OrganizeRoutePage() {
             <TabsContent value="organize" className="m-0">
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="col-span-3 lg:col-span-2">
-                  {isLoading ? (
+                   {isLoading ? (
                     <div className="flex h-48 items-center justify-center">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      {routeA && (
-                         <DndContext
-                          sensors={sensors}
-                          collisionDetection={closestCenter}
-                          onDragEnd={(e) => handleDragEnd(e, 'A')}
-                          modifiers={[restrictToVerticalAxis]}
-                        >
-                          <div className="space-y-3">
-                            <h3 className="font-semibold text-red-600">Rota A ({routeA.stops.length} paradas)</h3>
-                             <SortableContext items={routeA.stops.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                              <div className="space-y-2">
-                                {routeA.stops.map((stop, index) => (
-                                  <SortableStopItem key={stop.id} stop={stop} index={index} />
-                                ))}
-                              </div>
-                            </SortableContext>
-                          </div>
-                        </DndContext>
-                      )}
-
-                      {routeB && (
-                         <DndContext
-                          sensors={sensors}
-                          collisionDetection={closestCenter}
-                          onDragEnd={(e) => handleDragEnd(e, 'B')}
-                          modifiers={[restrictToVerticalAxis]}
-                        >
-                          <div className="space-y-3">
-                            <h3 className="font-semibold text-orange-500">Rota B ({routeB.stops.length} paradas)</h3>
-                             <SortableContext items={routeB.stops.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                              <div className="space-y-2">
-                                {routeB.stops.map((stop, index) => (
-                                  <SortableStopItem key={stop.id} stop={stop} index={index} />
-                                ))}
-                              </div>
-                            </SortableContext>
-                          </div>
-                        </DndContext>
-                      )}
-                    </div>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className='w-12'></TableHead>
+                                <TableHead>Rota</TableHead>
+                                <TableHead>Paradas</TableHead>
+                                <TableHead>Distância</TableHead>
+                                <TableHead>Tempo</TableHead>
+                                <TableHead className='w-[40%]'>Linha do Tempo</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                        {routesForTable.map(routeItem => routeItem.data && (
+                             <TableRow key={routeItem.key}>
+                                <TableCell className="align-middle">
+                                    <div className='flex items-center gap-2'>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                            <Eye className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </TableCell>
+                                <TableCell className='font-medium'>{routeItem.name}</TableCell>
+                                <TableCell>{routeItem.data.stops.length}</TableCell>
+                                <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
+                                <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
+                                <TableCell>
+                                    <RouteTimeline routeKey={routeItem.key} stops={routeItem.data.stops} color={routeItem.data.color} />
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                        </TableBody>
+                    </Table>
+                    </DndContext>
                   )}
                 </div>
                 <div className="col-span-3 lg:col-span-1 flex items-center">
@@ -482,3 +459,4 @@ export default function OrganizeRoutePage() {
     </div>
   );
 }
+
