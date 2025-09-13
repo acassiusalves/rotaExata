@@ -131,7 +131,19 @@ export function ImportAssistantDialog({
   }, [headers, isOpen]);
 
   const handleMappingChange = (header: string, field: string) => {
-    setMapping((prev) => ({ ...prev, [header]: field }));
+    setMapping(prev => {
+        const next = {...prev};
+        // se o campo for válido, remove esse campo de quem o tinha antes
+        if (field !== 'Ignorar') {
+            for (const [h, f] of Object.entries(next)) {
+                if (h !== header && f === field) {
+                    next[h] = 'Ignorar'; // ou o valor padrão
+                }
+            }
+        }
+        next[header] = field;
+        return next;
+    });
   };
 
   const handleConfirm = () => {
@@ -199,3 +211,5 @@ export function ImportAssistantDialog({
     </Dialog>
   );
 }
+
+    

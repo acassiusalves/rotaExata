@@ -104,7 +104,7 @@ export default function NewRoutePage() {
     savedOrigins[0].value
   );
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
-  const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
+  const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
   const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isImporting, setIsImporting] = React.useState(false);
@@ -243,6 +243,64 @@ export default function NewRoutePage() {
       description: 'A geocodificação pode levar alguns instantes.',
     });
 
+    const normalizeString = (s = '') =>
+      s.replace(/^\uFEFF/, '')
+       .replace(/\uFFFD/g, '')
+       .normalize('NFKC')
+       .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+       .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+    const fieldSynonyms: Record<string, string[]> = {
+      'Nome do Cliente': ['nome do cliente','nome cliente','cliente','destinatario','contato'],
+      'Número Pedido':   ['numero pedido','n pedido','pedido numero','pedido n','nº pedido','n° pedido','order id','id pedido','pedido'],
+      'Número':          ['numero','nº','n°','no','n','num','#','numero casa','numero endereco'],
+      // ... adicione outros sinônimos se necessário
+    };
+    
+    function invertMapping(mapping: Record<string,string>) {
+      const candidates: Record<string, string[]> = {};
+      for (const [header, field] of Object.entries(mapping)) {
+        if (!field || field === 'Ignorar') continue;
+        (candidates[field] ??= []).push(header);
+      }
+
+      const pickBest = (field: string, headers: string[]) => {
+        const keys = [field, ...(fieldSynonyms[field] ?? [])].map(normalizeString);
+
+        const score = (h: string) => {
+          const H = normalizeString(h);
+          if (!H) return -1;
+          if (keys.includes(H)) return 1000;
+          const numericOnly = /^[0-9#nºn°]+$/.test(H);
+          const tokens = H.split(' ');
+          const overlap = tokens.filter(t => keys.some(k => k.includes(t) || t.includes(k))).length;
+          const len = Math.max(...keys.map(k => k.length));
+          return (overlap * 10) + (len / 10) - (numericOnly ? 50 : 0);
+        };
+
+        return headers.sort((a, b) => score(b) - score(a))[0];
+      };
+
+      const result: Record<string, string> = {};
+      for (const [field, headers] of Object.entries(candidates)) {
+        result[field] = pickBest(field, headers);
+      }
+      return result;
+    }
+
+    const systemToCsvHeader = invertMapping(mapping);
+
+    const getField = (row: Record<string, any>, field: string, fallbacks: string[] = []) => {
+        const header = systemToCsvHeader[field];
+        const val = header ? row[header] : undefined;
+        if (val != null && String(val).trim() !== '') return String(val).trim();
+        for (const fb of fallbacks) {
+            if (row[fb] != null && String(row[fb]).trim() !== '') return String(row[fb]).trim();
+        }
+        return undefined;
+    };
+
+
     Papa.parse(csvContent, {
       header: true,
       skipEmptyLines: true,
@@ -250,14 +308,7 @@ export default function NewRoutePage() {
         const data = results.data as Record<string, string>[];
 
         const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
-        const systemToCsvHeader: Record<string, string> = {};
-        for (const header in mapping) {
-          const systemField = mapping[header];
-          if (systemField !== 'Ignorar') {
-            systemToCsvHeader[systemField] = header;
-          }
-        }
-
+        
         const stopsToProcess = data.map((row, index) => {
             const addressParts: Record<string, string> = {};
 
@@ -277,19 +328,19 @@ export default function NewRoutePage() {
             
             return {
                 addressString,
-                customerName: row[systemToCsvHeader['Nome do Cliente']],
-                phone: row[systemToCsvHeader['Telefone']],
-                notes: row[systemToCsvHeader['Observações']],
-                orderNumber: row[systemToCsvHeader['Número Pedido']],
-                timeWindowStart: row[systemToCsvHeader['Início do intervalo permitido']],
-                timeWindowEnd: row[systemToCsvHeader['Fim do intervalo permitido']],
+                customerName: getField(row, 'Nome do Cliente', ['Nome do Cliente','Cliente']),
+                phone:        getField(row, 'Telefone', ['Telefone']),
+                notes:        getField(row, 'Observações', ['Observações']),
+                orderNumber:  getField(row, 'Número Pedido', ['Número Pedido','Pedido']),
+                timeWindowStart: getField(row, 'Início do intervalo permitido', ['Início do intervalo permitido']),
+                timeWindowEnd:   getField(row, 'Fim do intervalo permitido', ['Fim do intervalo permitido']),
             };
         });
 
         const geocodedStopsPromises = stopsToProcess.map(async (item) => {
             const geocoded = await geocodeAddress(item.addressString);
             if (geocoded) {
-                return {
+                const stopData: PlaceValue = {
                     ...geocoded,
                     customerName: item.customerName,
                     phone: item.phone,
@@ -298,6 +349,11 @@ export default function NewRoutePage() {
                     timeWindowStart: item.timeWindowStart,
                     timeWindowEnd: item.timeWindowEnd,
                 };
+                // se "nome" vier só com dígitos (tipo 10), descarta
+                if (stopData.customerName && /^\d+$/.test(stopData.customerName)) {
+                    stopData.customerName = undefined;
+                }
+                return stopData;
             }
             return null;
         });
@@ -680,5 +736,7 @@ export default function NewRoutePage() {
     </>
   );
 }
+
+    
 
     
