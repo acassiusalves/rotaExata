@@ -305,11 +305,9 @@ export default function OrganizeRoutePage() {
                         {routesForTable.map(routeItem => routeItem.data && (
                              <TableRow key={routeItem.key}>
                                 <TableCell className="align-middle">
-                                    <div className='flex items-center gap-2'>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                            <Eye className="h-4 w-4" />
-                                        </Button>
-                                    </div>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                        <Eye className="h-4 w-4" />
+                                    </Button>
                                 </TableCell>
                                 <TableCell className='font-medium'>{routeItem.name}</TableCell>
                                 <TableCell>{routeItem.data.stops.length}</TableCell>
@@ -459,4 +457,3 @@ export default function OrganizeRoutePage() {
     </div>
   );
 }
-

@@ -16,9 +16,10 @@ interface SortableStopProps {
   stop: PlaceValue;
   index: number;
   routeKey: string;
+  color?: string;
 }
 
-function SortableStop({ stop, index, routeKey }: SortableStopProps) {
+function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
   const {
     attributes,
     listeners,
@@ -29,8 +30,8 @@ function SortableStop({ stop, index, routeKey }: SortableStopProps) {
   } = useSortable({
     id: stop.id,
     data: {
-        routeKey: routeKey,
-        index: index,
+      routeKey: routeKey,
+      index: index,
     }
   });
 
@@ -47,9 +48,16 @@ function SortableStop({ stop, index, routeKey }: SortableStopProps) {
       style={style}
       {...attributes}
       {...listeners}
-      className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
+      className="flex items-center"
     >
-      {index + 1}
+      {/* Connector Line */}
+      <div className="h-1 w-3" style={{ backgroundColor: color }} />
+      {/* Stop Box */}
+      <div
+        className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
+      >
+        {index + 1}
+      </div>
     </div>
   );
 }
@@ -69,28 +77,20 @@ export function RouteTimeline({ stops, color = '#888888', routeKey }: RouteTimel
 
   return (
     <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>
-        <div className="flex items-center">
-            {/* Home Icon */}
-            <div
-                className="flex h-6 w-6 items-center justify-center rounded-md"
-                style={{ backgroundColor: color }}
-            >
-                <Home className="h-4 w-4 text-white" />
-            </div>
-
-            {/* Stops */}
-            {stops.map((stop, index) => (
-                <React.Fragment key={stop.id}>
-                    {/* Connector Line */}
-                    <div
-                        className="h-1 w-3"
-                        style={{ backgroundColor: color }}
-                    />
-                    {/* Stop Box */}
-                    <SortableStop stop={stop} index={index} routeKey={routeKey} />
-                </React.Fragment>
-            ))}
+      <div className="flex items-center">
+        {/* Home Icon */}
+        <div
+          className="flex h-6 w-6 items-center justify-center rounded-md"
+          style={{ backgroundColor: color }}
+        >
+          <Home className="h-4 w-4 text-white" />
         </div>
+
+        {/* Stops */}
+        {stops.map((stop, index) => (
+            <SortableStop key={stop.id} stop={stop} index={index} routeKey={routeKey} color={color} />
+        ))}
+      </div>
     </SortableContext>
   );
 }
