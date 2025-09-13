@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Code,
   History,
+  LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,9 +29,14 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
+
 
 export function Header() {
   const pathname = usePathname();
+  const { user, signOut } = useAuth();
+
   const navItems = [
     { href: '/', icon: Home, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
@@ -41,12 +47,19 @@ export function Header() {
   ];
 
   const isActive = (href: string) => {
-    // Make parent 'Rotas' active if on any sub-route
-    if (href.startsWith('/routes')) {
-      return pathname.startsWith('/routes');
-    }
-    return pathname === href;
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
   };
+  
+  const getInitials = (name: string | null | undefined) => {
+    if (!name) return 'U';
+    const names = name.split(' ');
+    if (names.length > 1) {
+      return `${names[0][0]}${names[names.length - 1][0]}`;
+    }
+    return name.substring(0, 2);
+  };
+
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6">
@@ -90,6 +103,9 @@ export function Header() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
+             <DropdownMenuItem asChild>
+              <Link href="/routes">Ver Rotas</Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/routes/new">Criar Nova Rota</Link>
             </DropdownMenuItem>
@@ -123,14 +139,27 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
-             <Link
-                href="/routes"
-                className={cn('hover:text-foreground', {
-                  'text-muted-foreground': !isActive('/routes'),
-                })}
+             <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  'flex items-center gap-1 text-lg font-medium hover:text-foreground',
+                  {
+                    'text-muted-foreground': !isActive('/routes'),
+                  }
+                )}
               >
                 Rotas
-              </Link>
+                <ChevronDown className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem asChild>
+                  <Link href="/routes">Ver Rotas</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/routes/new">Nova Rota</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </nav>
         </SheetContent>
       </Sheet>
@@ -148,26 +177,25 @@ export function Header() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="secondary" size="icon" className="rounded-full">
-              <Image
-                src="https://picsum.photos/seed/admin/36/36"
-                width={36}
-                height={36}
-                alt="Avatar"
-                className="rounded-full"
-                data-ai-hint="person portrait"
-              />
+              <Avatar className="h-8 w-8">
+                  <AvatarImage src={user?.photoURL ?? undefined} />
+                  <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
+              </Avatar>
               <span className="sr-only">Toggle user menu</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
+            <DropdownMenuLabel>{user?.displayName || user?.email || 'Minha Conta'}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link href="/settings">Configurações</Link>
             </DropdownMenuItem>
             <DropdownMenuItem>Suporte</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Sair</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => signOut()}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Sair</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
