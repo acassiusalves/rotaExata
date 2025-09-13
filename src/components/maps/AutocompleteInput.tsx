@@ -1,13 +1,7 @@
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-
-type PlaceValue = {
-  address: string;
-  placeId: string;
-  lat: number;
-  lng: number;
-};
+import type { PlaceValue } from "@/lib/types";
 
 export function AutocompleteInput({
   id,
@@ -35,7 +29,7 @@ export function AutocompleteInput({
     let mounted = true;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
-      libraries: ["places", "geometry", "geocoding"],
+      libraries: ["places", "geometry", "geocoding", "marker"],
       language: "pt-BR",
       region: "BR",
     });
@@ -51,6 +45,7 @@ export function AutocompleteInput({
         const loc = p.geometry?.location;
         if (!loc || !p.place_id) return;
         onChange({
+          id: p.place_id,
           placeId: p.place_id,
           address: p.formatted_address ?? "",
           lat: loc.lat(),
