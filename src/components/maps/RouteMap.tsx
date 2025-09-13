@@ -1,7 +1,12 @@
+
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import type { PlaceValue, RouteInfo } from "@/lib/types";
+
+export type RouteMapHandle = {
+  openStopInfo: (stopId: string) => void;
+};
 
 // Função para gerar o conteúdo HTML do InfoWindow
 const createInfoWindowContent = (stop: PlaceValue, index: number): string => {
@@ -32,23 +37,36 @@ const createInfoWindowContent = (stop: PlaceValue, index: number): string => {
   `;
 };
 
-
-export function RouteMap({
-  origin,
-  stops,
-  routes,
-  height = 360,
-}: {
+type Props = {
   origin?: PlaceValue | null;
   stops?: PlaceValue[];
   routes?: RouteInfo[];
   height?: number;
-}) {
+};
+
+export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
+  { origin, stops, routes, height = 360 }: Props,
+  ref
+) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<google.maps.Map | null>(null);
   const markersRef = React.useRef<google.maps.Marker[]>([]);
   const polylinesRef = React.useRef<google.maps.Polyline[]>([]);
   const activeInfoWindowRef = React.useRef<google.maps.InfoWindow | null>(null);
+  const entriesRef = React.useRef<Map<string, { marker: any; info: google.maps.InfoWindow }>>(
+    new Map()
+  );
+
+  React.useImperativeHandle(ref, () => ({
+    openStopInfo: (stopId: string) => {
+      const entry = entriesRef.current.get(String(stopId));
+      if (entry && mapRef.current) {
+        activeInfoWindowRef.current?.close();
+        entry.info.open(mapRef.current, entry.marker);
+        activeInfoWindowRef.current = entry.info;
+      }
+    },
+  }));
 
 
   React.useEffect(() => {
@@ -86,6 +104,7 @@ export function RouteMap({
     polylinesRef.current = [];
     activeInfoWindowRef.current?.close();
     activeInfoWindowRef.current = null;
+    entriesRef.current.clear();
 
 
     const bounds = new google.maps.LatLngBounds();
@@ -107,37 +126,40 @@ export function RouteMap({
       bounds.extend(origin);
     }
     
+    // helper para criar marker+info e indexar por id
+    const addStop = (stop: PlaceValue, index: number, color?: string) => {
+      if (!stop.lat || !stop.lng) return;
+      const sid = String(stop.id ?? stop.placeId ?? index);
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: stop,
+        content: new google.maps.marker.PinElement({
+          background: color,
+          borderColor: "#FFFFFF",
+          glyph: `${index + 1}`,
+          glyphColor: "#FFFFFF",
+        }).element,
+        title: `Parada ${index + 1}: ${stop.customerName ?? ""}`,
+      });
+      const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
+
+      marker.addListener("click", () => {
+        activeInfoWindowRef.current?.close();
+        info.open(map, marker as any);
+        activeInfoWindowRef.current = info;
+      });
+
+      entriesRef.current.set(sid, { marker: marker as any, info });
+      markersRef.current.push(marker as any);
+      bounds.extend(stop);
+    };
+    
     // Handle multiple routes with different colors
     if (routes && routes.length > 0) {
         routes.forEach(route => {
             if (route.stops) {
                 route.stops.forEach((stop, index) => {
-                    if (stop.lat && stop.lng) {
-                        const marker = new google.maps.marker.AdvancedMarkerElement({
-                            map,
-                            position: stop,
-                            content: new google.maps.marker.PinElement({
-                                background: route.color,
-                                borderColor: '#FFFFFF',
-                                glyph: `${index + 1}`,
-                                glyphColor: '#FFFFFF',
-                            }).element,
-                            title: `Parada ${index + 1}: ${stop.customerName}`
-                        });
-
-                        const infoWindow = new google.maps.InfoWindow({
-                            content: createInfoWindowContent(stop, index)
-                        });
-
-                        marker.addListener('click', () => {
-                            activeInfoWindowRef.current?.close();
-                            infoWindow.open(map, marker as any);
-                            activeInfoWindowRef.current = infoWindow;
-                        });
-
-                        markersRef.current.push(marker as any);
-                        bounds.extend(stop);
-                    }
+                    addStop(stop, index, route.color)
                 });
             }
             if (route.encodedPolyline) {
@@ -149,28 +171,7 @@ export function RouteMap({
         });
     } else if (stops) { // Fallback for single list of stops
        stops.forEach((stop, index) => {
-        if (stop.lat && stop.lng) {
-             const marker = new google.maps.marker.AdvancedMarkerElement({
-                map,
-                position: stop,
-                content: new google.maps.marker.PinElement({
-                    glyph: `${index + 1}`,
-                }).element
-            });
-
-            const infoWindow = new google.maps.InfoWindow({
-                content: createInfoWindowContent(stop, index)
-            });
-
-            marker.addListener('click', () => {
-                activeInfoWindowRef.current?.close();
-                infoWindow.open(map, marker as any);
-                activeInfoWindowRef.current = infoWindow;
-            });
-
-            markersRef.current.push(marker as any);
-            bounds.extend(stop);
-        }
+        addStop(stop, index)
     });
     }
 
@@ -184,4 +185,5 @@ export function RouteMap({
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 
   return <div ref={divRef} style={mapStyle} className="w-full rounded-lg border" />;
-}
+});
+

@@ -29,7 +29,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { RouteMap } from '@/components/maps/RouteMap';
+import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
   Select,
   SelectContent,
@@ -220,8 +220,11 @@ export default function OrganizeRoutePage() {
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
 
+  const mapApiRef = React.useRef<RouteMapHandle>(null);
+  const DRAG_DELAY = 200;
+  
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { delay: DRAG_DELAY, tolerance: 5 } }),
     useSensor(KeyboardSensor)
   );
 
@@ -396,7 +399,7 @@ export default function OrganizeRoutePage() {
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
       <div className="flex-1 bg-muted">
-        <RouteMap height={-1} routes={combinedRoutes} origin={origin} />
+        <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} />
       </div>
 
       <div className="shrink-0 border-t bg-background">
@@ -462,7 +465,16 @@ export default function OrganizeRoutePage() {
                                 <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
                                 <TableCell>{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                 <TableCell>
-                                    <RouteTimeline routeKey={routeItem.key} stops={routeItem.data.stops} color={routeItem.data.color} />
+                                    <RouteTimeline
+                                      routeKey={routeItem.key}
+                                      stops={routeItem.data.stops}
+                                      color={routeItem.data.color}
+                                      dragDelay={DRAG_DELAY}
+                                      onStopClick={(stop) => {
+                                        const id = String(stop.id ?? stop.placeId ?? "");
+                                        if (id) mapApiRef.current?.openStopInfo(id);
+                                      }}
+                                    />
                                 </TableCell>
                                 <TableCell className="text-right">
                                     <Button 
@@ -575,6 +587,7 @@ export default function OrganizeRoutePage() {
                       <User className="h-4 w-4" /> Motorista:{' '}
                       <span className="font-semibold text-foreground">--</span>
                     </div>
+
                   </div>
                 </div>
                 <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
