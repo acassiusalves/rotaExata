@@ -70,7 +70,7 @@ export function RouteTimeline({ stops, color = '#888888', routeKey }: RouteTimel
     <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>
         <div className="flex items-center">
             {/* Home Icon */}
-            <div 
+            <div
                 className="flex h-6 w-6 items-center justify-center rounded-md"
                 style={{ backgroundColor: color }}
             >
@@ -81,7 +81,8 @@ export function RouteTimeline({ stops, color = '#888888', routeKey }: RouteTimel
             {stops.map((stop, index) => (
                 <div key={stop.id} className="flex items-center">
                 {/* Connector Line */}
-                <div 
+                <div
+                    key={`${stop.id}-connector`}
                     className="h-1 w-3"
                     style={{ backgroundColor: color }}
                 />
