@@ -30,6 +30,7 @@ import {
   EyeOff,
   Plus,
   PackagePlus,
+  Package,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
@@ -72,6 +73,8 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 
 interface RouteData {
@@ -371,6 +374,13 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const handleShowUnassignedStopOnMap = (stop: PlaceValue) => {
+    const id = String(stop.id ?? stop.placeId ?? "");
+    if (id) {
+        mapApiRef.current?.openStopInfo(id);
+    }
+  };
+
 
   if (isLoading && !routeData) {
     return (
@@ -470,14 +480,32 @@ export default function OrganizeRoutePage() {
                 <Separator />
                 <div className='p-4'>
                     <h3 className="text-sm font-semibold mb-2">Serviços não alocados</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {unassignedStops.map(stop => (
-                            <div key={stop.id} className="flex items-center gap-2 rounded-md border bg-muted p-2 text-sm">
-                                <PackagePlus className="h-4 w-4 text-muted-foreground" />
-                                <span className='font-medium'>{stop.address}</span>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-lg font-bold text-muted-foreground transition-colors hover:bg-muted/80">
+                                {unassignedStops.length}
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className='w-96'>
+                            <div className="space-y-2">
+                                <h4 className='font-medium leading-none'>Lista de Serviços</h4>
+                                <p className='text-sm text-muted-foreground'>
+                                    Clique em um serviço para ver no mapa.
+                                </p>
+                                <div className="mt-4 space-y-2">
+                                    {unassignedStops.map(stop => (
+                                        <button
+                                            key={stop.id}
+                                            onClick={() => handleShowUnassignedStopOnMap(stop)}
+                                            className="block w-full rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent"
+                                        >
+                                           <p className='font-medium truncate'>{stop.address}</p>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        ))}
-                    </div>
+                        </PopoverContent>
+                    </Popover>
                 </div>
                 <Separator />
               </div>

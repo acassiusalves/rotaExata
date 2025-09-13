@@ -10,7 +10,7 @@ export type RouteMapHandle = {
 
 // Função para gerar o conteúdo HTML do InfoWindow
 const createInfoWindowContent = (stop: PlaceValue, index?: number): string => {
-  const address = stop.address || stop.formattedAddress || stop.addressString || '--';
+  const address = stop.address || stop.addressString || '--';
   const title = index !== undefined ? `Parada ${index + 1}` : 'Serviço Avulso';
   return `
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
