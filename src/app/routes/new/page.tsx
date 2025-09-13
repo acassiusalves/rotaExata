@@ -80,7 +80,7 @@ export default function NewRoutePage() {
     savedOrigins[0].value
   );
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
-  const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
+  const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
   const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isImporting, setIsImporting] = React.useState(false);
@@ -95,6 +95,10 @@ export default function NewRoutePage() {
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  
+  React.useEffect(() => {
+    setRouteDate(new Date());
+  }, []);
 
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
