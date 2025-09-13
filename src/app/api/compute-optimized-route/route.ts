@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     }
 
     const waypoints = stops.map((stop) => ({
-      location: { latLng: { lat: stop.lat, lng: stop.lng } },
+      location: { latLng: { latitude: stop.lat, longitude: stop.lng } },
     }));
 
     // The last stop is the destination
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
             'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
         },
         body: JSON.stringify({
-          origin: { location: { latLng: origin } },
+          origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
           destination: destination,
           intermediates: waypoints,
           travelMode: 'DRIVE',
