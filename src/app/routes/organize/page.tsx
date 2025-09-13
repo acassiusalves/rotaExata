@@ -28,9 +28,7 @@ import {
   Loader2,
   Eye,
   EyeOff,
-  Plus,
-  PackagePlus,
-  Package,
+  Pencil,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
@@ -68,13 +66,7 @@ import {
 import { RouteTimeline } from '@/components/routes/route-timeline';
 import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 import { useToast } from '@/hooks/use-toast';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
 
 
 interface RouteData {
@@ -219,6 +211,63 @@ const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
   return clusters.filter(c => c.length > 0);
 };
 
+const EditableRouteName: React.FC<{
+  name: string;
+  onChange: (newName: string) => void;
+}> = ({ name, onChange }) => {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [currentName, setCurrentName] = React.useState(name);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = () => {
+    setIsEditing(false);
+    onChange(currentName);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSave();
+    }
+    if (e.key === 'Escape') {
+      setCurrentName(name);
+      setIsEditing(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 font-medium">
+      {isEditing ? (
+        <Input
+          ref={inputRef}
+          value={currentName}
+          onChange={(e) => setCurrentName(e.target.value)}
+          onBlur={handleSave}
+          onKeyDown={handleKeyDown}
+          className="h-8"
+        />
+      ) : (
+        <>
+          <span>{name}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => setIsEditing(true)}
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+};
 
 export default function OrganizeRoutePage() {
   const router = useRouter();
@@ -226,12 +275,11 @@ export default function OrganizeRoutePage() {
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
-  const [newService, setNewService] = React.useState<PlaceValue | null>(null);
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
+  const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
@@ -364,22 +412,6 @@ export default function OrganizeRoutePage() {
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
     setter(prev => prev ? { ...prev, visible: !prev.visible } : null);
   };
-  
-  const handleAddNewService = () => {
-    if (newService) {
-      setUnassignedStops(prev => [...prev, { ...newService, id: `unassigned-${Date.now()}` }]);
-      setNewService(null);
-      setIsAddServiceDialogOpen(false);
-      toast({ title: 'Serviço Adicionado', description: 'O novo serviço está pronto para ser alocado.' });
-    }
-  };
-
-  const handleShowUnassignedStopOnMap = (stop: PlaceValue) => {
-    const id = String(stop.id ?? stop.placeId ?? "");
-    if (id) {
-        mapApiRef.current?.openStopInfo(id);
-    }
-  };
 
 
   if (isLoading && !routeData) {
@@ -421,8 +453,8 @@ export default function OrganizeRoutePage() {
   const totalDurationSeconds = durationA + durationB;
 
   const routesForTable = [
-      { key: 'A', name: 'Rota 1', data: routeA },
-      { key: 'B', name: 'Rota 2', data: routeB },
+      { key: 'A' as const, name: routeNames.A, data: routeA },
+      { key: 'B' as const, name: routeNames.B, data: routeB },
   ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data);
 
   return (
@@ -441,75 +473,24 @@ export default function OrganizeRoutePage() {
                   Otimize a sequência, atribua um motorista e salve a rota.
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                         <Button variant="outline" size="icon">
-                            <Plus className="h-4 w-4" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => setIsAddServiceDialogOpen(true)}>
-                            <PackagePlus className="mr-2 h-4 w-4" />
-                            Adicionar um serviço
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-
-                <TabsList>
-                  <TabsTrigger value="organize">
-                    <Wand2 className="mr-2 h-4 w-4" />
-                    Organizar
-                  </TabsTrigger>
-                  <TabsTrigger value="assign">
-                    <User className="mr-2 h-4 w-4" />
-                    Atribuir
-                  </TabsTrigger>
-                  <TabsTrigger value="review">
-                    <Check className="mr-2 h-4 w-4" />
-                    Revisar
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+              <TabsList>
+                <TabsTrigger value="organize">
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  Organizar
+                </TabsTrigger>
+                <TabsTrigger value="assign">
+                  <User className="mr-2 h-4 w-4" />
+                  Atribuir
+                </TabsTrigger>
+                <TabsTrigger value="review">
+                  <Check className="mr-2 h-4 w-4" />
+                  Revisar
+                </TabsTrigger>
+              </TabsList>
             </div>
           </CardHeader>
 
           <CardContent className="p-4">
-             {unassignedStops.length > 0 && (
-              <div className="mb-4">
-                <Separator />
-                <div className='p-4'>
-                    <h3 className="text-sm font-semibold mb-2">Serviços não alocados</h3>
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <button className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-lg font-bold text-muted-foreground transition-colors hover:bg-muted/80">
-                                {unassignedStops.length}
-                            </button>
-                        </PopoverTrigger>
-                        <PopoverContent className='w-96'>
-                            <div className="space-y-2">
-                                <h4 className='font-medium leading-none'>Lista de Serviços</h4>
-                                <p className='text-sm text-muted-foreground'>
-                                    Clique em um serviço para ver no mapa.
-                                </p>
-                                <div className="mt-4 space-y-2">
-                                    {unassignedStops.map(stop => (
-                                        <button
-                                            key={stop.id}
-                                            onClick={() => handleShowUnassignedStopOnMap(stop)}
-                                            className="block w-full rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                                        >
-                                           <p className='font-medium truncate'>{stop.address}</p>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
-                </div>
-                <Separator />
-              </div>
-            )}
             <TabsContent value="organize" className="m-0">
               <div className="col-span-3">
                    {isLoading ? (
@@ -539,7 +520,14 @@ export default function OrganizeRoutePage() {
                                         {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                     </Button>
                                 </TableCell>
-                                <TableCell className='font-medium'>{routeItem.name}</TableCell>
+                                <TableCell>
+                                    <EditableRouteName
+                                      name={routeItem.name}
+                                      onChange={(newName) =>
+                                        setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
+                                      }
+                                    />
+                                </TableCell>
                                 <TableCell>{routeItem.data.stops.length}</TableCell>
                                 <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
                                 <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
@@ -688,48 +676,8 @@ export default function OrganizeRoutePage() {
           </CardContent>
         </Tabs>
       </div>
-
-       <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
-        <DialogContent
-            onInteractOutside={(e) => {
-              const el = e.target as HTMLElement;
-              if (el.closest('.pac-container')) {
-                e.preventDefault();
-              }
-            }}
-            onPointerDownOutside={(e) => {
-              const el = e.target as HTMLElement;
-              if (el.closest('.pac-container')) {
-                e.preventDefault();
-              }
-            }}
-        >
-          <DialogHeader>
-            <DialogTitle>Adicionar Novo Serviço</DialogTitle>
-            <DialogDescription>
-              Busque e adicione um novo endereço que ficará disponível para ser alocado em uma rota.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <AutocompleteInput
-                id="new-service-address"
-                label="Endereço do Serviço"
-                placeholder="Pesquise o endereço..."
-                onChange={(place) => setNewService(place)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">Cancelar</Button>
-            </DialogClose>
-            <Button onClick={handleAddNewService} disabled={!newService}>
-              Salvar Serviço
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
+
+    
