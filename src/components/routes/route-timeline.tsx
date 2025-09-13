@@ -2,6 +2,7 @@
 "use client";
 
 import { Home } from 'lucide-react';
+import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { PlaceValue } from '@/lib/types';
 import {
@@ -79,16 +80,15 @@ export function RouteTimeline({ stops, color = '#888888', routeKey }: RouteTimel
 
             {/* Stops */}
             {stops.map((stop, index) => (
-                <div key={stop.id} className="flex items-center">
-                {/* Connector Line */}
-                <div
-                    key={`${stop.id}-connector`}
-                    className="h-1 w-3"
-                    style={{ backgroundColor: color }}
-                />
-                {/* Stop Box */}
-                <SortableStop stop={stop} index={index} routeKey={routeKey} />
-                </div>
+                <React.Fragment key={stop.id}>
+                    {/* Connector Line */}
+                    <div
+                        className="h-1 w-3"
+                        style={{ backgroundColor: color }}
+                    />
+                    {/* Stop Box */}
+                    <SortableStop stop={stop} index={index} routeKey={routeKey} />
+                </React.Fragment>
             ))}
         </div>
     </SortableContext>
