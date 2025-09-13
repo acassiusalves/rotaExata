@@ -59,7 +59,7 @@ const optimizeDeliveryRoutesPrompt = ai.definePrompt({
   output: {schema: OptimizeDeliveryRoutesOutputSchema},
   prompt: `You are an expert route optimization specialist for delivery drivers.
 
-Given the driver's current location and a list of delivery locations, you will determine the most efficient route to minimize travel time and distance.
+Given the driver's current location and a list of delivery locations, you will determine the route with the shortest total distance traveled as the main criterion.
 
 Driver's current location: Latitude: {{{currentLocationLat}}}, Longitude: {{{currentLocationLng}}}
 
@@ -68,7 +68,7 @@ Delivery Locations:
 - Order ID: {{{orderId}}}, Latitude: {{{lat}}}, Longitude: {{{lng}}}
 {{/each}}
 
-Consider real-time traffic data and provide the optimized routes.
+Consider real-time traffic data, but always prioritize the shortest path.
 
 Output the optimized routes as an array of objects, including the order ID, latitude, and longitude for each delivery location in the optimized order.
 Include also the estimated total travel time in minutes and the estimated total distance in kilometers.
