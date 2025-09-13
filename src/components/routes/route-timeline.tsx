@@ -24,21 +24,25 @@ interface SortableStopProps {
   color?: string;
 }
 
+function getFullAddress(stop: any) {
+  // tenta as chaves mais comuns que usamos no app
+  return (
+    stop.address ||
+    stop.formattedAddress ||
+    stop.addressString ||
+    stop?.place?.formatted_address ||
+    '--'
+  );
+}
+
 function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: stop.id,
-    data: {
-      routeKey: routeKey,
-      index: index,
-    },
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({
+      id: stop.id ?? stop.placeId ?? `${routeKey}-${index}`,
+      data: { routeKey, index },
+    });
+
+  const [open, setOpen] = React.useState(false);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -47,39 +51,41 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // Só inicia drag no pointerDown; clique simples abre o popover
   const handlePointerDown = (e: React.PointerEvent) => {
     if (isDragging) return;
-    listeners?.onPointerDown(e);
-  };
-  const handleClick = (e: React.MouseEvent) => {
-    if (isDragging) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    listeners?.onPointerDown?.(e);
   };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      className="flex items-center"
-      onClickCapture={handleClick}
-    >
-      {/* Connector Line */}
+    <div ref={setNodeRef} style={style} {...attributes} className="flex items-center">
+      {/* Conector */}
       <div className="h-1 w-3" style={{ backgroundColor: color }} />
-      {/* Stop Box wrapped in Popover */}
-      <Popover>
+
+      {/* Ponto + Popover com balão */}
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <div
-            className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
+          <button
+            type="button"
             onPointerDown={handlePointerDown}
-            {...listeners}
+            className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
           >
             {index + 1}
-          </div>
+          </button>
         </PopoverTrigger>
-        <PopoverContent className="w-80">
+
+        {/* Balão tipo “speech bubble” */}
+        <PopoverContent
+          side="top"
+          align="center"
+          className={cn(
+            'w-80 relative rounded-xl border bg-popover text-popover-foreground shadow-lg',
+            // cauda do balão
+            "after:content-[''] after:absolute after:-bottom-2 after:left-10 after:border-[10px] after:border-transparent after:border-t-background after:drop-shadow",
+            // “contorno” estilo mock (opcional)
+            'shadow-[4px_4px_0_0_rgba(0,0,0,0.2)]'
+          )}
+        >
           <div className="grid gap-4">
             <h4 className="font-medium leading-none">Detalhes da Parada</h4>
             <div className="grid gap-2 text-sm">
@@ -103,14 +109,28 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
                     : '--'}
                 </span>
               </div>
-               <div className="grid grid-cols-3 items-start gap-2">
-                <span className="text-muted-foreground col-span-1">Endereço</span>
-                <p className="col-span-2 leading-snug">{stop.address || '--'}</p>
-              </div>
+
               <div className="grid grid-cols-3 items-start gap-2">
-                <span className="text-muted-foreground col-span-1">Obs.</span>
-                <p className="col-span-2 font-medium leading-snug">{stop.notes || '--'}</p>
+                <span className="text-muted-foreground col-span-1">Endereço</span>
+                <p className="col-span-2 leading-snug break-words">
+                  {getFullAddress(stop)}
+                </p>
               </div>
+
+              <div className="grid grid-cols-3 items-start gap-2">
+                <span className="text-muted-foreground col-span-1">Observações</span>
+                <p className="col-span-2 leading-snug">{stop.notes || '--'}</p>
+              </div>
+
+              {/* Ações rápidas (opcional): copiar endereço */}
+              {getFullAddress(stop) !== '--' && (
+                <button
+                  className="justify-self-start text-xs underline text-muted-foreground hover:text-foreground"
+                  onClick={() => navigator.clipboard?.writeText(getFullAddress(stop))}
+                >
+                  Copiar endereço
+                </button>
+              )}
             </div>
           </div>
         </PopoverContent>
@@ -118,6 +138,7 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
     </div>
   );
 }
+
 
 interface RouteTimelineProps {
   stops: PlaceValue[];
@@ -133,11 +154,11 @@ export function RouteTimeline({
   if (stops.length === 0) {
     return null;
   }
-  const stopIds = stops.map((s) => s.id);
+  const stopIds = stops.map((s) => s.id ?? s.placeId ?? `${routeKey}-${stops.indexOf(s)}`);
 
   return (
     <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>
-      <div className="flex items-center">
+      <div className="flex items-center overflow-x-auto">
         {/* Home Icon */}
         <div
           className="flex h-6 w-6 items-center justify-center rounded-md"
@@ -149,7 +170,7 @@ export function RouteTimeline({
         {/* Stops */}
         {stops.map((stop, index) => (
           <SortableStop
-            key={stop.id}
+            key={stop.id ?? stop.placeId ?? index}
             stop={stop}
             index={index}
             routeKey={routeKey}

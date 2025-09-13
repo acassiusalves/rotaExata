@@ -221,7 +221,7 @@ export default function OrganizeRoutePage() {
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
     useSensor(KeyboardSensor)
   );
 
