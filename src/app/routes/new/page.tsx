@@ -13,7 +13,7 @@ import {
   Home,
   Plus,
   ArrowRight,
-  Settings2,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -45,7 +45,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
-import { Switch } from '@/components/ui/switch';
 
 const savedOrigins = [
   {
@@ -97,6 +96,7 @@ export default function NewRoutePage() {
   const { toast } = useToast();
   
   React.useEffect(() => {
+    // This runs only on the client, after hydration
     setRouteDate(new Date());
   }, []);
 
@@ -211,31 +211,63 @@ export default function NewRoutePage() {
         const data = results.data as Record<string, string>[];
 
         const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
+        const systemToCsvHeader: Record<string, string> = {};
+        for (const key in mapping) {
+            systemToCsvHeader[mapping[key]] = key;
+        }
 
-        const addressesToGeocode = data.map(row => {
-          const addressParts: Record<string, string> = {};
-          for (const header in mapping) {
-            const systemField = mapping[header];
-            if (systemField !== 'Ignorar' && row[header]) {
-              addressParts[systemField] = row[header];
+        const stopsToProcess = data.map((row, index) => {
+            const addressParts: Record<string, string> = {};
+            const otherData: Partial<PlaceValue> = {};
+
+            for (const header in mapping) {
+                const systemField = mapping[header];
+                if (systemField !== 'Ignorar' && row[header]) {
+                    if (fieldOrder.includes(systemField)) {
+                        addressParts[systemField] = row[header];
+                    }
+                }
             }
-          }
+            
+            const addressString = fieldOrder
+                .map(field => addressParts[field])
+                .filter(Boolean)
+                .join(', ') + ', Brasil';
 
-          // Assemble the address string based on a preferred order
-          return fieldOrder
-            .map(field => addressParts[field])
-            .filter(Boolean)
-            .join(', ') + ', Brasil'; // Add country for better accuracy
-        }).filter(Boolean);
+            return {
+                addressString,
+                customerName: row[systemToCsvHeader['Nome do Cliente']],
+                phone: row[systemToCsvHeader['Telefone']],
+                notes: row[systemToCsvHeader['Observações']],
+                orderNumber: row[systemToCsvHeader['Número Pedido']],
+                timeWindowStart: row[systemToCsvHeader['Início do intervalo permitido']],
+                timeWindowEnd: row[systemToCsvHeader['Fim do intervalo permitido']],
+            };
+        });
 
-        const geocodedStopsPromises = addressesToGeocode.map(addr => geocodeAddress(addr));
+        const geocodedStopsPromises = stopsToProcess.map(async (item) => {
+            const geocoded = await geocodeAddress(item.addressString);
+            if (geocoded) {
+                return {
+                    ...geocoded,
+                    customerName: item.customerName,
+                    phone: item.phone,
+                    notes: item.notes,
+                    orderNumber: item.orderNumber,
+                    timeWindowStart: item.timeWindowStart,
+                    timeWindowEnd: item.timeWindowEnd,
+                };
+            }
+            return null;
+        });
+
         const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
 
         setStops(prevStops => [...prevStops, ...newStops]);
 
         toast({
           title: 'Importação Concluída!',
-          description: `${newStops.length} de ${addressesToGeocode.length} endereços foram adicionados à rota.`,
+          description: `${newStops.length} de ${stopsToProcess.length} endereços foram adicionados à rota.`,
         });
         setIsImporting(false);
         setFileToProcess(null);
@@ -400,7 +432,15 @@ export default function NewRoutePage() {
                <div className="space-y-4">
                 {stops.map((stop, index) => (
                   <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
-                    <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
+                    <Label htmlFor={`stop-${index}`}>
+                      Parada {index + 1}
+                      {stop.customerName && (
+                        <span className="ml-2 font-normal text-muted-foreground">
+                          {stop.customerName}
+                          {stop.orderNumber && ` (${stop.orderNumber})`}
+                        </span>
+                      )}
+                    </Label>
                     <div className="flex items-center gap-2">
                       <AutocompleteInput
                         id={`stop-${index}`}
@@ -408,6 +448,40 @@ export default function NewRoutePage() {
                         value={stop}
                         onChange={(place) => handleStopChange(index, place)}
                       />
+                      <Popover>
+                        <PopoverTrigger asChild>
+                           <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                                <Info className="h-4 w-4" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className='w-80'>
+                            <div className="grid gap-4">
+                                <h4 className="font-medium leading-none">Detalhes da Parada</h4>
+                                <div className="grid gap-2 text-sm">
+                                    <div className="grid grid-cols-2 items-center gap-4">
+                                        <span className='text-muted-foreground'>Cliente</span>
+                                        <span>{stop.customerName || '--'}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 items-center gap-4">
+                                        <span className='text-muted-foreground'>Pedido Nº</span>
+                                        <span>{stop.orderNumber || '--'}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 items-center gap-4">
+                                        <span className='text-muted-foreground'>Telefone</span>
+                                        <span>{stop.phone || '--'}</span>
+                                    </div>
+                                     <div className="grid grid-cols-2 items-center gap-4">
+                                        <span className='text-muted-foreground'>Janela</span>
+                                        <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 items-center gap-2">
+                                        <span className='text-muted-foreground'>Observações</span>
+                                        <p className='leading-snug'>{stop.notes || '--'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </PopoverContent>
+                      </Popover>
                       <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -543,7 +617,8 @@ export default function NewRoutePage() {
                 placeholder="Pesquise o endereço..."
                 onChange={(place) => {
                   if (place) {
-                     setOrigin({...place, id: `${place.placeId}-${Date.now()}`});
+                     const safeId = place.id || place.placeId || `origin-${Date.now()}`;
+                     setOrigin({...place, id: String(safeId)});
                   }
                 }}
               />

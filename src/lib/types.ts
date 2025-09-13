@@ -1,3 +1,4 @@
+
 import type { LucideIcon } from 'lucide-react';
 import type { Timestamp } from 'firebase/firestore';
 
@@ -14,6 +15,13 @@ export type PlaceValue = {
   placeId: string;
   lat: number;
   lng: number;
+  // Campos adicionais da planilha
+  customerName?: string;
+  phone?: string;
+  notes?: string;
+  orderNumber?: string;
+  timeWindowStart?: string;
+  timeWindowEnd?: string;
 };
 
 export type RouteInfo = {

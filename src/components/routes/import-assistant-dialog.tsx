@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from 'react';
@@ -38,6 +39,10 @@ const availableFields = [
   'Estado',
   'CEP',
   'Telefone',
+  'Observações',
+  'Número Pedido',
+  'Início do intervalo permitido',
+  'Fim do intervalo permitido',
   'Ignorar',
 ];
 
@@ -53,13 +58,17 @@ export function ImportAssistantDialog({
     // Tenta fazer um mapeamento automático inicial
     const initialMapping: Record<string, string> = {};
     headers.forEach((header) => {
-      const foundField = availableFields.find(
-        (field) => field.toLowerCase() === header.toLowerCase()
-      );
+      const headerLower = header.toLowerCase().trim();
+      const foundField = availableFields.find((field) => {
+        if (field === 'Ignorar') return false;
+        // Mapeamento mais flexível
+        const fieldLower = field.toLowerCase().trim();
+        return headerLower.includes(fieldLower) || fieldLower.includes(headerLower);
+      });
       initialMapping[header] = foundField || 'Ignorar';
     });
     setMapping(initialMapping);
-  }, [headers]);
+  }, [headers, isOpen]); // Roda quando abre a dialog
 
   const handleMappingChange = (header: string, field: string) => {
     setMapping((prev) => ({ ...prev, [header]: field }));
