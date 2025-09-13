@@ -27,10 +27,6 @@ import {
   Milestone,
   Loader2,
   GripVertical,
-  ChevronDown,
-  ChevronUp,
-  ArrowUp,
-  ArrowDown,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
 import {
@@ -45,9 +41,23 @@ import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { RouteTimeline } from '@/components/routes/route-timeline';
-
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 
 interface RouteData {
   origin: PlaceValue;
@@ -71,7 +81,7 @@ const computeRoute = async (
       const errorText = await res.text();
       console.error('API Error:', errorText);
       throw new Error(errorText);
-    };
+    }
     const data = await res.json();
     return { ...data, stops }; // Ensure original stops are returned
   } catch (error) {
@@ -81,19 +91,51 @@ const computeRoute = async (
 };
 
 const formatDistance = (meters: number) => {
-    if (meters === 0) return '0.00';
-    return (meters / 1000).toFixed(2);
-}
+  if (meters === 0) return '0.00';
+  return (meters / 1000).toFixed(2);
+};
 
 const formatDuration = (durationString: string) => {
-    if (!durationString || durationString === '0s') return '0m';
-    const seconds = parseInt(durationString.replace('s', ''), 10);
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    if (hours > 0) {
-        return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
+  if (!durationString || durationString === '0s') return '0m';
+  const seconds = parseInt(durationString.replace('s', ''), 10);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+};
+
+
+// Sortable Item Component
+function SortableStopItem({ stop, index }: { stop: PlaceValue; index: number }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: stop.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      className="flex items-center gap-4 rounded-md border bg-background p-3"
+    >
+      <div {...listeners} className="cursor-grab text-muted-foreground">
+        <GripVertical className="h-5 w-5" />
+      </div>
+      <div className="font-mono text-sm">{index + 1}</div>
+      <div className="flex-1 text-sm">{stop.address}</div>
+    </div>
+  );
 }
 
 
@@ -105,7 +147,13 @@ export default function OrganizeRoutePage() {
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
-  const [expandedRoute, setExpandedRoute] = React.useState<'A' | 'B' | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
@@ -113,7 +161,7 @@ export default function OrganizeRoutePage() {
       const parsedData: RouteData = JSON.parse(storedData);
       setRouteData(parsedData);
 
-      const allStops = parsedData.stops.filter(s => s.placeId);
+      const allStops = parsedData.stops.filter((s) => s.placeId);
       const midPoint = Math.ceil(allStops.length / 2);
       const stopsA = allStops.slice(0, midPoint);
       const stopsB = allStops.slice(midPoint);
@@ -121,8 +169,12 @@ export default function OrganizeRoutePage() {
       const calculateRoutes = async () => {
         setIsLoading(true);
         const [computedRouteA, computedRouteB] = await Promise.all([
-          stopsA.length > 0 ? computeRoute(parsedData.origin, stopsA) : Promise.resolve(null),
-          stopsB.length > 0 ? computeRoute(parsedData.origin, stopsB) : Promise.resolve(null),
+          stopsA.length > 0
+            ? computeRoute(parsedData.origin, stopsA)
+            : Promise.resolve(null),
+          stopsB.length > 0
+            ? computeRoute(parsedData.origin, stopsB)
+            : Promise.resolve(null),
         ]);
         if (computedRouteA) {
           setRouteA({ ...computedRouteA, color: '#F44336' });
@@ -135,31 +187,40 @@ export default function OrganizeRoutePage() {
 
       calculateRoutes();
     } else {
-      console.log("No route data found in session storage.");
+      console.log('No route data found in session storage.');
       setIsLoading(false);
       // Optional: redirect back if no data
       // router.push('/routes/new');
     }
   }, [router]);
 
-  const handleReorderStop = async (routeKey: 'A' | 'B', stopIndex: number, direction: 'up' | 'down') => {
+
+  const handleDragEnd = async (event: DragEndEvent, routeKey: 'A' | 'B') => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
     const currentRoute = routeKey === 'A' ? routeA : routeB;
-    if (!currentRoute || !routeData) return;
-  
-    const stops = [...currentRoute.stops];
-    const newIndex = direction === 'up' ? stopIndex - 1 : stopIndex + 1;
-  
-    if (newIndex < 0 || newIndex >= stops.length) return;
-  
-    // Swap elements
-    [stops[stopIndex], stops[newIndex]] = [stops[newIndex], stops[stopIndex]];
-  
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
-    setter(prev => prev ? { ...prev, stops, encodedPolyline: '' } : null); // Clear polyline while re-calculating
-  
-    const newRouteInfo = await computeRoute(routeData.origin, stops);
+    if (!currentRoute || !routeData) return;
+
+    const oldIndex = currentRoute.stops.findIndex((s) => s.id === active.id);
+    const newIndex = currentRoute.stops.findIndex((s) => s.id === over.id);
+    
+    // Create new sorted array
+    const newStops = Array.from(currentRoute.stops);
+    const [movedItem] = newStops.splice(oldIndex, 1);
+    newStops.splice(newIndex, 0, movedItem);
+
+    // Update state optimistically
+    setter((prev) => (prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null));
+
+    // Recalculate route
+    const newRouteInfo = await computeRoute(routeData.origin, newStops);
     if (newRouteInfo) {
-      setter(prev => prev ? { ...prev, ...newRouteInfo, stops } : null);
+      setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: newStops } : null));
     }
   };
 
@@ -174,37 +235,38 @@ export default function OrganizeRoutePage() {
   }
 
   if (!routeData) {
-     return (
+    return (
       <div className="flex h-screen items-center justify-center">
-        <p>Nenhum dado de rota encontrado. Por favor, <a href="/routes/new" className="underline">crie uma nova rota</a>.</p>
+        <p>
+          Nenhum dado de rota encontrado. Por favor,{' '}
+          <a href="/routes/new" className="underline">
+            crie uma nova rota
+          </a>
+          .
+        </p>
       </div>
     );
   }
 
   const { origin, routeDate, routeTime } = routeData;
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
-  
-  const routesForTable = [
-      { name: "Rota A", data: routeA, key: 'A', color: "#F44336" },
-      { name: "Rota B", data: routeB, key: 'B', color: "#FF9800" }
-  ] as const;
 
   const totalStops = (routeA?.stops.length || 0) + (routeB?.stops.length || 0);
-  const totalDistance = (routeA?.distanceMeters || 0) + (routeB?.distanceMeters || 0);
-  
-  const durationA = routeA?.duration ? parseInt(routeA.duration.replace('s', '')) : 0;
-  const durationB = routeB?.duration ? parseInt(routeB.duration.replace('s', '')) : 0;
-  const totalDurationSeconds = durationA + durationB;
+  const totalDistance =
+    (routeA?.distanceMeters || 0) + (routeB?.distanceMeters || 0);
 
+  const durationA = routeA?.duration
+    ? parseInt(routeA.duration.replace('s', ''))
+    : 0;
+  const durationB = routeB?.duration
+    ? parseInt(routeB.duration.replace('s', ''))
+    : 0;
+  const totalDurationSeconds = durationA + durationB;
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
       <div className="flex-1 bg-muted">
-        <RouteMap
-          height={-1}
-          routes={combinedRoutes}
-          origin={origin}
-        />
+        <RouteMap height={-1} routes={combinedRoutes} origin={origin} />
       </div>
 
       <div className="shrink-0 border-t bg-background">
@@ -236,101 +298,76 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="col-span-3 lg:col-span-2">
-                   {isLoading ? (
-                        <div className="flex items-center justify-center h-48">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        </div>
-                    ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className='w-[150px]'>Rota</TableHead>
-                                <TableHead className="w-[80px]">Paradas</TableHead>
-                                <TableHead>Linha do Tempo</TableHead>
-                                <TableHead className="w-[120px]">Distância (km)</TableHead>
-                                <TableHead className="w-[120px]">Tempo Estimado</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                           {routesForTable.map((routeItem) => routeItem.data && (
-                            <React.Fragment key={routeItem.key}>
-                                <TableRow 
-                                    className='cursor-pointer hover:bg-muted/50'
-                                    onClick={() => setExpandedRoute(expandedRoute === routeItem.key ? null : routeItem.key)}
-                                >
-                                    <TableCell>
-                                        <div className="flex items-center gap-2">
-                                            {expandedRoute === routeItem.key ? <ChevronUp className='h-4 w-4'/> : <ChevronDown className='h-4 w-4'/>}
-                                            <GripVertical className='h-5 w-5 text-muted-foreground cursor-grab shrink-0' />
-                                            <span className="font-semibold" style={{ color: routeItem.color }}>{routeItem.name}</span>
-                                        </div>
-                                    </TableCell>
-                                    <TableCell className="text-center">{routeItem.data.stops.length}</TableCell>
-                                    <TableCell>
-                                      <RouteTimeline 
-                                        numberOfStops={routeItem.data.stops.length}
-                                        color={routeItem.color}
-                                      />
-                                    </TableCell>
-                                    <TableCell>{formatDistance(routeItem.data.distanceMeters)}</TableCell>
-                                    <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
-                                </TableRow>
-                                {expandedRoute === routeItem.key && (
-                                    <TableRow className='bg-muted/30 hover:bg-muted/40'>
-                                        <TableCell colSpan={5} className="p-0">
-                                            <div className="p-4">
-                                                <h4 className='font-semibold mb-2'>Ordem das Paradas - {routeItem.name}</h4>
-                                                <div className="rounded-md border">
-                                                    <Table>
-                                                      <TableBody>
-                                                        {routeItem.data.stops.map((stop, index) => (
-                                                            <TableRow key={stop.id} className='bg-background'>
-                                                                <TableCell className='w-12 text-center font-mono'>{index + 1}</TableCell>
-                                                                <TableCell>{stop.address}</TableCell>
-                                                                <TableCell className='w-24 text-right'>
-                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'up')} disabled={index === 0}>
-                                                                        <ArrowUp className="h-4 w-4" />
-                                                                    </Button>
-                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'down')} disabled={index === routeItem.data.stops.length - 1}>
-                                                                        <ArrowDown className="h-4 w-4" />
-                                                                    </Button>
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        ))}
-                                                      </TableBody>
-                                                    </Table>
-                                                </div>
-                                            </div>
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                              </React.Fragment>
-                            ))}
-                        </TableBody>
-                    </Table>
-                    )}
-                </div>
-                 <div className="col-span-3 lg:col-span-1 flex items-center">
-                    <div className="flex h-full flex-col justify-between rounded-lg border bg-muted/30 p-4 w-full">
-                        <div>
-                        <h4 className="font-semibold">Otimização Automática</h4>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            Deixe a IA encontrar a melhor sequência para cada rota, priorizando a menor distância.
-                        </p>
-                        </div>
-                        <Button disabled={isOptimizing} className="mt-4 w-full">
-                          {isOptimizing ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Wand2 className="mr-2 h-4 w-4" />
-                          )}
-                          {isOptimizing
-                              ? 'Otimizando...'
-                              : 'Otimizar Ambas as Rotas'}
-                        </Button>
+                  {isLoading ? (
+                    <div className="flex h-48 items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                      {routeA && (
+                         <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={(e) => handleDragEnd(e, 'A')}
+                          modifiers={[restrictToVerticalAxis]}
+                        >
+                          <div className="space-y-3">
+                            <h3 className="font-semibold text-red-600">Rota A ({routeA.stops.length} paradas)</h3>
+                             <SortableContext items={routeA.stops.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                              <div className="space-y-2">
+                                {routeA.stops.map((stop, index) => (
+                                  <SortableStopItem key={stop.id} stop={stop} index={index} />
+                                ))}
+                              </div>
+                            </SortableContext>
+                          </div>
+                        </DndContext>
+                      )}
+
+                      {routeB && (
+                         <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={(e) => handleDragEnd(e, 'B')}
+                          modifiers={[restrictToVerticalAxis]}
+                        >
+                          <div className="space-y-3">
+                            <h3 className="font-semibold text-orange-500">Rota B ({routeB.stops.length} paradas)</h3>
+                             <SortableContext items={routeB.stops.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                              <div className="space-y-2">
+                                {routeB.stops.map((stop, index) => (
+                                  <SortableStopItem key={stop.id} stop={stop} index={index} />
+                                ))}
+                              </div>
+                            </SortableContext>
+                          </div>
+                        </DndContext>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="col-span-3 lg:col-span-1 flex items-center">
+                  <div className="flex h-full w-full flex-col justify-between rounded-lg border bg-muted/30 p-4">
+                    <div>
+                      <h4 className="font-semibold">Otimização Automática</h4>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Deixe a IA encontrar a melhor sequência para cada rota,
+                        priorizando a menor distância.
+                      </p>
+                    </div>
+                    <Button disabled={isOptimizing} className="mt-4 w-full">
+                      {isOptimizing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Wand2 className="mr-2 h-4 w-4" />
+                      )}
+                      {isOptimizing
+                        ? 'Otimizando...'
+                        : 'Otimizar Ambas as Rotas'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </TabsContent>
@@ -338,9 +375,7 @@ export default function OrganizeRoutePage() {
             <TabsContent value="assign" className="m-0">
               <div className="grid grid-cols-3 gap-6">
                 <div className="col-span-2">
-                  <h4 className="mb-2 font-semibold">
-                    Selecionar Motorista
-                  </h4>
+                  <h4 className="mb-2 font-semibold">Selecionar Motorista</h4>
                   <Select>
                     <SelectTrigger>
                       <SelectValue placeholder="Escolha um motorista disponível..." />
@@ -368,14 +403,15 @@ export default function OrganizeRoutePage() {
                   </p>
                 </div>
                 <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                   <div>
+                  <div>
                     <h4 className="font-semibold">Atribuição</h4>
                     <p className="mt-1 text-sm text-muted-foreground">
-                     Atribua a rota a um motorista para iniciar o processo de entrega.
+                      Atribua a rota a um motorista para iniciar o processo de
+                      entrega.
                     </p>
                   </div>
                   <Button variant="secondary" className="w-full">
-                     <User className="mr-2 h-4 w-4" />
+                    <User className="mr-2 h-4 w-4" />
                     Atribuir Motorista
                   </Button>
                 </div>
@@ -384,22 +420,53 @@ export default function OrganizeRoutePage() {
 
             <TabsContent value="review" className="m-0">
               <div className="grid grid-cols-3 gap-6">
-                 <div className="col-span-2 space-y-4">
-                   <h4 className="font-semibold">Resumo da Rota</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" /> Data: <span className="font-semibold text-foreground">{format(new Date(routeDate), 'dd/MM/yyyy', { locale: ptBR })}</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Horário: <span className="font-semibold text-foreground">{routeTime}</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Milestone className="h-4 w-4" /> Distância Total: <span className="font-semibold text-foreground">{formatDistance(totalDistance)} km</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Tempo Estimado: <span className="font-semibold text-foreground">{formatDuration(`${totalDurationSeconds}s`)}</span></div>
-                       <div className="flex items-center gap-2 text-muted-foreground"><List className="h-4 w-4" /> Total de Paradas: <span className="font-semibold text-foreground">{totalStops}</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><User className="h-4 w-4" /> Motorista: <span className="font-semibold text-foreground">--</span></div>
+                <div className="col-span-2 space-y-4">
+                  <h4 className="font-semibold">Resumo da Rota</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Calendar className="h-4 w-4" /> Data:{' '}
+                      <span className="font-semibold text-foreground">
+                        {format(new Date(routeDate), 'dd/MM/yyyy', {
+                          locale: ptBR,
+                        })}
+                      </span>
                     </div>
-                 </div>
-                 <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                   <div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Clock className="h-4 w-4" /> Horário:{' '}
+                      <span className="font-semibold text-foreground">
+                        {routeTime}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Milestone className="h-4 w-4" /> Distância Total:{' '}
+                      <span className="font-semibold text-foreground">
+                        {formatDistance(totalDistance)} km
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Clock className="h-4 w-4" /> Tempo Estimado:{' '}
+                      <span className="font-semibold text-foreground">
+                        {formatDuration(`${totalDurationSeconds}s`)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <List className="h-4 w-4" /> Total de Paradas:{' '}
+                      <span className="font-semibold text-foreground">
+                        {totalStops}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <User className="h-4 w-4" /> Motorista:{' '}
+                      <span className="font-semibold text-foreground">--</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
+                  <div>
                     <h4 className="font-semibold">Finalizar</h4>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Após revisar, salve a rota para enviá-la ao motorista e iniciar o monitoramento.
+                      Após revisar, salve a rota para enviá-la ao motorista e
+                      iniciar o monitoramento.
                     </p>
                   </div>
                   <Button className="w-full">
