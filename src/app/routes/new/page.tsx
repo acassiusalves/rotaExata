@@ -132,7 +132,7 @@ export default function NewRoutePage() {
   };
 
   const handleAddStop = () => {
-    const newId = `manual-${Date.now()}`;
+    const newId = `manual-stop-${Date.now()}`;
     setStops([...stops, { id: newId } as PlaceValue]);
   };
 
@@ -251,8 +251,11 @@ export default function NewRoutePage() {
 
         const fieldOrder = ['Rua', 'Número', 'Bairro', 'Município', 'Estado', 'CEP'];
         const systemToCsvHeader: Record<string, string> = {};
-        for (const key in mapping) {
-            systemToCsvHeader[mapping[key]] = key;
+        for (const header in mapping) {
+          const systemField = mapping[header];
+          if (systemField !== 'Ignorar') {
+            systemToCsvHeader[systemField] = header;
+          }
         }
 
         const stopsToProcess = data.map((row, index) => {
@@ -271,7 +274,7 @@ export default function NewRoutePage() {
                 .map(field => addressParts[field])
                 .filter(Boolean)
                 .join(', ') + ', Brasil';
-
+            
             return {
                 addressString,
                 customerName: row[systemToCsvHeader['Nome do Cliente']],
@@ -476,8 +479,8 @@ export default function NewRoutePage() {
                       Parada {index + 1}
                       {stop.customerName && (
                         <span className="ml-2 font-normal text-muted-foreground">
-                          {stop.customerName}
-                          {stop.orderNumber && ` (${stop.orderNumber})`}
+                          - {stop.customerName}
+                          {stop.orderNumber && ` (#${stop.orderNumber})`}
                         </span>
                       )}
                     </Label>
@@ -677,3 +680,5 @@ export default function NewRoutePage() {
     </>
   );
 }
+
+    
