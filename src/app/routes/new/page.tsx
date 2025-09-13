@@ -51,6 +51,7 @@ const savedOrigins = [
     id: 'origin-1',
     name: 'Sol de Maria',
     value: {
+      id: 'saved-origin-1',
       address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
       placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
       lat: -16.6786,
@@ -61,6 +62,7 @@ const savedOrigins = [
     id: 'origin-2',
     name: 'InvesteAqui',
     value: {
+      id: 'saved-origin-2',
       address: 'Rua da Alfandega, 200, Bras, Sao paulo, SP, Brasil',
       placeId: 'ChIJR9QCMf5ZzpQR4iS2PS52rCk',
       lat: -23.5410,
@@ -68,6 +70,8 @@ const savedOrigins = [
     },
   },
 ];
+
+let stopIdCounter = 0;
 
 export default function NewRoutePage() {
   const router = useRouter();
@@ -97,7 +101,7 @@ export default function NewRoutePage() {
   };
 
   const handleAddStop = () => {
-    setStops([...stops, {} as PlaceValue]);
+    setStops([...stops, { id: `manual-${stopIdCounter++}` } as PlaceValue]);
   };
 
   const handleRemoveStop = (index: number) => {
@@ -108,7 +112,7 @@ export default function NewRoutePage() {
   const handleStopChange = (index: number, place: PlaceValue | null) => {
     const newStops = [...stops];
     if (place) {
-      newStops[index] = place;
+      newStops[index] = { ...newStops[index], ...place }; // Preserve the ID
       setStops(newStops);
     }
   };
@@ -123,6 +127,7 @@ export default function NewRoutePage() {
               const place = results[0];
               const location = place.geometry.location;
               resolve({
+                id: `geocoded-${place.place_id}-${Date.now()}`,
                 address: place.formatted_address,
                 placeId: place.place_id,
                 lat: location.lat(),
@@ -261,7 +266,7 @@ export default function NewRoutePage() {
     // Save data to session storage to pass to the next page
     const routeData = {
       origin,
-      stops,
+      stops: stops.filter(s => s.placeId), // Ensure we only pass valid stops
       routeDate: routeDate?.toISOString(),
       routeTime,
     };
@@ -387,7 +392,7 @@ export default function NewRoutePage() {
               <Separator />
                <div className="space-y-4">
                 {stops.map((stop, index) => (
-                  <div key={index} className="space-y-2">
+                  <div key={stop.id} className="space-y-2">
                     <Label htmlFor={`stop-${index}`}>Parada {index + 1}</Label>
                     <div className="flex items-center gap-2">
                       <AutocompleteInput

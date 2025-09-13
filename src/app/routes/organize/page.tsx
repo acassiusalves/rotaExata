@@ -24,11 +24,13 @@ import {
   Truck,
   Calendar,
   Clock,
-  Map,
   Milestone,
   Loader2,
-  Eye,
   GripVertical,
+  ChevronDown,
+  ChevronUp,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
 import {
@@ -45,6 +47,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RouteTimeline } from '@/components/routes/route-timeline';
+import { cn } from '@/lib/utils';
 
 
 interface RouteData {
@@ -66,7 +69,8 @@ const computeRoute = async (
       body: JSON.stringify({ origin, stops }),
     });
     if (!res.ok) throw new Error(await res.text());
-    return await res.json();
+    const data = await res.json();
+    return { ...data, stops }; // Ensure original stops are returned
   } catch (error) {
     console.error('Failed to compute route:', error);
     return null;
@@ -98,6 +102,7 @@ export default function OrganizeRoutePage() {
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
+  const [expandedRoute, setExpandedRoute] = React.useState<'A' | 'B' | null>(null);
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
@@ -127,12 +132,32 @@ export default function OrganizeRoutePage() {
 
       calculateRoutes();
     } else {
-      // For development, you might want to redirect, but for now, let's log it.
-      // router.push('/routes/new');
       console.log("No route data found in session storage.");
       setIsLoading(false);
     }
   }, [router]);
+
+  const handleReorderStop = async (routeKey: 'A' | 'B', stopIndex: number, direction: 'up' | 'down') => {
+    const currentRoute = routeKey === 'A' ? routeA : routeB;
+    if (!currentRoute || !routeData) return;
+  
+    const stops = [...currentRoute.stops];
+    const newIndex = direction === 'up' ? stopIndex - 1 : stopIndex + 1;
+  
+    if (newIndex < 0 || newIndex >= stops.length) return;
+  
+    // Swap elements
+    [stops[stopIndex], stops[newIndex]] = [stops[newIndex], stops[stopIndex]];
+  
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+    setter(prev => prev ? { ...prev, stops, encodedPolyline: '' } : null); // Clear polyline while re-calculating
+  
+    const newRouteInfo = await computeRoute(routeData.origin, stops);
+    if (newRouteInfo) {
+      setter(prev => prev ? { ...prev, ...newRouteInfo, stops } : null);
+    }
+  };
+
 
   if (isLoading && !routeData) {
     return (
@@ -151,13 +176,18 @@ export default function OrganizeRoutePage() {
     );
   }
 
-  const { origin, stops, routeDate, routeTime } = routeData;
+  const { origin, routeDate, routeTime } = routeData;
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
   
   const routesForTable = [
-      { name: "Rota A", data: routeA, color: "#F44336" },
-      { name: "Rota B", data: routeB, color: "#FF9800" }
-  ];
+      { name: "Rota A", data: routeA, key: 'A', color: "#F44336" },
+      { name: "Rota B", data: routeB, key: 'B', color: "#FF9800" }
+  ] as const;
+
+  const totalStops = (routeA?.stops.length || 0) + (routeB?.stops.length || 0);
+  const totalDistance = (routeA?.distanceMeters || 0) + (routeB?.distanceMeters || 0);
+  const totalDurationSeconds = (parseInt(routeA?.duration || '0s') + parseInt(routeB?.duration || '0s'));
+
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
@@ -208,7 +238,7 @@ export default function OrganizeRoutePage() {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead className='w-[120px]'>Rota</TableHead>
+                                <TableHead className='w-[150px]'>Rota</TableHead>
                                 <TableHead className="w-[80px]">Paradas</TableHead>
                                 <TableHead>Linha do Tempo</TableHead>
                                 <TableHead className="w-[120px]">Distância (km)</TableHead>
@@ -216,11 +246,15 @@ export default function OrganizeRoutePage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                           {routesForTable.map((routeItem, index) => routeItem.data && (
-                                <TableRow key={index}>
+                           {routesForTable.map((routeItem) => routeItem.data && (
+                            <React.Fragment key={routeItem.key}>
+                                <TableRow 
+                                    className='cursor-pointer hover:bg-muted/50'
+                                    onClick={() => setExpandedRoute(expandedRoute === routeItem.key ? null : routeItem.key)}
+                                >
                                     <TableCell>
                                         <div className="flex items-center gap-2">
-                                            <Button variant="ghost" size="icon" className='h-8 w-8 shrink-0'><Eye className='h-4 w-4' /></Button>
+                                            {expandedRoute === routeItem.key ? <ChevronUp className='h-4 w-4'/> : <ChevronDown className='h-4 w-4'/>}
                                             <GripVertical className='h-5 w-5 text-muted-foreground cursor-grab shrink-0' />
                                             <span className="font-semibold" style={{ color: routeItem.color }}>{routeItem.name}</span>
                                         </div>
@@ -235,6 +269,34 @@ export default function OrganizeRoutePage() {
                                     <TableCell>{formatDistance(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
                                 </TableRow>
+                                {expandedRoute === routeItem.key && (
+                                    <TableRow className='bg-muted/30 hover:bg-muted/40'>
+                                        <TableCell colSpan={5} className="p-0">
+                                            <div className="p-4">
+                                                <h4 className='font-semibold mb-2'>Ordem das Paradas - {routeItem.name}</h4>
+                                                <div className="rounded-md border">
+                                                    <Table>
+                                                        {routeItem.data.stops.map((stop, index) => (
+                                                            <TableRow key={stop.id} className='bg-background'>
+                                                                <TableCell className='w-12 text-center font-mono'>{index + 1}</TableCell>
+                                                                <TableCell>{stop.address}</TableCell>
+                                                                <TableCell className='w-24 text-right'>
+                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'up')} disabled={index === 0}>
+                                                                        <ArrowUp className="h-4 w-4" />
+                                                                    </Button>
+                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'down')} disabled={index === routeItem.data!.stops.length - 1}>
+                                                                        <ArrowDown className="h-4 w-4" />
+                                                                    </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </Table>
+                                                </div>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                              </React.Fragment>
                             ))}
                         </TableBody>
                     </Table>
@@ -317,9 +379,9 @@ export default function OrganizeRoutePage() {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" /> Data: <span className="font-semibold text-foreground">{format(new Date(routeDate), 'dd/MM/yyyy', { locale: ptBR })}</span></div>
                       <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Horário: <span className="font-semibold text-foreground">{routeTime}</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Milestone className="h-4 w-4" /> Distância Total: <span className="font-semibold text-foreground">-- km</span></div>
-                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Tempo Estimado: <span className="font-semibold text-foreground">-- min</span></div>
-                       <div className="flex items-center gap-2 text-muted-foreground"><List className="h-4 w-4" /> Total de Paradas: <span className="font-semibold text-foreground">{stops.length}</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Milestone className="h-4 w-4" /> Distância Total: <span className="font-semibold text-foreground">{formatDistance(totalDistance)} km</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-4 w-4" /> Tempo Estimado: <span className="font-semibold text-foreground">{formatDuration(`${totalDurationSeconds}s`)}</span></div>
+                       <div className="flex items-center gap-2 text-muted-foreground"><List className="h-4 w-4" /> Total de Paradas: <span className="font-semibold text-foreground">{totalStops}</span></div>
                       <div className="flex items-center gap-2 text-muted-foreground"><User className="h-4 w-4" /> Motorista: <span className="font-semibold text-foreground">--</span></div>
                     </div>
                  </div>

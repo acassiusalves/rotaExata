@@ -9,6 +9,7 @@ export type NavItem = {
 };
 
 export type PlaceValue = {
+  id: string;
   address: string;
   placeId: string;
   lat: number;
