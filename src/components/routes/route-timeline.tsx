@@ -63,7 +63,6 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
       className="flex items-center"
       onClickCapture={handleClick}
     >
@@ -75,6 +74,7 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
           <div
             className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
             onPointerDown={handlePointerDown}
+            {...listeners}
           >
             {index + 1}
           </div>
