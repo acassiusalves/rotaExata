@@ -42,8 +42,6 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
       data: { routeKey, index },
     });
 
-  const [open, setOpen] = React.useState(false);
-
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -51,41 +49,41 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Só inicia drag no pointerDown; clique simples abre o popover
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (isDragging) return;
-    listeners?.onPointerDown?.(e);
-  };
-
   return (
     <div ref={setNodeRef} style={style} {...attributes} className="flex items-center">
       {/* Conector */}
       <div className="h-1 w-3" style={{ backgroundColor: color }} />
 
-      {/* Ponto + Popover com balão */}
-      <Popover open={open} onOpenChange={setOpen}>
+      {/* Ponto + Popover */}
+      <Popover>
+        {/* O TRIGGER é um wrapper; NÃO colocamos listeners nele */}
         <PopoverTrigger asChild>
-          <button
-            type="button"
-            onPointerDown={handlePointerDown}
-            className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
-          >
+          <div className="relative flex h-6 w-6 items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700">
             {index + 1}
-          </button>
+
+            {/* HANDLE DE ARRASTE (lado direito do ponto) */}
+            <span
+              // área ~ metade direita do círculo; ajuste se quiser menor
+              className="absolute right-0 top-0 h-6 w-3 cursor-grab active:cursor-grabbing"
+              // impede que o clique do handle abra o popover
+              onClick={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                // passa o evento para o dnd-kit iniciar o arraste
+                listeners?.onPointerDown?.(e as any);
+              }}
+              // importante para Pointer events em touch
+              style={{ touchAction: 'none' }}
+              aria-label="Arrastar parada"
+              title="Arrastar"
+            />
+          </div>
         </PopoverTrigger>
 
-        {/* Balão tipo “speech bubble” */}
-        <PopoverContent
-          side="top"
-          align="center"
-          className={cn(
-            'w-80 relative rounded-xl border bg-popover text-popover-foreground shadow-lg',
-            // cauda do balão
-            "after:content-[''] after:absolute after:-bottom-2 after:left-10 after:border-[10px] after:border-transparent after:border-t-background after:drop-shadow",
-            // “contorno” estilo mock (opcional)
-            'shadow-[4px_4px_0_0_rgba(0,0,0,0.2)]'
-          )}
-        >
+        <PopoverContent side="top" align="center" className={cn(
+          'w-80 relative rounded-xl border bg-popover text-popover-foreground shadow-lg',
+          "after:content-[''] after:absolute after:-bottom-2 after:left-10 after:border-[10px] after:border-transparent after:border-t-background"
+        )}>
           <div className="grid gap-4">
             <h4 className="font-medium leading-none">Detalhes da Parada</h4>
             <div className="grid gap-2 text-sm">
@@ -104,33 +102,19 @@ function SortableStop({ stop, index, routeKey, color }: SortableStopProps) {
               <div className="grid grid-cols-3 items-center gap-2">
                 <span className="text-muted-foreground col-span-1">Janela</span>
                 <span className="col-span-2">
-                  {stop.timeWindowStart && stop.timeWindowEnd
-                    ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}`
-                    : '--'}
+                  {stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}
                 </span>
               </div>
-
               <div className="grid grid-cols-3 items-start gap-2">
                 <span className="text-muted-foreground col-span-1">Endereço</span>
                 <p className="col-span-2 leading-snug break-words">
-                  {getFullAddress(stop)}
+                  {stop.address || stop.formattedAddress || stop.addressString || stop?.place?.formatted_address || '--'}
                 </p>
               </div>
-
               <div className="grid grid-cols-3 items-start gap-2">
                 <span className="text-muted-foreground col-span-1">Observações</span>
                 <p className="col-span-2 leading-snug">{stop.notes || '--'}</p>
               </div>
-
-              {/* Ações rápidas (opcional): copiar endereço */}
-              {getFullAddress(stop) !== '--' && (
-                <button
-                  className="justify-self-start text-xs underline text-muted-foreground hover:text-foreground"
-                  onClick={() => navigator.clipboard?.writeText(getFullAddress(stop))}
-                >
-                  Copiar endereço
-                </button>
-              )}
             </div>
           </div>
         </PopoverContent>
