@@ -29,6 +29,8 @@ import {
   Map,
   Milestone,
   Loader2,
+  Eye,
+  GripVertical,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,6 +46,8 @@ import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
 
 interface RouteData {
   origin: PlaceValue;
@@ -70,6 +74,22 @@ const computeRoute = async (
     return null;
   }
 };
+
+const formatDistance = (meters: number) => {
+    return (meters / 1000).toFixed(2);
+}
+
+const formatDuration = (durationString: string) => {
+    if (!durationString) return '0m';
+    const seconds = parseInt(durationString.replace('s', ''), 10);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+}
+
 
 export default function OrganizeRoutePage() {
   const router = useRouter();
@@ -122,6 +142,11 @@ export default function OrganizeRoutePage() {
 
   const { origin, stops, routeDate, routeTime } = routeData;
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
+  
+  const routesForTable = [
+      { name: "Rota A", data: routeA, color: "text-[#F44336]" },
+      { name: "Rota B", data: routeB, color: "text-[#FF9800]" }
+  ];
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
@@ -162,64 +187,56 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="space-y-4">
-                  <div className="flex h-full flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                    <div>
-                      <h4 className="font-semibold">Otimização Automática</h4>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Deixe a IA encontrar a melhor sequência para cada rota.
-                      </p>
-                    </div>
-                    <Button disabled={isOptimizing} className="mt-4 w-full">
-                      <Wand2 className="mr-2 h-4 w-4" />
-                      {isOptimizing
-                        ? 'Otimizando...'
-                        : 'Otimizar Ambas as Rotas'}
-                    </Button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                    {isLoading ? (
-                        <div className="col-span-2 flex items-center justify-center h-40">
+               <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                <div className="col-span-3 md:col-span-2">
+                   {isLoading ? (
+                        <div className="flex items-center justify-center h-40">
                             <Loader2 className="h-8 w-8 animate-spin text-primary" />
                         </div>
                     ) : (
-                        <>
-                        <div>
-                        <h4 className="mb-2 font-semibold text-center text-[#F44336]">Rota A</h4>
-                        <ScrollArea className="h-40 rounded-md border">
-                            <div className="p-4">
-                            <p className="text-sm">
-                                <span className="font-bold">O.</span> {origin.address.split(',')[0]}
-                            </p>
-                            {routeA?.stops.map((stop, index) => (
-                                <p key={index} className="mt-2 text-sm">
-                                <span className="font-bold">{index + 1}.</span>{' '}
-                                {stop.address.split(',')[0]}
-                                </p>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className='w-[140px]'>Rota</TableHead>
+                                <TableHead>Paradas</TableHead>
+                                <TableHead>Distância (km)</TableHead>
+                                <TableHead>Tempo Estimado</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                           {routesForTable.map((routeItem, index) => routeItem.data && (
+                                <TableRow key={index}>
+                                    <TableCell>
+                                        <div className="flex items-center gap-3">
+                                            <Button variant="ghost" size="icon" className='h-8 w-8'><Eye className='h-4 w-4' /></Button>
+                                            <GripVertical className='h-5 w-5 text-muted-foreground cursor-grab' />
+                                            <span className={`font-semibold ${routeItem.color}`}>{routeItem.name}</span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>{routeItem.data.stops.length}</TableCell>
+                                    <TableCell>{formatDistance(routeItem.data.distanceMeters)}</TableCell>
+                                    <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
+                                </TableRow>
                             ))}
-                            </div>
-                        </ScrollArea>
-                    </div>
-                     <div>
-                        <h4 className="mb-2 font-semibold text-center text-[#FF9800]">Rota B</h4>
-                        <ScrollArea className="h-40 rounded-md border">
-                            <div className="p-4">
-                            <p className="text-sm">
-                                <span className="font-bold">O.</span> {origin.address.split(',')[0]}
-                            </p>
-                            {routeB?.stops.map((stop, index) => (
-                                <p key={index} className="mt-2 text-sm">
-                                <span className="font-bold">{index + 1}.</span>{' '}
-                                {stop.address.split(',')[0]}
-                                </p>
-                            ))}
-                            </div>
-                        </ScrollArea>
-                    </div>
-                    </>
+                        </TableBody>
+                    </Table>
                     )}
+                </div>
+                 <div className="col-span-3 md:col-span-1 flex items-center">
+                    <div className="flex h-full flex-col justify-between rounded-lg border bg-muted/30 p-4 w-full">
+                        <div>
+                        <h4 className="font-semibold">Otimização Automática</h4>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Deixe a IA encontrar a melhor sequência para cada rota, priorizando a menor distância.
+                        </p>
+                        </div>
+                        <Button disabled={isOptimizing} className="mt-4 w-full">
+                        <Wand2 className="mr-2 h-4 w-4" />
+                        {isOptimizing
+                            ? 'Otimizando...'
+                            : 'Otimizar Ambas as Rotas'}
+                        </Button>
+                    </div>
                 </div>
               </div>
             </TabsContent>
