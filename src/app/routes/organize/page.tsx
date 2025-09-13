@@ -16,8 +16,6 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import {
   List,
   Wand2,
@@ -33,7 +31,6 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -47,6 +44,7 @@ import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { RouteTimeline } from '@/components/routes/route-timeline';
 
 
 interface RouteData {
@@ -76,6 +74,7 @@ const computeRoute = async (
 };
 
 const formatDistance = (meters: number) => {
+    if (meters === 0) return '0.00';
     return (meters / 1000).toFixed(2);
 }
 
@@ -106,7 +105,7 @@ export default function OrganizeRoutePage() {
       const parsedData: RouteData = JSON.parse(storedData);
       setRouteData(parsedData);
 
-      const allStops = parsedData.stops;
+      const allStops = parsedData.stops.filter(s => s.placeId);
       const midPoint = Math.ceil(allStops.length / 2);
       const stopsA = allStops.slice(0, midPoint);
       const stopsB = allStops.slice(midPoint);
@@ -114,8 +113,8 @@ export default function OrganizeRoutePage() {
       const calculateRoutes = async () => {
         setIsLoading(true);
         const [computedRouteA, computedRouteB] = await Promise.all([
-          computeRoute(parsedData.origin, stopsA),
-          computeRoute(parsedData.origin, stopsB),
+          stopsA.length > 0 ? computeRoute(parsedData.origin, stopsA) : Promise.resolve(null),
+          stopsB.length > 0 ? computeRoute(parsedData.origin, stopsB) : Promise.resolve(null),
         ]);
         if (computedRouteA) {
           setRouteA({ ...computedRouteA, color: '#F44336' });
@@ -128,14 +127,26 @@ export default function OrganizeRoutePage() {
 
       calculateRoutes();
     } else {
-      router.push('/routes/new');
+      // For development, you might want to redirect, but for now, let's log it.
+      // router.push('/routes/new');
+      console.log("No route data found in session storage.");
+      setIsLoading(false);
     }
   }, [router]);
 
-  if (!routeData) {
+  if (isLoading && !routeData) {
     return (
       <div className="flex h-screen items-center justify-center">
-        Carregando dados da rota...
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-4">Carregando dados da rota...</span>
+      </div>
+    );
+  }
+
+  if (!routeData) {
+     return (
+      <div className="flex h-screen items-center justify-center">
+        <p>Nenhum dado de rota encontrado. Por favor, <a href="/routes/new" className="underline">crie uma nova rota</a>.</p>
       </div>
     );
   }
@@ -144,8 +155,8 @@ export default function OrganizeRoutePage() {
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
   
   const routesForTable = [
-      { name: "Rota A", data: routeA, color: "text-[#F44336]" },
-      { name: "Rota B", data: routeB, color: "text-[#FF9800]" }
+      { name: "Rota A", data: routeA, color: "#F44336" },
+      { name: "Rota B", data: routeB, color: "#FF9800" }
   ];
 
   return (
@@ -187,33 +198,40 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-               <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-                <div className="col-span-3 md:col-span-2">
+               <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div className="col-span-3 lg:col-span-2">
                    {isLoading ? (
-                        <div className="flex items-center justify-center h-40">
+                        <div className="flex items-center justify-center h-48">
                             <Loader2 className="h-8 w-8 animate-spin text-primary" />
                         </div>
                     ) : (
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead className='w-[140px]'>Rota</TableHead>
-                                <TableHead>Paradas</TableHead>
-                                <TableHead>Distância (km)</TableHead>
-                                <TableHead>Tempo Estimado</TableHead>
+                                <TableHead className='w-[120px]'>Rota</TableHead>
+                                <TableHead className="w-[80px]">Paradas</TableHead>
+                                <TableHead>Linha do Tempo</TableHead>
+                                <TableHead className="w-[120px]">Distância (km)</TableHead>
+                                <TableHead className="w-[120px]">Tempo Estimado</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                            {routesForTable.map((routeItem, index) => routeItem.data && (
                                 <TableRow key={index}>
                                     <TableCell>
-                                        <div className="flex items-center gap-3">
-                                            <Button variant="ghost" size="icon" className='h-8 w-8'><Eye className='h-4 w-4' /></Button>
-                                            <GripVertical className='h-5 w-5 text-muted-foreground cursor-grab' />
-                                            <span className={`font-semibold ${routeItem.color}`}>{routeItem.name}</span>
+                                        <div className="flex items-center gap-2">
+                                            <Button variant="ghost" size="icon" className='h-8 w-8 shrink-0'><Eye className='h-4 w-4' /></Button>
+                                            <GripVertical className='h-5 w-5 text-muted-foreground cursor-grab shrink-0' />
+                                            <span className="font-semibold" style={{ color: routeItem.color }}>{routeItem.name}</span>
                                         </div>
                                     </TableCell>
-                                    <TableCell>{routeItem.data.stops.length}</TableCell>
+                                    <TableCell className="text-center">{routeItem.data.stops.length}</TableCell>
+                                    <TableCell>
+                                      <RouteTimeline 
+                                        numberOfStops={routeItem.data.stops.length}
+                                        color={routeItem.color}
+                                      />
+                                    </TableCell>
                                     <TableCell>{formatDistance(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
                                 </TableRow>
@@ -222,7 +240,7 @@ export default function OrganizeRoutePage() {
                     </Table>
                     )}
                 </div>
-                 <div className="col-span-3 md:col-span-1 flex items-center">
+                 <div className="col-span-3 lg:col-span-1 flex items-center">
                     <div className="flex h-full flex-col justify-between rounded-lg border bg-muted/30 p-4 w-full">
                         <div>
                         <h4 className="font-semibold">Otimização Automática</h4>
@@ -231,10 +249,14 @@ export default function OrganizeRoutePage() {
                         </p>
                         </div>
                         <Button disabled={isOptimizing} className="mt-4 w-full">
-                        <Wand2 className="mr-2 h-4 w-4" />
-                        {isOptimizing
-                            ? 'Otimizando...'
-                            : 'Otimizar Ambas as Rotas'}
+                          {isOptimizing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Wand2 className="mr-2 h-4 w-4" />
+                          )}
+                          {isOptimizing
+                              ? 'Otimizando...'
+                              : 'Otimizar Ambas as Rotas'}
                         </Button>
                     </div>
                 </div>
