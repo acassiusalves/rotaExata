@@ -854,11 +854,11 @@ export default function NewRoutePage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
-            <div className="col-span-2 space-y-2">
+            <div className="space-y-2">
                 <Label htmlFor="customerName">Nome do Cliente</Label>
                 <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="phone">Telefone</Label>
                     <Input id="phone" value={manualService.phone} onChange={handleManualServiceChange} placeholder="(00) 90000-0000" />
@@ -868,7 +868,7 @@ export default function NewRoutePage() {
                     <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
                 </div>
             </div>
-             <div className="col-span-2 space-y-2 mt-4">
+             <div className="space-y-2">
                 <Label htmlFor="locationLink">Link Localização (Google Maps)</Label>
                 <Input id="locationLink" value={manualService.locationLink} onChange={handleManualServiceChange} placeholder="Cole o link do Google Maps aqui" />
             </div>
@@ -877,7 +877,7 @@ export default function NewRoutePage() {
                 <Label htmlFor="rua">Rua</Label>
                 <Input id="rua" value={manualService.rua} onChange={handleManualServiceChange} placeholder="Avenida, Rua, etc." />
             </div>
-            <div className="grid grid-cols-3 gap-4 mt-4">
+            <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-1 space-y-2">
                     <Label htmlFor="numero">Número</Label>
                     <Input id="numero" value={manualService.numero} onChange={handleManualServiceChange} placeholder="123" />
@@ -887,7 +887,7 @@ export default function NewRoutePage() {
                     <Input id="complemento" value={manualService.complemento} onChange={handleManualServiceChange} placeholder="Apto, Bloco, etc." />
                 </div>
             </div>
-             <div className="grid grid-cols-2 gap-4 mt-4">
+             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="bairro">Bairro</Label>
                     <Input id="bairro" value={manualService.bairro} onChange={handleManualServiceChange} placeholder="Setor, Bairro" />
@@ -897,7 +897,7 @@ export default function NewRoutePage() {
                     <Input id="cidade" value={manualService.cidade} onChange={handleManualServiceChange} placeholder="Goiânia" />
                 </div>
             </div>
-            <div className="space-y-2 mt-4">
+            <div className="space-y-2">
                 <Label htmlFor="notes">Observações</Label>
                 <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
             </div>
