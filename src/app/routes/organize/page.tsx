@@ -28,6 +28,7 @@ import {
   Clock,
   Map,
   Milestone,
+  Loader2,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -39,7 +40,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { drivers } from '@/lib/data';
-import type { PlaceValue } from '@/lib/types';
+import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -51,34 +52,67 @@ interface RouteData {
   routeTime: string;
 }
 
+const computeRoute = async (
+  origin: PlaceValue,
+  stops: PlaceValue[]
+): Promise<RouteInfo | null> => {
+  if (stops.length === 0) return null;
+  try {
+    const res = await fetch('/api/compute-optimized-route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin, stops }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  } catch (error) {
+    console.error('Failed to compute route:', error);
+    return null;
+  }
+};
+
 export default function OrganizeRoutePage() {
   const router = useRouter();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
 
-  const [routeAStops, setRouteAStops] = React.useState<PlaceValue[]>([]);
-  const [routeBStops, setRouteBStops] = React.useState<PlaceValue[]>([]);
+  const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
+  const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
       setRouteData(parsedData);
-      
-      // Dividir as paradas em duas rotas
+
       const allStops = parsedData.stops;
       const midPoint = Math.ceil(allStops.length / 2);
-      setRouteAStops(allStops.slice(0, midPoint));
-      setRouteBStops(allStops.slice(midPoint));
+      const stopsA = allStops.slice(0, midPoint);
+      const stopsB = allStops.slice(midPoint);
 
+      const calculateRoutes = async () => {
+        setIsLoading(true);
+        const [computedRouteA, computedRouteB] = await Promise.all([
+          computeRoute(parsedData.origin, stopsA),
+          computeRoute(parsedData.origin, stopsB),
+        ]);
+        if (computedRouteA) {
+          setRouteA({ ...computedRouteA, color: '#F44336' });
+        }
+        if (computedRouteB) {
+          setRouteB({ ...computedRouteB, color: '#FF9800' });
+        }
+        setIsLoading(false);
+      };
+
+      calculateRoutes();
     } else {
-      // If no data, maybe redirect back or show a message
       router.push('/routes/new');
     }
   }, [router]);
 
   if (!routeData) {
-    // You can show a loading spinner here
     return (
       <div className="flex h-screen items-center justify-center">
         Carregando dados da rota...
@@ -87,19 +121,18 @@ export default function OrganizeRoutePage() {
   }
 
   const { origin, stops, routeDate, routeTime } = routeData;
+  const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r);
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
-      {/* Mapa na parte superior */}
       <div className="flex-1 bg-muted">
         <RouteMap
-          height={-1} // -1 for 100% height
+          height={-1}
+          routes={combinedRoutes}
           origin={origin}
-          stops={stops} // Passar todas as paradas para o mapa
         />
       </div>
 
-      {/* Painel de controle na parte inferior */}
       <div className="shrink-0 border-t bg-background">
         <Tabs defaultValue="organize" className="w-full">
           <CardHeader className="p-4 pb-0">
@@ -129,32 +162,38 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                {/* Coluna de Ações e Lista de Paradas */}
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div className="space-y-4">
-                   <div className="flex flex-col justify-between rounded-lg border bg-muted/30 p-4 h-full">
-                     <div>
-                       <h4 className="font-semibold">Otimização Automática</h4>
-                       <p className="mt-1 text-sm text-muted-foreground">
-                         Deixe a IA encontrar a melhor sequência para cada rota.
-                       </p>
-                     </div>
-                     <Button disabled={isOptimizing} className="w-full mt-4">
-                       <Wand2 className="mr-2 h-4 w-4" />
-                       {isOptimizing ? 'Otimizando...' : 'Otimizar Ambas as Rotas'}
-                     </Button>
-                   </div>
-                 </div>
-                {/* Coluna com as duas rotas */}
-                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex h-full flex-col justify-between rounded-lg border bg-muted/30 p-4">
                     <div>
-                        <h4 className="mb-2 font-semibold text-center">Rota A</h4>
+                      <h4 className="font-semibold">Otimização Automática</h4>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Deixe a IA encontrar a melhor sequência para cada rota.
+                      </p>
+                    </div>
+                    <Button disabled={isOptimizing} className="mt-4 w-full">
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      {isOptimizing
+                        ? 'Otimizando...'
+                        : 'Otimizar Ambas as Rotas'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    {isLoading ? (
+                        <div className="col-span-2 flex items-center justify-center h-40">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        </div>
+                    ) : (
+                        <>
+                        <div>
+                        <h4 className="mb-2 font-semibold text-center text-[#F44336]">Rota A</h4>
                         <ScrollArea className="h-40 rounded-md border">
                             <div className="p-4">
                             <p className="text-sm">
                                 <span className="font-bold">O.</span> {origin.address.split(',')[0]}
                             </p>
-                            {routeAStops.map((stop, index) => (
+                            {routeA?.stops.map((stop, index) => (
                                 <p key={index} className="mt-2 text-sm">
                                 <span className="font-bold">{index + 1}.</span>{' '}
                                 {stop.address.split(',')[0]}
@@ -164,13 +203,13 @@ export default function OrganizeRoutePage() {
                         </ScrollArea>
                     </div>
                      <div>
-                        <h4 className="mb-2 font-semibold text-center">Rota B</h4>
+                        <h4 className="mb-2 font-semibold text-center text-[#FF9800]">Rota B</h4>
                         <ScrollArea className="h-40 rounded-md border">
                             <div className="p-4">
                             <p className="text-sm">
                                 <span className="font-bold">O.</span> {origin.address.split(',')[0]}
                             </p>
-                            {routeBStops.map((stop, index) => (
+                            {routeB?.stops.map((stop, index) => (
                                 <p key={index} className="mt-2 text-sm">
                                 <span className="font-bold">{index + 1}.</span>{' '}
                                 {stop.address.split(',')[0]}
@@ -179,6 +218,8 @@ export default function OrganizeRoutePage() {
                             </div>
                         </ScrollArea>
                     </div>
+                    </>
+                    )}
                 </div>
               </div>
             </TabsContent>
@@ -263,5 +304,3 @@ export default function OrganizeRoutePage() {
     </div>
   );
 }
-
-    

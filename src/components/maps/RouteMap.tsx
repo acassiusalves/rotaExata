@@ -1,33 +1,29 @@
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-import type { PlaceValue } from "@/lib/types";
-
-type LatLng = { lat: number; lng: number };
+import type { PlaceValue, RouteInfo } from "@/lib/types";
 
 export function RouteMap({
   origin,
-  destination,
   stops,
-  encodedPolyline,
+  routes,
   height = 360,
 }: {
-  origin?: LatLng | null;
-  destination?: LatLng | null;
+  origin?: PlaceValue | null;
   stops?: PlaceValue[];
-  encodedPolyline?: string | null;
+  routes?: RouteInfo[];
   height?: number;
 }) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<google.maps.Map | null>(null);
   const markersRef = React.useRef<google.maps.Marker[]>([]);
-  const polyRef = React.useRef<google.maps.Polyline | null>(null);
+  const polylinesRef = React.useRef<google.maps.Polyline[]>([]);
 
   React.useEffect(() => {
     let canceled = false;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
-      libraries: ["places", "geometry", "geocoding"],
+      libraries: ["places", "geometry", "geocoding", "marker"],
       language: "pt-BR",
       region: "BR",
     });
@@ -40,6 +36,7 @@ export function RouteMap({
         mapTypeControl: false,
         fullscreenControl: false,
         streetViewControl: false,
+        mapId: '4a356a5009a25b81' // A custom map ID with no POIs
       });
     });
 
@@ -50,48 +47,82 @@ export function RouteMap({
     const map = mapRef.current;
     if (!map) return;
 
-    // limpa marcadores e polyline
+    // Clear previous elements
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
-    if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null; }
+    polylinesRef.current.forEach(p => p.setMap(null));
+    polylinesRef.current = [];
 
     const bounds = new google.maps.LatLngBounds();
 
+    // Add origin marker
     if (origin) {
-      const m = new google.maps.Marker({ map, position: origin, label: "O" });
-      markersRef.current.push(m);
-      bounds.extend(m.getPosition()!);
+      const originMarker = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: origin,
+        content: new google.maps.marker.PinElement({
+          background: '#111827', // dark-gray
+          borderColor: '#F9FAFB', // near-white for contrast
+          glyph: new URL('https://fonts.gstatic.com/s/i/googlematerialicons/home/v15/24px.svg'),
+          glyphColor: '#FFFFFF',
+        }).element,
+        title: "Origem"
+      });
+      markersRef.current.push(originMarker as any); // cast because of type mismatch
+      bounds.extend(origin);
     }
-
-    stops?.forEach((stop, index) => {
+    
+    // Handle multiple routes with different colors
+    if (routes && routes.length > 0) {
+        routes.forEach(route => {
+            if (route.stops) {
+                route.stops.forEach((stop, index) => {
+                    if (stop.lat && stop.lng) {
+                        const marker = new google.maps.marker.AdvancedMarkerElement({
+                            map,
+                            position: stop,
+                            content: new google.maps.marker.PinElement({
+                                background: route.color,
+                                borderColor: '#FFFFFF',
+                                glyph: `${index + 1}`,
+                                glyphColor: '#FFFFFF',
+                            }).element,
+                            title: `Parada ${index + 1}`
+                        });
+                        markersRef.current.push(marker as any);
+                        bounds.extend(stop);
+                    }
+                });
+            }
+            if (route.encodedPolyline) {
+                 const path = google.maps.geometry.encoding.decodePath(route.encodedPolyline);
+                 const poly = new google.maps.Polyline({ map, path, strokeColor: route.color, strokeWeight: 5, strokeOpacity: 0.8 });
+                 polylinesRef.current.push(poly);
+                 path.forEach(p => bounds.extend(p));
+            }
+        });
+    } else if (stops) { // Fallback for single list of stops
+       stops.forEach((stop, index) => {
         if (stop.lat && stop.lng) {
-            const m = new google.maps.Marker({ map, position: stop, label: (index + 1).toString() });
-            markersRef.current.push(m);
-            bounds.extend(m.getPosition()!);
+             const marker = new google.maps.marker.AdvancedMarkerElement({
+                map,
+                position: stop,
+                content: new google.maps.marker.PinElement({
+                    glyph: `${index + 1}`,
+                }).element
+            });
+            markersRef.current.push(marker as any);
+            bounds.extend(stop);
         }
     });
-
-    if (destination) {
-      const m = new google.maps.Marker({ map, position: destination, label: "D" });
-      markersRef.current.push(m);
-      bounds.extend(m.getPosition()!);
     }
 
-    if (encodedPolyline) {
-      const path = google.maps.geometry.encoding.decodePath(encodedPolyline);
-      polyRef.current = new google.maps.Polyline({ map, path, strokeColor: '#2962FF' });
-      path.forEach(p => bounds.extend(p));
+
+    if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, 100); // 100px padding
     }
 
-    if (markersRef.current.length > 0) {
-        map.fitBounds(bounds);
-    } 
-    if (markersRef.current.length === 1) {
-        map.setCenter(bounds.getCenter());
-        map.setZoom(15);
-    }
-
-  }, [origin, destination, stops, encodedPolyline]);
+  }, [origin, stops, routes]);
   
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 

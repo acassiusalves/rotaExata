@@ -15,6 +15,14 @@ export type PlaceValue = {
   lng: number;
 };
 
+export type RouteInfo = {
+  stops: PlaceValue[];
+  encodedPolyline: string;
+  distanceMeters: number;
+  duration: string;
+  color?: string; // Optional color for rendering
+};
+
 export type OrderStatus =
   | 'created'
   | 'assigned'
