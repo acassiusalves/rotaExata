@@ -113,6 +113,88 @@ const formatDuration = (durationString: string) => {
   return `${minutes}m`;
 };
 
+// Simple Euclidean distance for clustering (good enough for this purpose)
+const getDistance = (p1: {lat: number, lng: number}, p2: {lat: number, lng: number}) => {
+    return Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
+};
+
+const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
+  if (stops.length <= k) {
+    return stops.map(stop => [stop]);
+  }
+
+  // 1. Initialize centroids by picking k stops that are far from each other
+  let centroids: {lat: number, lng: number}[] = [];
+  centroids.push(stops[0]);
+  while (centroids.length < k) {
+    let maxDist = 0;
+    let farthestStop: PlaceValue | null = null;
+    stops.forEach(stop => {
+      let minDistToCentroid = Infinity;
+      centroids.forEach(centroid => {
+        const dist = getDistance(stop, centroid);
+        if (dist < minDistToCentroid) {
+          minDistToCentroid = dist;
+        }
+      });
+      if (minDistToCentroid > maxDist) {
+        maxDist = minDistToCentroid;
+        farthestStop = stop;
+      }
+    });
+    if (farthestStop) {
+      centroids.push(farthestStop);
+    }
+  }
+
+
+  let clusters: PlaceValue[][] = [];
+  let iterations = 0;
+
+  while (iterations < maxIterations) {
+    // 2. Assign stops to the closest centroid
+    clusters = Array.from({ length: k }, () => []);
+    stops.forEach(stop => {
+      let minDistance = Infinity;
+      let closestCentroidIndex = -1;
+      centroids.forEach((centroid, index) => {
+        const distance = getDistance(stop, centroid);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestCentroidIndex = index;
+        }
+      });
+      if (closestCentroidIndex !== -1) {
+        clusters[closestCentroidIndex].push(stop);
+      }
+    });
+
+    // 3. Recalculate centroids
+    const newCentroids = clusters.map(cluster => {
+      if (cluster.length === 0) {
+        // Find a random stop to be the new centroid if a cluster is empty
+        return stops[Math.floor(Math.random() * stops.length)];
+      }
+      const sum = cluster.reduce((acc, stop) => ({ lat: acc.lat + stop.lat, lng: acc.lng + stop.lng }), { lat: 0, lng: 0 });
+      return { lat: sum.lat / cluster.length, lng: sum.lng / cluster.length };
+    });
+
+    // 4. Check for convergence
+    const hasConverged = newCentroids.every((centroid, index) => {
+      return centroid.lat === centroids[index].lat && centroid.lng === centroids[index].lng;
+    });
+
+    if (hasConverged) {
+      break;
+    }
+
+    centroids = newCentroids;
+    iterations++;
+  }
+
+  return clusters.filter(c => c.length > 0);
+};
+
 
 export default function OrganizeRoutePage() {
   const router = useRouter();
@@ -135,9 +217,12 @@ export default function OrganizeRoutePage() {
       setRouteData(parsedData);
 
       const allStops = parsedData.stops.filter((s) => s.placeId);
-      const midPoint = Math.ceil(allStops.length / 2);
-      const stopsA = allStops.slice(0, midPoint);
-      const stopsB = allStops.slice(midPoint);
+      
+      // Use k-means to split stops into two clusters
+      const clusters = kMeansCluster(allStops, 2);
+      const stopsA = clusters[0] || [];
+      const stopsB = clusters[1] || [];
+
 
       const calculateRoutes = async () => {
         setIsLoading(true);
@@ -150,10 +235,10 @@ export default function OrganizeRoutePage() {
             : Promise.resolve(null),
         ]);
         if (computedRouteA) {
-          setRouteA({ ...computedRouteA, color: '#F44336' });
+          setRouteA({ ...computedRouteA, color: '#F44336', visible: true });
         }
         if (computedRouteB) {
-          setRouteB({ ...computedRouteB, color: '#FF9800' });
+          setRouteB({ ...computedRouteB, color: '#FF9800', visible: true });
         }
         setIsLoading(false);
       };
