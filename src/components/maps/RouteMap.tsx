@@ -3,6 +3,36 @@ import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import type { PlaceValue, RouteInfo } from "@/lib/types";
 
+// Função para gerar o conteúdo HTML do InfoWindow
+const createInfoWindowContent = (stop: PlaceValue, index: number): string => {
+  const address = stop.address || stop.formattedAddress || stop.addressString || '--';
+  return `
+    <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
+      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">Parada ${index + 1}</h4>
+      <div style="display: grid; grid-template-columns: 90px 1fr; gap: 8px;">
+        <span style="color: #666;">Cliente:</span>
+        <strong style="color: #000;">${stop.customerName || '--'}</strong>
+
+        <span style="color: #666;">Pedido Nº:</span>
+        <span>${stop.orderNumber || '--'}</span>
+
+        <span style="color: #666;">Telefone:</span>
+        <span>${stop.phone || '--'}</span>
+
+        <span style="color: #666;">Janela:</span>
+        <span>${stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
+
+        <span style="color: #666; align-self: start;">Endereço:</span>
+        <p style="margin: 0; word-break: break-word;">${address}</p>
+
+        <span style="color: #666; align-self: start;">Obs:</span>
+        <p style="margin: 0; word-break: break-word; font-style: italic;">${stop.notes || '--'}</p>
+      </div>
+    </div>
+  `;
+};
+
+
 export function RouteMap({
   origin,
   stops,
@@ -18,6 +48,8 @@ export function RouteMap({
   const mapRef = React.useRef<google.maps.Map | null>(null);
   const markersRef = React.useRef<google.maps.Marker[]>([]);
   const polylinesRef = React.useRef<google.maps.Polyline[]>([]);
+  const activeInfoWindowRef = React.useRef<google.maps.InfoWindow | null>(null);
+
 
   React.useEffect(() => {
     let canceled = false;
@@ -52,6 +84,9 @@ export function RouteMap({
     markersRef.current = [];
     polylinesRef.current.forEach(p => p.setMap(null));
     polylinesRef.current = [];
+    activeInfoWindowRef.current?.close();
+    activeInfoWindowRef.current = null;
+
 
     const bounds = new google.maps.LatLngBounds();
 
@@ -87,8 +122,19 @@ export function RouteMap({
                                 glyph: `${index + 1}`,
                                 glyphColor: '#FFFFFF',
                             }).element,
-                            title: `Parada ${index + 1}`
+                            title: `Parada ${index + 1}: ${stop.customerName}`
                         });
+
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: createInfoWindowContent(stop, index)
+                        });
+
+                        marker.addListener('click', () => {
+                            activeInfoWindowRef.current?.close();
+                            infoWindow.open(map, marker as any);
+                            activeInfoWindowRef.current = infoWindow;
+                        });
+
                         markersRef.current.push(marker as any);
                         bounds.extend(stop);
                     }
@@ -111,6 +157,17 @@ export function RouteMap({
                     glyph: `${index + 1}`,
                 }).element
             });
+
+            const infoWindow = new google.maps.InfoWindow({
+                content: createInfoWindowContent(stop, index)
+            });
+
+            marker.addListener('click', () => {
+                activeInfoWindowRef.current?.close();
+                infoWindow.open(map, marker as any);
+                activeInfoWindowRef.current = infoWindow;
+            });
+
             markersRef.current.push(marker as any);
             bounds.extend(stop);
         }
