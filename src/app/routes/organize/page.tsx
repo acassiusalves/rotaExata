@@ -47,7 +47,6 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RouteTimeline } from '@/components/routes/route-timeline';
-import { cn } from '@/lib/utils';
 
 
 interface RouteData {
@@ -68,7 +67,11 @@ const computeRoute = async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ origin, stops }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('API Error:', errorText);
+      throw new Error(errorText);
+    };
     const data = await res.json();
     return { ...data, stops }; // Ensure original stops are returned
   } catch (error) {
@@ -83,7 +86,7 @@ const formatDistance = (meters: number) => {
 }
 
 const formatDuration = (durationString: string) => {
-    if (!durationString) return '0m';
+    if (!durationString || durationString === '0s') return '0m';
     const seconds = parseInt(durationString.replace('s', ''), 10);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -134,6 +137,8 @@ export default function OrganizeRoutePage() {
     } else {
       console.log("No route data found in session storage.");
       setIsLoading(false);
+      // Optional: redirect back if no data
+      // router.push('/routes/new');
     }
   }, [router]);
 
@@ -186,7 +191,10 @@ export default function OrganizeRoutePage() {
 
   const totalStops = (routeA?.stops.length || 0) + (routeB?.stops.length || 0);
   const totalDistance = (routeA?.distanceMeters || 0) + (routeB?.distanceMeters || 0);
-  const totalDurationSeconds = (parseInt(routeA?.duration || '0s') + parseInt(routeB?.duration || '0s'));
+  
+  const durationA = routeA?.duration ? parseInt(routeA.duration.replace('s', '')) : 0;
+  const durationB = routeB?.duration ? parseInt(routeB.duration.replace('s', '')) : 0;
+  const totalDurationSeconds = durationA + durationB;
 
 
   return (
@@ -276,6 +284,7 @@ export default function OrganizeRoutePage() {
                                                 <h4 className='font-semibold mb-2'>Ordem das Paradas - {routeItem.name}</h4>
                                                 <div className="rounded-md border">
                                                     <Table>
+                                                      <TableBody>
                                                         {routeItem.data.stops.map((stop, index) => (
                                                             <TableRow key={stop.id} className='bg-background'>
                                                                 <TableCell className='w-12 text-center font-mono'>{index + 1}</TableCell>
@@ -284,12 +293,13 @@ export default function OrganizeRoutePage() {
                                                                     <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'up')} disabled={index === 0}>
                                                                         <ArrowUp className="h-4 w-4" />
                                                                     </Button>
-                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'down')} disabled={index === routeItem.data!.stops.length - 1}>
+                                                                    <Button variant="ghost" size="icon" className='h-8 w-8' onClick={() => handleReorderStop(routeItem.key, index, 'down')} disabled={index === routeItem.data.stops.length - 1}>
                                                                         <ArrowDown className="h-4 w-4" />
                                                                     </Button>
                                                                 </TableCell>
                                                             </TableRow>
                                                         ))}
+                                                      </TableBody>
                                                     </Table>
                                                 </div>
                                             </div>
