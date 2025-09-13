@@ -767,7 +767,26 @@ export default function OrganizeRoutePage() {
       </div>
     </div>
     <Dialog modal={false} open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
-        <DialogContent onSelect={(e) => { e.preventDefault(); }}>
+        <DialogContent
+            onInteractOutside={(e) => {
+                const el = e.target as HTMLElement;
+                if (el.closest('.pac-container')) {
+                    e.preventDefault();
+                }
+            }}
+            onPointerDownOutside={(e) => {
+                const el = e.target as HTMLElement;
+                if (el.closest('.pac-container')) {
+                    e.preventDefault();
+                }
+            }}
+            onFocusOutside={(e) => {
+                const el = e.target as HTMLElement;
+                if (el.closest('.pac-container')) {
+                    e.preventDefault();
+                }
+            }}
+        >
           <DialogHeader>
             <DialogTitle>Adicionar Novo Serviço</DialogTitle>
             <DialogDescription>
@@ -795,3 +814,4 @@ export default function OrganizeRoutePage() {
     </>
   );
 }
+
