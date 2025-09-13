@@ -33,6 +33,7 @@ export default function LoginPage() {
     } catch (error: any) {
       console.error(error);
       let description = 'Ocorreu um erro desconhecido. Tente novamente.';
+      // Updated error handling to include 'auth/invalid-credential'
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         description = 'Email ou senha inválidos. Verifique suas credenciais.';
       } else if (error.code === 'auth/invalid-email') {
