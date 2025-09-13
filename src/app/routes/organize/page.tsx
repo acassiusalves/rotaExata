@@ -27,7 +27,6 @@ import {
   Milestone,
   Loader2,
   Eye,
-  GripVertical,
   EyeOff,
 } from 'lucide-react';
 import { RouteMap } from '@/components/maps/RouteMap';
@@ -64,6 +63,8 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { RouteTimeline } from '@/components/routes/route-timeline';
+import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
+import { useToast } from '@/hooks/use-toast';
 
 
 interface RouteData {
@@ -198,8 +199,9 @@ const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
 
 export default function OrganizeRoutePage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
-  const [isOptimizing, setIsOptimizing] = React.useState(false);
+  const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
@@ -216,7 +218,7 @@ export default function OrganizeRoutePage() {
       const parsedData: RouteData = JSON.parse(storedData);
       setRouteData(parsedData);
 
-      const allStops = parsedData.stops.filter((s) => s.placeId);
+      const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
       
       // Use k-means to split stops into two clusters
       const clusters = kMeansCluster(allStops, 2);
@@ -260,11 +262,12 @@ export default function OrganizeRoutePage() {
       return;
     }
     
-    const activeRouteKey = active.data.current?.routeKey;
-    const overRouteKey = over.data.current?.routeKey;
+    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B';
+    const overRouteKey = over.data.current?.routeKey  as 'A' | 'B';
 
-    if (activeRouteKey !== overRouteKey) {
+    if (!activeRouteKey || activeRouteKey !== overRouteKey) {
         // Handle moving between routes if needed in the future
+        console.warn("Moving stops between different routes is not supported yet.");
         return;
     }
 
@@ -284,6 +287,47 @@ export default function OrganizeRoutePage() {
     const newRouteInfo = await computeRoute(routeData.origin, newStops);
     if (newRouteInfo) {
       setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: newStops } : null));
+    }
+  };
+
+  const handleOptimizeSingleRoute = async (routeKey: 'A' | 'B') => {
+    const routeToOptimize = routeKey === 'A' ? routeA : routeB;
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+
+    if (!routeToOptimize || !routeData) {
+        toast({ variant: 'destructive', title: "Erro", description: "Dados da rota não encontrados." });
+        return;
+    }
+
+    setIsOptimizing(prev => ({...prev, [routeKey]: true}));
+    
+    try {
+        const result = await optimizeDeliveryRoutes({
+            origin: routeData.origin,
+            deliveryLocations: routeToOptimize.stops.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
+        });
+        
+        const optimizedStopsMap = new Map(result.optimizedStops.map(s => [s.id, s]));
+        const reorderedStops = [...routeToOptimize.stops].sort((a, b) => {
+            const indexA = result.optimizedStops.findIndex(s => s.id === a.id);
+            const indexB = result.optimizedStops.findIndex(s => s.id === b.id);
+            return indexA - indexB;
+        });
+
+        setter((prev) => (prev ? { ...prev, stops: reorderedStops, encodedPolyline: '' } : null));
+        
+        const newRouteInfo = await computeRoute(routeData.origin, reorderedStops);
+        if (newRouteInfo) {
+            setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: reorderedStops } : null));
+        }
+
+        toast({ title: "Rota Otimizada!", description: `A Rota ${routeKey === 'A' ? '1' : '2'} foi otimizada com sucesso.` });
+
+    } catch (error) {
+        console.error("Error optimizing route:", error);
+        toast({ variant: 'destructive', title: "Falha na Otimização", description: "Não foi possível otimizar a rota." });
+    } finally {
+        setIsOptimizing(prev => ({...prev, [routeKey]: false}));
     }
   };
 
@@ -334,7 +378,7 @@ export default function OrganizeRoutePage() {
   const routesForTable = [
       { key: 'A', name: 'Rota 1', data: routeA },
       { key: 'B', name: 'Rota 2', data: routeB },
-  ].filter(r => r.data);
+  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data);
 
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
@@ -371,8 +415,7 @@ export default function OrganizeRoutePage() {
 
           <CardContent className="p-4">
             <TabsContent value="organize" className="m-0">
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <div className="col-span-3 lg:col-span-2">
+              <div className="col-span-3">
                    {isLoading ? (
                     <div className="flex h-48 items-center justify-center">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -388,13 +431,14 @@ export default function OrganizeRoutePage() {
                                 <TableHead>Distância</TableHead>
                                 <TableHead>Tempo</TableHead>
                                 <TableHead className='w-[40%]'>Linha do Tempo</TableHead>
+                                <TableHead className='w-32 text-right'>Ações</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                        {routesForTable.map(routeItem => routeItem.data && (
+                        {routesForTable.map(routeItem => (
                              <TableRow key={routeItem.key}>
                                 <TableCell className="align-middle">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key as 'A' | 'B')}>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
                                         {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                     </Button>
                                 </TableCell>
@@ -405,6 +449,21 @@ export default function OrganizeRoutePage() {
                                 <TableCell>
                                     <RouteTimeline routeKey={routeItem.key} stops={routeItem.data.stops} color={routeItem.data.color} />
                                 </TableCell>
+                                <TableCell className="text-right">
+                                    <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        onClick={() => handleOptimizeSingleRoute(routeItem.key)}
+                                        disabled={isOptimizing[routeItem.key]}
+                                    >
+                                        {isOptimizing[routeItem.key] ? (
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Wand2 className="mr-2 h-4 w-4" />
+                                        )}
+                                        Otimizar
+                                    </Button>
+                                </TableCell>
                             </TableRow>
                         ))}
                         </TableBody>
@@ -412,28 +471,6 @@ export default function OrganizeRoutePage() {
                     </DndContext>
                   )}
                 </div>
-                <div className="col-span-3 lg:col-span-1 flex items-center">
-                  <div className="flex h-full w-full flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                    <div>
-                      <h4 className="font-semibold">Otimização Automática</h4>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Deixe a IA encontrar a melhor sequência para cada rota,
-                        priorizando a menor distância.
-                      </p>
-                    </div>
-                    <Button disabled={isOptimizing} className="mt-4 w-full">
-                      {isOptimizing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Wand2 className="mr-2 h-4 w-4" />
-                      )}
-                      {isOptimizing
-                        ? 'Otimizando...'
-                        : 'Otimizar Ambas as Rotas'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">

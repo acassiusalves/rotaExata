@@ -3,7 +3,7 @@
 /**
  * @fileOverview This file defines a Genkit flow for optimizing delivery routes.
  *
- * - optimizeDeliveryRoutes - A function that suggests optimized delivery routes based on current location, delivery locations, and real-time traffic data.
+ * - optimizeDeliveryRoutes - A function that suggests optimized delivery routes based on a list of delivery locations.
  * - OptimizeDeliveryRoutesInput - The input type for the optimizeDeliveryRoutes function.
  * - OptimizeDeliveryRoutesOutput - The return type for the optimizeDeliveryRoutes function.
  */
@@ -12,38 +12,32 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const OptimizeDeliveryRoutesInputSchema = z.object({
-  currentLocationLat: z.number().describe('The latitude of the driver\u0027s current location.'),
-  currentLocationLng: z.number().describe('The longitude of the driver\u0027s current location.'),
+  origin: z.object({
+    lat: z.number().describe('The latitude of the starting location.'),
+    lng: z.number().describe('The longitude of the starting location.'),
+  }),
   deliveryLocations: z
     .array(
       z.object({
+        id: z.string().describe('The unique ID of the stop.'),
         lat: z.number().describe('The latitude of the delivery location.'),
         lng: z.number().describe('The longitude of the delivery location.'),
-        orderId: z.string().describe('The ID of the order associated with this location.'),
       })
     )
-    .describe('An array of delivery locations with latitude, longitude, and order ID.'),
+    .describe('An array of delivery locations with latitude, longitude, and a unique ID.'),
 });
 export type OptimizeDeliveryRoutesInput = z.infer<typeof OptimizeDeliveryRoutesInputSchema>;
 
 const OptimizeDeliveryRoutesOutputSchema = z.object({
-  optimizedRoutes: z
+  optimizedStops: z
     .array(
       z.object({
-        orderId: z.string().describe('The ID of the order associated with this location.'),
+        id: z.string().describe('The unique ID of the stop.'),
         lat: z.number().describe('The latitude of the delivery location.'),
         lng: z.number().describe('The longitude of the delivery location.'),
       })
     )
-    .describe('An array of optimized delivery routes, each with order ID, latitude, and longitude.'),
-  estimatedTotalTravelTimeMinutes: z
-    .number()
-    .optional()
-    .describe('Estimated total travel time in minutes for the optimized route.'),
-  estimatedTotalDistanceKm: z
-    .number()
-    .optional()
-    .describe('Estimated total travel distance in kilometers for the optimized route.'),
+    .describe('An array of stops in the optimized order.'),
 });
 export type OptimizeDeliveryRoutesOutput = z.infer<typeof OptimizeDeliveryRoutesOutputSchema>;
 
@@ -59,19 +53,16 @@ const optimizeDeliveryRoutesPrompt = ai.definePrompt({
   output: {schema: OptimizeDeliveryRoutesOutputSchema},
   prompt: `You are an expert route optimization specialist for delivery drivers.
 
-Given the driver's current location and a list of delivery locations, you will determine the route with the shortest total distance traveled as the main criterion.
+Given a starting origin point and a list of delivery locations, you will determine the optimal sequence of stops to minimize the total travel distance. The route starts at the origin and must visit every delivery location.
 
-Driver's current location: Latitude: {{{currentLocationLat}}}, Longitude: {{{currentLocationLng}}}
+Origin Location: Latitude: {{{origin.lat}}}, Longitude: {{{origin.lng}}}
 
-Delivery Locations:
+Delivery Locations to visit:
 {{#each deliveryLocations}}
-- Order ID: {{{orderId}}}, Latitude: {{{lat}}}, Longitude: {{{lng}}}
+- Stop ID: {{{id}}}, Latitude: {{{lat}}}, Longitude: {{{lng}}}
 {{/each}}
 
-Consider real-time traffic data, but always prioritize the shortest path.
-
-Output the optimized routes as an array of objects, including the order ID, latitude, and longitude for each delivery location in the optimized order.
-Include also the estimated total travel time in minutes and the estimated total distance in kilometers.
+Your task is to return the list of stops in the most efficient order. The output should be an array of stop objects, sorted by the optimized route sequence.
 `,
 });
 
@@ -83,6 +74,8 @@ const optimizeDeliveryRoutesFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await optimizeDeliveryRoutesPrompt(input);
-    return output!;
+    // The output from the prompt is already the sorted list of stops.
+    // We need to ensure the format matches OptimizeDeliveryRoutesOutputSchema
+    return { optimizedStops: output!.optimizedStops };
   }
 );
