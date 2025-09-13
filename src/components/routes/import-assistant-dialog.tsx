@@ -46,6 +46,15 @@ const availableFields = [
   'Ignorar',
 ];
 
+const normalizeString = (str: string) => {
+  return str
+    .normalize('NFD') // Decomposes accented characters into base characters and combining marks
+    .replace(/[\u0300-\u036f]/g, '') // Removes the combining marks
+    .toLowerCase()
+    .trim();
+};
+
+
 export function ImportAssistantDialog({
   isOpen,
   onClose,
@@ -58,12 +67,12 @@ export function ImportAssistantDialog({
     // Tenta fazer um mapeamento automático inicial
     const initialMapping: Record<string, string> = {};
     headers.forEach((header) => {
-      const headerLower = header.toLowerCase().trim();
+      const normalizedHeader = normalizeString(header);
       const foundField = availableFields.find((field) => {
         if (field === 'Ignorar') return false;
-        // Mapeamento mais flexível
-        const fieldLower = field.toLowerCase().trim();
-        return headerLower.includes(fieldLower) || fieldLower.includes(headerLower);
+        const normalizedField = normalizeString(field);
+        // Mapeamento mais flexível e robusto com normalização
+        return normalizedHeader.includes(normalizedField) || normalizedField.includes(normalizedHeader);
       });
       initialMapping[header] = foundField || 'Ignorar';
     });
