@@ -28,6 +28,8 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  Plus,
+  PackagePlus,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
@@ -65,6 +67,11 @@ import {
 import { RouteTimeline } from '@/components/routes/route-timeline';
 import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 import { useToast } from '@/hooks/use-toast';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 
 
 interface RouteData {
@@ -216,9 +223,13 @@ export default function OrganizeRoutePage() {
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
+  const [newService, setNewService] = React.useState<PlaceValue | null>(null);
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
+  const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
+
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
   const DRAG_DELAY = 200;
@@ -323,7 +334,6 @@ export default function OrganizeRoutePage() {
             deliveryLocations: routeToOptimize.stops.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
         });
         
-        const optimizedStopsMap = new Map(result.optimizedStops.map(s => [s.id, s]));
         const reorderedStops = [...routeToOptimize.stops].sort((a, b) => {
             const indexA = result.optimizedStops.findIndex(s => s.id === a.id);
             const indexB = result.optimizedStops.findIndex(s => s.id === b.id);
@@ -350,6 +360,15 @@ export default function OrganizeRoutePage() {
   const toggleRouteVisibility = (routeKey: 'A' | 'B') => {
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
     setter(prev => prev ? { ...prev, visible: !prev.visible } : null);
+  };
+  
+  const handleAddNewService = () => {
+    if (newService) {
+      setUnassignedStops(prev => [...prev, { ...newService, id: `unassigned-${Date.now()}` }]);
+      setNewService(null);
+      setIsAddServiceDialogOpen(false);
+      toast({ title: 'Serviço Adicionado', description: 'O novo serviço está pronto para ser alocado.' });
+    }
   };
 
 
@@ -399,7 +418,7 @@ export default function OrganizeRoutePage() {
   return (
     <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
       <div className="flex-1 bg-muted">
-        <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} />
+        <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} unassignedStops={unassignedStops} />
       </div>
 
       <div className="shrink-0 border-t bg-background">
@@ -412,24 +431,57 @@ export default function OrganizeRoutePage() {
                   Otimize a sequência, atribua um motorista e salve a rota.
                 </CardDescription>
               </div>
-              <TabsList>
-                <TabsTrigger value="organize">
-                  <Wand2 className="mr-2 h-4 w-4" />
-                  Organizar
-                </TabsTrigger>
-                <TabsTrigger value="assign">
-                  <User className="mr-2 h-4 w-4" />
-                  Atribuir
-                </TabsTrigger>
-                <TabsTrigger value="review">
-                  <Check className="mr-2 h-4 w-4" />
-                  Revisar
-                </TabsTrigger>
-              </TabsList>
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                         <Button variant="outline" size="icon">
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => setIsAddServiceDialogOpen(true)}>
+                            <PackagePlus className="mr-2 h-4 w-4" />
+                            Adicionar um serviço
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+
+                <TabsList>
+                  <TabsTrigger value="organize">
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    Organizar
+                  </TabsTrigger>
+                  <TabsTrigger value="assign">
+                    <User className="mr-2 h-4 w-4" />
+                    Atribuir
+                  </TabsTrigger>
+                  <TabsTrigger value="review">
+                    <Check className="mr-2 h-4 w-4" />
+                    Revisar
+                  </TabsTrigger>
+                </TabsList>
+              </div>
             </div>
           </CardHeader>
 
           <CardContent className="p-4">
+             {unassignedStops.length > 0 && (
+              <div className="mb-4">
+                <Separator />
+                <div className='p-4'>
+                    <h3 className="text-sm font-semibold mb-2">Serviços não alocados</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {unassignedStops.map(stop => (
+                            <div key={stop.id} className="flex items-center gap-2 rounded-md border bg-muted p-2 text-sm">
+                                <PackagePlus className="h-4 w-4 text-muted-foreground" />
+                                <span className='font-medium'>{stop.address}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <Separator />
+              </div>
+            )}
             <TabsContent value="organize" className="m-0">
               <div className="col-span-3">
                    {isLoading ? (
@@ -608,6 +660,35 @@ export default function OrganizeRoutePage() {
           </CardContent>
         </Tabs>
       </div>
+
+       <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Adicionar Novo Serviço</DialogTitle>
+            <DialogDescription>
+              Busque e adicione um novo endereço que ficará disponível para ser alocado em uma rota.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <AutocompleteInput
+                id="new-service-address"
+                label="Endereço do Serviço"
+                placeholder="Pesquise o endereço..."
+                onChange={(place) => setNewService(place)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleAddNewService} disabled={!newService}>
+              Salvar Serviço
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

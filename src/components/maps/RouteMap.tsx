@@ -9,11 +9,12 @@ export type RouteMapHandle = {
 };
 
 // Função para gerar o conteúdo HTML do InfoWindow
-const createInfoWindowContent = (stop: PlaceValue, index: number): string => {
+const createInfoWindowContent = (stop: PlaceValue, index?: number): string => {
   const address = stop.address || stop.formattedAddress || stop.addressString || '--';
+  const title = index !== undefined ? `Parada ${index + 1}` : 'Serviço Avulso';
   return `
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
-      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">Parada ${index + 1}</h4>
+      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">${title}</h4>
       <div style="display: grid; grid-template-columns: 90px 1fr; gap: 8px;">
         <span style="color: #666;">Cliente:</span>
         <strong style="color: #000;">${stop.customerName || '--'}</strong>
@@ -41,11 +42,12 @@ type Props = {
   origin?: PlaceValue | null;
   stops?: PlaceValue[];
   routes?: RouteInfo[];
+  unassignedStops?: PlaceValue[];
   height?: number;
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, height = 360 }: Props,
+  { origin, stops, routes, unassignedStops, height = 360 }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -127,19 +129,24 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     }
     
     // helper para criar marker+info e indexar por id
-    const addStop = (stop: PlaceValue, index: number, color?: string) => {
+    const addStop = (stop: PlaceValue, index?: number, color?: string, isUnassigned = false) => {
       if (!stop.lat || !stop.lng) return;
       const sid = String(stop.id ?? stop.placeId ?? index);
+      
+      const pinElement = isUnassigned
+        ? new google.maps.marker.PinElement({ background: '#000000', borderColor: '#FFFFFF', glyph: '' })
+        : new google.maps.marker.PinElement({
+            background: color,
+            borderColor: "#FFFFFF",
+            glyph: index !== undefined ? `${index + 1}` : '',
+            glyphColor: "#FFFFFF",
+          });
+
       const marker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: stop,
-        content: new google.maps.marker.PinElement({
-          background: color,
-          borderColor: "#FFFFFF",
-          glyph: `${index + 1}`,
-          glyphColor: "#FFFFFF",
-        }).element,
-        title: `Parada ${index + 1}: ${stop.customerName ?? ""}`,
+        content: pinElement.element,
+        title: `Parada ${index !== undefined ? index + 1 : 'Avulsa'}: ${stop.customerName ?? ""}`,
       });
       const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
 
@@ -159,7 +166,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         routes.forEach(route => {
             if (route.stops) {
                 route.stops.forEach((stop, index) => {
-                    addStop(stop, index, route.color)
+                    addStop(stop, index, route.color, false)
                 });
             }
             if (route.encodedPolyline) {
@@ -171,8 +178,13 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         });
     } else if (stops) { // Fallback for single list of stops
        stops.forEach((stop, index) => {
-        addStop(stop, index)
+        addStop(stop, index, undefined, false)
     });
+    }
+
+    // Handle unassigned stops with black pins
+    if (unassignedStops) {
+      unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
 
@@ -180,10 +192,9 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         map.fitBounds(bounds, 100); // 100px padding
     }
 
-  }, [origin, stops, routes]);
+  }, [origin, stops, routes, unassignedStops]);
   
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 
   return <div ref={divRef} style={mapStyle} className="w-full rounded-lg border" />;
 });
-
