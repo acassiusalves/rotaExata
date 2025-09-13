@@ -497,7 +497,7 @@ export default function OrganizeRoutePage() {
                                         <button
                                             key={stop.id}
                                             onClick={() => handleShowUnassignedStopOnMap(stop)}
-                                            className="block w-full rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent"
+                                            className="block w-full rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
                                         >
                                            <p className='font-medium truncate'>{stop.address}</p>
                                         </button>
@@ -690,7 +690,20 @@ export default function OrganizeRoutePage() {
       </div>
 
        <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
-        <DialogContent>
+        <DialogContent
+            onInteractOutside={(e) => {
+              const el = e.target as HTMLElement;
+              if (el.closest('.pac-container')) {
+                e.preventDefault();
+              }
+            }}
+            onPointerDownOutside={(e) => {
+              const el = e.target as HTMLElement;
+              if (el.closest('.pac-container')) {
+                e.preventDefault();
+              }
+            }}
+        >
           <DialogHeader>
             <DialogTitle>Adicionar Novo Serviço</DialogTitle>
             <DialogDescription>

@@ -72,3 +72,8 @@ body {
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* Google Places dropdown acima do overlay do Dialog */
+.pac-container {
+  z-index: 99999 !important;
+}
