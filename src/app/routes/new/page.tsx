@@ -38,6 +38,7 @@ import type { PlaceValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
@@ -70,6 +71,19 @@ const savedOrigins = [
     },
   },
 ];
+
+const initialManualServiceState = {
+  customerName: '',
+  phone: '',
+  cep: '',
+  rua: '',
+  numero: '',
+  complemento: '',
+  bairro: '',
+  cidade: '',
+  notes: '',
+};
+
 
 let stopIdCounter = 0;
 
@@ -111,6 +125,8 @@ export default function NewRoutePage() {
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
+  const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
+  const [manualService, setManualService] = React.useState(initialManualServiceState);
   
   // States for Import Assistant
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
@@ -129,11 +145,6 @@ export default function NewRoutePage() {
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
     setIsOriginDialogOpen(false);
-  };
-
-  const handleAddStop = () => {
-    const newId = `manual-stop-${Date.now()}`;
-    setStops([...stops, { id: newId } as PlaceValue]);
   };
 
   const handleRemoveStop = (index: number) => {
@@ -179,6 +190,51 @@ export default function NewRoutePage() {
     },
     []
   );
+
+  const handleManualServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { id, value } = e.target;
+    setManualService(prev => ({...prev, [id]: value}));
+  }
+
+  const handleSaveManualService = async () => {
+    const { rua, numero, bairro, cidade, cep } = manualService;
+    if (!rua || !numero || !bairro || !cidade) {
+        toast({
+            variant: 'destructive',
+            title: 'Campos Obrigatórios',
+            description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+        });
+        return;
+    }
+
+    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+    
+    const geocoded = await geocodeAddress(addressString);
+
+    if (geocoded) {
+        const newStop: PlaceValue = {
+            ...geocoded,
+            id: `manual-${Date.now()}`,
+            address: geocoded.address,
+            customerName: manualService.customerName,
+            phone: manualService.phone,
+            notes: manualService.notes,
+        };
+        setStops(prevStops => [...prevStops, newStop]);
+        setManualService(initialManualServiceState);
+        setIsAddServiceDialogOpen(false);
+        toast({
+            title: 'Serviço Adicionado!',
+            description: 'O novo serviço foi adicionado à lista de paradas.',
+        });
+    } else {
+        toast({
+            variant: 'destructive',
+            title: 'Falha na Geocodificação',
+            description: 'Não foi possível encontrar o endereço. Verifique os dados e tente novamente.',
+        });
+    }
+  };
 
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -589,7 +645,7 @@ export default function NewRoutePage() {
                 ))}
               
                 <div className="mt-4">
-                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleAddStop}>
+                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
                     <PlusCircle className="h-5 w-5" />
                     Adicionar novo serviço
                   </Button>
@@ -730,6 +786,68 @@ export default function NewRoutePage() {
             <Button onClick={() => setIsNewOriginDialogOpen(false)}>
               Salvar Origem
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Add Service Dialog */}
+       <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Adicionar Novo Serviço Manualmente</DialogTitle>
+            <DialogDescription>
+              Preencha os detalhes do serviço. O endereço será validado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-6">
+            <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="customerName">Nome do Cliente</Label>
+                    <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input id="phone" value={manualService.phone} onChange={handleManualServiceChange} placeholder="(00) 90000-0000" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cep">CEP</Label>
+                    <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="rua">Rua</Label>
+                <Input id="rua" value={manualService.rua} onChange={handleManualServiceChange} placeholder="Avenida, Rua, etc." />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-1 space-y-2">
+                    <Label htmlFor="numero">Número</Label>
+                    <Input id="numero" value={manualService.numero} onChange={handleManualServiceChange} placeholder="123" />
+                </div>
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="complemento">Complemento</Label>
+                    <Input id="complemento" value={manualService.complemento} onChange={handleManualServiceChange} placeholder="Apto, Bloco, etc." />
+                </div>
+            </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="bairro">Bairro</Label>
+                    <Input id="bairro" value={manualService.bairro} onChange={handleManualServiceChange} placeholder="Setor, Bairro" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cidade">Cidade</Label>
+                    <Input id="cidade" value={manualService.cidade} onChange={handleManualServiceChange} placeholder="Goiânia" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="notes">Observações</Label>
+                <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleSaveManualService}>Salvar Serviço</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
