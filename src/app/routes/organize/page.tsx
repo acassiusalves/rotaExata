@@ -766,7 +766,7 @@ export default function OrganizeRoutePage() {
         </Tabs>
       </div>
     </div>
-    <Dialog modal={false} open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
+    <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
         <DialogContent
             onInteractOutside={(e) => {
                 const el = e.target as HTMLElement;
@@ -815,3 +815,4 @@ export default function OrganizeRoutePage() {
   );
 }
 
+    
