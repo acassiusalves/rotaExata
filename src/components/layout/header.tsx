@@ -11,6 +11,7 @@ import {
   Route,
   ChevronDown,
   Code,
+  History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,7 +35,7 @@ export function Header() {
     { href: '/', icon: Home, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
-    // { href: '/routes', icon: Route, label: 'Rotas' }, // Will be handled separately as a dropdown
+    { href: '/history', icon: History, label: 'Histórico' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
     { href: '/api', icon: Code, label: 'API' },
   ];
