@@ -7,26 +7,36 @@ import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
 import { useToast } from "@/hooks/use-toast";
 import React from "react";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function MyRoutesPage() {
   const [isSyncing, setIsSyncing] = React.useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  const handleSyncUsers = async () => {
+  const handleSyncUser = async () => {
+    if (!user || !user.email) {
+      toast({
+        variant: 'destructive',
+        title: "Erro",
+        description: "Usuário não autenticado ou sem email.",
+      });
+      return;
+    }
     setIsSyncing(true);
     try {
       const syncAuthUsers = httpsCallable(functions, 'syncAuthUsers');
-      const result: any = await syncAuthUsers();
+      const result: any = await syncAuthUsers({ email: user.email });
       
       toast({
         title: "Sincronização Concluída!",
-        description: `${result.data.synced} usuários foram sincronizados. Por favor, deslogue e logue novamente para acessar o painel de admin.`,
+        description: `Seu usuário foi atualizado para o papel de '${result.data.role}'. Por favor, deslogue e logue novamente para acessar o painel de admin.`,
       });
     } catch (error: any) {
       toast({
         variant: 'destructive',
         title: "Erro na Sincronização",
-        description: error.message || "Não foi possível sincronizar os usuários.",
+        description: error.message || "Não foi possível sincronizar sua permissão.",
       });
        console.error(error);
     } finally {
@@ -57,9 +67,9 @@ export default function MyRoutesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-           <Button onClick={handleSyncUsers} disabled={isSyncing} variant="secondary" className="w-full">
+           <Button onClick={handleSyncUser} disabled={isSyncing} variant="secondary" className="w-full">
             <UserCog className="mr-2 h-4 w-4" />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar Permissões de Usuário'}
+            {isSyncing ? 'Sincronizando...' : 'Corrigir Minha Permissão'}
           </Button>
         </CardContent>
       </Card>

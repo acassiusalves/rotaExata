@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Terminal, CheckCircle, UserCog } from 'lucide-react';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function ApiPage() {
   const [apiKey, setApiKey] = React.useState('');
@@ -24,6 +25,8 @@ export default function ApiPage() {
   const [isSaved, setIsSaved] = React.useState(false);
   const [isSyncing, setIsSyncing] = React.useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
+
 
   const handleSave = async () => {
     if (!apiKey) {
@@ -68,21 +71,25 @@ export default function ApiPage() {
     }
   };
 
-  const handleSyncUsers = async () => {
+  const handleSyncUser = async () => {
+    if (!user || !user.email) {
+      toast({ variant: 'destructive', title: "Erro", description: "Usuário não autenticado." });
+      return;
+    }
     setIsSyncing(true);
     try {
       const syncAuthUsers = httpsCallable(functions, 'syncAuthUsers');
-      const result: any = await syncAuthUsers();
+      const result: any = await syncAuthUsers({ email: user.email });
       
       toast({
         title: "Sincronização Concluída!",
-        description: `${result.data.synced} usuários foram sincronizados com o Firestore.`,
+        description: `Usuário ${user.email} sincronizado com o papel: ${result.data.role}.`,
       });
     } catch (error: any) {
       toast({
         variant: 'destructive',
         title: "Erro na Sincronização",
-        description: error.message || "Não foi possível sincronizar os usuários.",
+        description: error.message || "Não foi possível sincronizar o usuário.",
       });
        console.error(error);
     } finally {
@@ -153,15 +160,15 @@ export default function ApiPage() {
 
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>Sincronização de Usuários</CardTitle>
+          <CardTitle>Sincronização de Usuário</CardTitle>
           <CardDescription>
-            Força a sincronização entre os usuários do Firebase Authentication e os documentos do Firestore. Útil para corrigir problemas de papéis (roles) ou criar documentos de usuário ausentes.
+            Força a sincronização do seu próprio usuário entre o Firebase Authentication e o Firestore. Útil para corrigir problemas de papéis (roles) ou criar um documento de usuário ausente.
           </CardDescription>
         </CardHeader>
         <CardFooter>
-           <Button onClick={handleSyncUsers} disabled={isSyncing} variant="secondary">
+           <Button onClick={handleSyncUser} disabled={isSyncing} variant="secondary">
             <UserCog className="mr-2 h-4 w-4" />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar Usuários com Firestore'}
+            {isSyncing ? 'Sincronizando...' : 'Sincronizar Meu Usuário'}
           </Button>
         </CardFooter>
       </Card>
