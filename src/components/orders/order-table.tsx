@@ -209,7 +209,7 @@ export function OrderTable({ orders }: { orders: Order[] }) {
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {render(
+                      {flexRender(
                         cell.column.columnDef.cell,
                         cell.getContext()
                       )}
