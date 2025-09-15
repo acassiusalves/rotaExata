@@ -7,26 +7,12 @@ import { Loader2 } from 'lucide-react';
 
 // This page acts as a router based on user role.
 export default function Page() {
-  const { user, userRole, loading } = useAuth();
   const router = useRouter();
 
   React.useEffect(() => {
-    if (loading) {
-      // Still loading, do nothing
-      return;
-    }
-
-    if (!user) {
-      router.replace('/login');
-    } else if (userRole === 'admin') {
-      router.replace('/dashboard');
-    } else if (userRole === 'vendedor') {
-      router.replace('/my-routes');
-    } else {
-      // Default fallback or for other roles
-      router.replace('/login');
-    }
-  }, [user, userRole, loading, router]);
+    // Simply redirect to the main dashboard as roles are being ignored
+    router.replace('/dashboard');
+  }, [router]);
 
   // Show a loading spinner while redirecting
   return (
