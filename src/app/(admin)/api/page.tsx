@@ -160,9 +160,9 @@ export default function ApiPage() {
 
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>Sincronização de Usuário</CardTitle>
+          <CardTitle>Sincronização de Usuários com Firestore</CardTitle>
           <CardDescription>
-            Força a sincronização do seu próprio usuário entre o Firebase Authentication e o Firestore. Útil para corrigir problemas de papéis (roles) ou criar um documento de usuário ausente.
+            Use este botão para forçar a criação ou atualização do seu documento de usuário no Firestore com a permissão correta. Útil se sua permissão de 'admin' não estiver sendo reconhecida.
           </CardDescription>
         </CardHeader>
         <CardFooter>
