@@ -15,6 +15,7 @@ import {
   LogOut,
   Settings,
   LayoutDashboard,
+  Smartphone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -115,6 +116,18 @@ export function Header() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Link
+            href="/my-routes"
+            className={cn(
+              'flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground',
+               isActive('/my-routes') && 'text-foreground font-semibold'
+            )}
+          >
+            <Smartphone className="h-4 w-4" />
+            App do Motorista
+        </Link>
+
       </nav>
       <Sheet>
         <SheetTrigger asChild>
@@ -164,6 +177,16 @@ export function Header() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Link
+                href="/my-routes"
+                className={cn(
+                  'flex items-center gap-2 hover:text-foreground',
+                   isActive('/my-routes') ? 'text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                <Smartphone className="h-5 w-5" />
+                App do Motorista
+              </Link>
           </nav>
         </SheetContent>
       </Sheet>
