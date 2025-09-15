@@ -14,6 +14,7 @@ import {
   History,
   LogOut,
   Settings,
+  LayoutDashboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,7 +40,7 @@ export function Header() {
   const { user, signOut } = useAuth();
 
   const navItems = [
-    { href: '/', icon: Home, label: 'Dashboard' },
+    { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/history', icon: History, label: 'Histórico' },
@@ -48,10 +49,10 @@ export function Header() {
 
   const isActive = (href: string) => {
     // Special case for root
-    if (href === '/') return pathname === '/';
+    if (href === '/dashboard') return pathname === '/dashboard';
     // For other routes, check if the pathname starts with the href
     // This handles nested routes like /routes/new correctly
-    return pathname.startsWith(href);
+    return pathname.startsWith(href) && href !== '/';
   };
   
   const getInitials = (name: string | null | undefined) => {

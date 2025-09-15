@@ -1,5 +1,5 @@
-// This file is intentionally left blank to resolve a route conflict.
-// The correct API management page is located at src/app/(admin)/api/page.tsx
-export default function ApiConflictResolver() {
+// This file is intentionally left blank to avoid route conflicts.
+// The active page is now at src/app/(admin)/api/page.tsx
+export default function Page() {
   return null;
 }

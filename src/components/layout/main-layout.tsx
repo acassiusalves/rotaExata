@@ -11,27 +11,21 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, userRole } = useAuth();
   
   React.useEffect(() => {
-    if (loading) return; // Wait for loading to finish
+    if (loading) return; 
 
     if (!user) {
-      // If not logged in, redirect to login
       router.push('/login');
       return;
     }
-
-    // If logged in and is admin, they are OK.
-    // If not admin, they should not be on admin pages.
-    // This is a simple check, a more robust one can be implemented
-    // with middleware or more complex logic here.
+    
     if (userRole !== 'admin') {
-       // For now, let's just log this. We can redirect to a driver page later.
-       console.log('User is not an admin. Role:', userRole);
-       // router.push('/driver'); // Example future redirect
+       console.warn(`Non-admin user (role: ${userRole}) tried to access admin area. Redirecting.`);
+       router.push('/my-routes');
     }
 
   }, [loading, user, userRole, router, pathname]);
 
-  if (loading || !user) {
+  if (loading || !user || userRole !== 'admin') {
      return (
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
