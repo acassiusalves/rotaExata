@@ -2,14 +2,13 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
-import { MainLayout } from '@/components/layout/main-layout';
 import { AuthProvider } from '@/hooks/use-auth';
 import React from 'react';
 import { ServiceWorkerRegistration } from '@/components/pwa/service-worker-registration';
 
 export const metadata: Metadata = {
   title: 'RotaExata - Gestão de Entregas',
-  description: 'Sistema de gestão de entregas para administradores.',
+  description: 'Sistema de gestão de entregas para administradores e motoristas.',
   manifest: '/manifest.json',
 };
 
@@ -31,7 +30,7 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased">
         <AuthProvider>
-            <MainLayout>{children}</MainLayout>
+          {children}
         </AuthProvider>
         <Toaster />
         <ServiceWorkerRegistration />

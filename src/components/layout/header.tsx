@@ -13,6 +13,7 @@ import {
   Code,
   History,
   LogOut,
+  Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -43,11 +44,13 @@ export function Header() {
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/history', icon: History, label: 'Histórico' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
-    { href: '/api', icon: Code, label: 'API' },
   ];
 
   const isActive = (href: string) => {
+    // Special case for root
     if (href === '/') return pathname === '/';
+    // For other routes, check if the pathname starts with the href
+    // This handles nested routes like /routes/new correctly
     return pathname.startsWith(href);
   };
   
@@ -179,7 +182,7 @@ export function Header() {
             <Button variant="secondary" size="icon" className="rounded-full">
               <Avatar className="h-8 w-8">
                   <AvatarImage src={user?.photoURL ?? undefined} />
-                  <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
+                  <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
               </Avatar>
               <span className="sr-only">Toggle user menu</span>
             </Button>
@@ -187,10 +190,20 @@ export function Header() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>{user?.displayName || user?.email || 'Minha Conta'}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/settings">Configurações</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem>Suporte</DropdownMenuItem>
+            <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Configurações</span>
+                  </Link>
+                </DropdownMenuItem>
+                 <DropdownMenuItem asChild>
+                  <Link href="/api">
+                    <Code className="mr-2 h-4 w-4" />
+                    <span>API</span>
+                  </Link>
+                </DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => signOut()}>
                 <LogOut className="mr-2 h-4 w-4" />

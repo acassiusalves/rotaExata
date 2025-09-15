@@ -31,16 +31,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setUser(user);
-        // User is signed in, see docs for a list of available properties
-        // https://firebase.google.com/docs/reference/js/firebase.User
+        // User is signed in, fetch role from Firestore
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
-          setUserRole(userDocSnap.data()?.role || 'vendedor');
+          const role = userDocSnap.data()?.role || 'vendedor';
+          setUserRole(role);
+          setUser(user);
         } else {
           // Handle case where user exists in Auth but not in Firestore
-          setUserRole('vendedor'); 
+          console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
+          setUserRole('vendedor'); // default role
+          setUser(user);
         }
       } else {
         setUser(null);
@@ -58,6 +60,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     await firebaseSignOut(auth);
+    setUser(null);
     setUserRole(null);
     router.push('/login');
   };

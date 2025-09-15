@@ -20,7 +20,7 @@ export default function LoginPage() {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
-  const { signIn } = useAuth();
+  const { signIn, userRole } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -28,12 +28,14 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await signIn(email, password);
-      router.push('/');
+      const userCredential = await signIn(email, password);
+      // The auth state listener in AuthProvider will handle fetching the role.
+      // We just need to wait for it to propagate. A small delay or a more robust
+      // state management solution could handle this. For now, we rely on the
+      // redirect logic within the layouts.
     } catch (error: any) {
-      console.error(error);
+      console.error("Login Error:", error, "Code:", error.code);
       let description = 'Ocorreu um erro desconhecido. Tente novamente.';
-      // Updated error handling to include 'auth/invalid-credential'
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         description = 'Email ou senha inválidos. Verifique suas credenciais.';
       } else if (error.code === 'auth/invalid-email') {
@@ -49,6 +51,17 @@ export default function LoginPage() {
     }
   };
 
+  // This effect will run when the userRole is determined after login
+  React.useEffect(() => {
+    if (userRole) {
+      if (userRole === 'admin') {
+        router.push('/');
+      } else {
+        router.push('/driver/my-routes'); // Example driver page
+      }
+    }
+  }, [userRole, router]);
+
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -57,7 +70,7 @@ export default function LoginPage() {
             <div className="flex justify-center items-center mb-4">
                  <BotMessageSquare className="h-8 w-8 text-primary" />
             </div>
-          <CardTitle className="text-2xl">RotaExata Admin</CardTitle>
+          <CardTitle className="text-2xl">RotaExata</CardTitle>
           <CardDescription>
             Acesse o painel para gerenciar suas entregas.
           </CardDescription>
