@@ -43,6 +43,7 @@ export function Header() {
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { href: '/orders', icon: Package, label: 'Pedidos' },
+    { href: '/users', icon: Users, label: 'Usuários' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/history', icon: History, label: 'Histórico' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },

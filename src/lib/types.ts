@@ -83,6 +83,16 @@ export type Driver = {
   avatarUrl: string;
 };
 
+export type User = {
+  uid: string;
+  email: string;
+  role: 'admin' | 'vendedor' | 'driver' | string; // string for flexibility
+  createdAt: Date | Timestamp;
+  displayName?: string;
+  photoURL?: string;
+};
+
+
 export type ActivityEvent = {
   id: string;
   type: 'status_change' | 'note' | 'assignment';
