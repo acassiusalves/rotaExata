@@ -22,6 +22,7 @@ export type PlaceValue = {
   orderNumber?: string;
   timeWindowStart?: string;
   timeWindowEnd?: string;
+  addressString?: string;
 };
 
 export type RouteInfo = {
@@ -46,8 +47,8 @@ export type Order = {
   id: string; // Document id
   code: string;
   status: OrderStatus;
-  pickup: PlaceValue;
-  destination: PlaceValue;
+  pickup: Partial<PlaceValue>;
+  destination: Partial<PlaceValue>;
   distanceMeters: number;
   duration: string; // "1234s"
   encodedPolyline: string;
@@ -58,6 +59,11 @@ export type Order = {
   };
   createdAt: Date | Timestamp;
   notes?: string;
+  assignedTo?: string;
+  customer?: {
+    name: string;
+    address: string;
+  }
 };
 
 export type DriverStatus = 'offline' | 'available' | 'busy';

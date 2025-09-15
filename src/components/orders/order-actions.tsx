@@ -64,14 +64,21 @@ export function OrderActions({ order }: { order: Order }) {
   };
 
   const handleOptimizeRoute = async () => {
+    if (!order.pickup?.lat || !order.pickup?.lng || !order.destination?.lat || !order.destination?.lng) {
+      toast({
+        variant: 'destructive',
+        title: 'Dados incompletos',
+        description: 'A origem ou destino não possuem coordenadas para otimizar a rota.',
+      });
+      return;
+    }
     setIsOptimizing(true);
     try {
       // Note: This uses a mocked current location.
       // In a real app, this would come from the driver's device.
       const result = await optimizeDeliveryRoutes({
-        currentLocationLat: order.pickup.lat,
-        currentLocationLng: order.pickup.lng,
-        deliveryLocations: [{ ...order.destination, orderId: order.id }],
+        origin: { lat: order.pickup.lat, lng: order.pickup.lng },
+        deliveryLocations: [{ id: order.id, lat: order.destination.lat, lng: order.destination.lng }],
       });
       setOptimizedRoute(result);
       toast({
@@ -162,9 +169,8 @@ export function OrderActions({ order }: { order: Order }) {
                      {isOptimizing && <Skeleton className="h-20 w-full" />}
                      {optimizedRoute && !isOptimizing && (
                         <div className="text-sm text-foreground p-2 bg-background rounded-md border">
-                            <p><strong>Distância Total:</strong> {optimizedRoute.estimatedTotalDistanceKm} km</p>
-                            <p><strong>Tempo Estimado:</strong> {optimizedRoute.estimatedTotalTravelTimeMinutes} min</p>
-                            <p><strong>Ordem:</strong> {optimizedRoute.optimizedRoutes.map((r: any) => r.orderId).join(' -> ')}</p>
+                            <p><strong>Distância Total:</strong> {(optimizedRoute.optimizedStops.reduce((acc: number, stop: any) => acc + (stop.distanceMeters || 0), 0)/1000).toFixed(2)} km</p>
+                            <p><strong>Ordem:</strong> {optimizedRoute.optimizedStops.map((r: any) => r.id).join(' -> ')}</p>
                         </div>
                     )}
                 </div>

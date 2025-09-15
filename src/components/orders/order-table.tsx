@@ -85,12 +85,12 @@ export const columns: ColumnDef<Order>[] = [
   {
     accessorKey: 'pickup.address',
     header: 'Coleta',
-    cell: ({ row }) => <div>{row.original.pickup.address}</div>,
+    cell: ({ row }) => <div>{row.original.pickup?.address}</div>,
   },
   {
     accessorKey: 'destination.address',
     header: 'Entrega',
-    cell: ({ row }) => <div>{row.original.destination.address}</div>,
+    cell: ({ row }) => <div>{row.original.destination?.address}</div>,
   },
   {
     accessorKey: 'createdAt',
@@ -209,7 +209,7 @@ export function OrderTable({ orders }: { orders: Order[] }) {
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(
+                      {render(
                         cell.column.columnDef.cell,
                         cell.getContext()
                       )}
