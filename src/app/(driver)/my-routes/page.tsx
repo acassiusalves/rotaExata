@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Truck, UserSync } from "lucide-react";
+import { Truck, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
@@ -58,7 +58,7 @@ export default function MyRoutesPage() {
         </CardHeader>
         <CardContent>
            <Button onClick={handleSyncUsers} disabled={isSyncing} variant="secondary" className="w-full">
-            <UserSync className="mr-2 h-4 w-4" />
+            <UserCog className="mr-2 h-4 w-4" />
             {isSyncing ? 'Sincronizando...' : 'Sincronizar Permissões de Usuário'}
           </Button>
         </CardContent>

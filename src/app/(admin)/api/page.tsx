@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal, CheckCircle, UserSync } from 'lucide-react';
+import { Terminal, CheckCircle, UserCog } from 'lucide-react';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
 
@@ -160,7 +160,7 @@ export default function ApiPage() {
         </CardHeader>
         <CardFooter>
            <Button onClick={handleSyncUsers} disabled={isSyncing} variant="secondary">
-            <UserSync className="mr-2 h-4 w-4" />
+            <UserCog className="mr-2 h-4 w-4" />
             {isSyncing ? 'Sincronizando...' : 'Sincronizar Usuários com Firestore'}
           </Button>
         </CardFooter>
