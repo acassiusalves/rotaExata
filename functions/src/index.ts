@@ -69,7 +69,7 @@ export const authUserMirror=functionsV1.auth.user()
         );
       }else{
         // Define 'admin' role for specific email, otherwise default to 'vendedor'
-        const role = email === 'admin@rotaexata.com' ? 'admin' : 'vendedor';
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
         tx.set(ref,
           {
             email,
@@ -95,7 +95,7 @@ export const syncAuthUsers=onCall(
       for(const ur of page.users){
         const email=(ur.email||"").toLowerCase();
         // Also apply the admin role logic here during backfill
-        const role = email === 'admin@rotaexata.com' ? 'admin' : 'vendedor';
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
         await db.collection("users").doc(ur.uid).set(
           {
             email,
