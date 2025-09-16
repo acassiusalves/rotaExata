@@ -21,11 +21,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { User } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
-import { Timestamp } from 'firebase/firestore';
 
 const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
     admin: { label: 'Admin', variant: 'default' },
@@ -34,7 +31,7 @@ const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' 
 };
 
 
-export const columns: ColumnDef<User>[] = [
+export const columns: ColumnDef<any>[] = [
   {
     accessorKey: 'email',
     header: 'Email',
@@ -55,12 +52,9 @@ export const columns: ColumnDef<User>[] = [
     accessorKey: 'createdAt',
     header: 'Criado em',
     cell: ({ row }) => {
-      const createdAtValue = row.getValue('createdAt') as { seconds: number; nanoseconds: number };
-      if (!createdAtValue || typeof createdAtValue.seconds !== 'number') {
-        return 'Data inválida';
-      }
-      const date = new Timestamp(createdAtValue.seconds, createdAtValue.nanoseconds).toDate();
-      return <div>{format(date, 'dd/MM/yyyy HH:mm', { locale: ptBR })}</div>;
+      // The value is now a pre-formatted string from the server component
+      const createdAtValue = row.getValue('createdAt') as string;
+      return <div>{createdAtValue}</div>;
     },
   },
   {
@@ -87,7 +81,7 @@ export const columns: ColumnDef<User>[] = [
   },
 ];
 
-export function UserTable({ users }: { users: User[] }) {
+export function UserTable({ users }: { users: any[] }) {
   const table = useReactTable({
     data: users,
     columns,
