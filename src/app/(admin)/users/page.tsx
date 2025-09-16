@@ -19,19 +19,19 @@ const users: User[] = [
     uid: 'user-1',
     email: 'acassiusalves@gmail.com',
     role: 'admin',
-    createdAt: Timestamp.now(),
+    createdAt: new Timestamp(1726502400, 0), // Sep 16 2024 16:00:00 GMT-0300
   },
   {
     uid: 'user-2',
     email: 'vendedor1@rotaexata.com',
     role: 'vendedor',
-    createdAt: Timestamp.now(),
+    createdAt: new Timestamp(1726416000, 0), // Sep 15 2024 16:00:00 GMT-0300
   },
   {
     uid: 'user-3',
     email: 'motorista@rotaexata.com',
     role: 'driver',
-    createdAt: Timestamp.now(),
+    createdAt: new Timestamp(1726329600, 0), // Sep 14 2024 16:00:00 GMT-0300
   },
 ];
 
@@ -47,6 +47,14 @@ const serializeUsers = (users: User[]): any[] => {
           nanoseconds: createdAt.nanoseconds
         }
       };
+    }
+    // Fallback for already serialized data or regular Date objects
+    if (createdAt instanceof Date) {
+        const seconds = Math.floor(createdAt.getTime() / 1000);
+        return {
+            ...rest,
+            createdAt: { seconds, nanoseconds: 0 }
+        };
     }
     return user;
   });
