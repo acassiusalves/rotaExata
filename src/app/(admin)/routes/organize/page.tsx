@@ -221,7 +221,7 @@ const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
         return stops[Math.floor(Math.random() * stops.length)];
       }
       const sum = cluster.reduce((acc, stop) => ({ lat: acc.lat + stop.lat, lng: acc.lng + stop.lng }), { lat: 0, lng: 0 });
-      return { lat: sum.lat / cluster.length, lng: acc.lng / cluster.length };
+      return { lat: sum.lat / cluster.length, lng: sum.lng / cluster.length };
     });
 
     // 4. Check for convergence
