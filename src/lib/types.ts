@@ -32,6 +32,7 @@ export type RouteInfo = {
   duration: string;
   color?: string; // Optional color for rendering
   visible?: boolean;
+  status?: 'dispatched' | 'in_progress' | 'completed';
 };
 
 export type OrderStatus =
