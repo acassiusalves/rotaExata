@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
+  CardFooter
 } from '@/components/ui/card';
 import {
   Tabs,
@@ -220,7 +221,7 @@ const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
         return stops[Math.floor(Math.random() * stops.length)];
       }
       const sum = cluster.reduce((acc, stop) => ({ lat: acc.lat + stop.lat, lng: acc.lng + stop.lng }), { lat: 0, lng: 0 });
-      return { lat: sum.lat / cluster.length, lng: sum.lng / cluster.length };
+      return { lat: sum.lat / cluster.length, lng: acc.lng / cluster.length };
     });
 
     // 4. Check for convergence
@@ -303,7 +304,8 @@ export default function OrganizeRoutePage() {
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSaving, setIsSaving] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState<{ [key: string]: boolean }>({});
+
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
@@ -459,69 +461,78 @@ export default function OrganizeRoutePage() {
     setAssignedDrivers(prev => ({...prev, [routeKey]: driverId}));
   };
   
-  const handleSaveAndDispatch = async () => {
+  const handleDispatchRoute = async (routeKey: 'A' | 'B') => {
     if (!routeData) return;
-    setIsSaving(true);
+
+    const routeToSave = routeKey === 'A' ? routeA : routeB;
+    const routeName = routeNames[routeKey];
+    const driverId = assignedDrivers[routeKey];
     
-    const routesToSave = routesForTable.filter(r => r.data);
-    
-    // Validation
-    for (const routeItem of routesToSave) {
-        if (!assignedDrivers[routeItem.key]) {
-            toast({
-                variant: 'destructive',
-                title: 'Motorista não atribuído',
-                description: `Por favor, atribua um motorista para a ${routeItem.name}.`,
-            });
-            setIsSaving(false);
-            return;
-        }
+    if (!routeToSave) {
+        toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
+        return;
     }
+    if (!driverId) {
+        toast({ variant: 'destructive', title: 'Motorista não atribuído', description: `Por favor, atribua um motorista para a ${routeName}.` });
+        return;
+    }
+    
+    setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
-        const savePromises = routesToSave.map(routeItem => {
-            const driverId = assignedDrivers[routeItem.key];
-            const driver = drivers.find(d => d.id === driverId);
-            
-            const routeDoc = {
-                name: routeItem.name,
-                status: 'dispatched',
-                createdAt: serverTimestamp(),
-                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
-                origin: routeData.origin,
-                stops: routeItem.data.stops,
-                distanceMeters: routeItem.data.distanceMeters,
-                duration: routeItem.data.duration,
-                encodedPolyline: routeItem.data.encodedPolyline,
-                color: routeItem.data.color,
-                driverId: driverId,
-                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
-            };
-            return addDoc(collection(db, "routes"), routeDoc);
-        });
+        const driver = drivers.find(d => d.id === driverId);
         
-        await Promise.all(savePromises);
+        const routeDoc = {
+            name: routeName,
+            status: 'dispatched',
+            createdAt: serverTimestamp(),
+            plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+            origin: routeData.origin,
+            stops: routeToSave.stops,
+            distanceMeters: routeToSave.distanceMeters,
+            duration: routeToSave.duration,
+            encodedPolyline: routeToSave.encodedPolyline,
+            color: routeToSave.color,
+            driverId: driverId,
+            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+        };
+        await addDoc(collection(db, "routes"), routeDoc);
 
         toast({
-            title: 'Rotas Salvas com Sucesso!',
-            description: `${routesToSave.length} rota(s) foram despachadas para os motoristas.`,
+            title: 'Rota Despachada!',
+            description: `A ${routeName} foi enviada para ${driver?.name}.`,
         });
-        
-        sessionStorage.removeItem('newRouteData');
-        router.push('/routes');
 
+        // Remove the dispatched route from state
+        if (routeKey === 'A') {
+            setRouteA(null);
+        } else {
+            setRouteB(null);
+        }
+        
     } catch (error) {
-        console.error("Error saving routes:", error);
+        console.error("Error saving route:", error);
         toast({
             variant: 'destructive',
             title: 'Falha ao Salvar Rota',
-            description: 'Ocorreu um erro ao tentar salvar as rotas no banco de dados.',
+            description: 'Ocorreu um erro ao tentar despachar a rota.',
         });
     } finally {
-        setIsSaving(false);
+        setIsSaving(prev => ({ ...prev, [routeKey]: false }));
     }
   };
 
+  React.useEffect(() => {
+    // If all routes have been dispatched, redirect
+    if (!isLoading && !routeA && !routeB) {
+        toast({
+            title: 'Todas as rotas foram despachadas!',
+            description: 'Redirecionando para a página de rotas.',
+        });
+        sessionStorage.removeItem('newRouteData');
+        setTimeout(() => router.push('/routes'), 1500);
+    }
+  }, [isLoading, routeA, routeB, router, toast]);
 
   if (isLoading && !routeData) {
     return (
@@ -547,7 +558,7 @@ export default function OrganizeRoutePage() {
     );
   }
 
-  const { origin, routeDate, routeTime } = routeData;
+  const { origin } = routeData;
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r && !!r.visible);
 
   const routesForTable = [
@@ -555,11 +566,6 @@ export default function OrganizeRoutePage() {
       { key: 'B' as const, name: routeNames.B, data: routeB },
   ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0);
 
-  const totalStops = routesForTable.reduce((sum, r) => sum + r.data.stops.length, 0);
-  const totalDistance = routesForTable.reduce((sum, r) => sum + r.data.distanceMeters, 0);
-  const totalDurationSeconds = routesForTable.reduce((sum, r) => {
-    return sum + (r.data.duration ? parseInt(r.data.duration.replace('s', ''), 10) : 0);
-  }, 0);
 
   return (
     <>
@@ -653,79 +659,85 @@ export default function OrganizeRoutePage() {
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
                   ) : (
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                        <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className='w-12'></TableHead>
-                                <TableHead>Rota</TableHead>
-                                <TableHead>Paradas</TableHead>
-                                <TableHead>Distância</TableHead>
-                                <TableHead>Tempo</TableHead>
-                                <TableHead>Frete R$</TableHead>
-                                <TableHead className='w-[35%]'>Linha do Tempo</TableHead>
-                                <TableHead className='w-32 text-right'>Ações</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                        {routesForTable.map(routeItem => (
-                             <TableRow key={routeItem.key}>
-                                <TableCell className="align-middle">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
-                                        {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                                    </Button>
-                                </TableCell>
-                                <TableCell>
-                                    <EditableRouteName
-                                      name={routeItem.name}
-                                      onChange={(newName) =>
-                                        setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
-                                      }
-                                    />
-                                </TableCell>
-                                <TableCell>{routeItem.data.stops.length}</TableCell>
-                                <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
-                                <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
-                                <TableCell>{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
-                                <TableCell>
-                                    <RouteTimeline
-                                      routeKey={routeItem.key}
-                                      stops={routeItem.data.stops}
-                                      color={routeItem.data.color}
-                                      dragDelay={DRAG_DELAY}
-                                      onStopClick={(stop) => {
-                                        const id = String(stop.id ?? stop.placeId ?? "");
-                                        if (id) mapApiRef.current?.openStopInfo(id);
-                                      }}
-                                    />
-                                </TableCell>
-                                <TableCell className="text-right">
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm" 
-                                        onClick={() => handleOptimizeSingleRoute(routeItem.key)}
-                                        disabled={isOptimizing[routeItem.key]}
-                                    >
-                                        {isOptimizing[routeItem.key] ? (
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <Wand2 className="mr-2 h-4 w-4" />
-                                        )}
-                                        Otimizar
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                        </TableBody>
-                    </Table>
-                    </DndContext>
+                    routesForTable.length > 0 ? (
+                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                            <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className='w-12'></TableHead>
+                                    <TableHead>Rota</TableHead>
+                                    <TableHead>Paradas</TableHead>
+                                    <TableHead>Distância</TableHead>
+                                    <TableHead>Tempo</TableHead>
+                                    <TableHead>Frete R$</TableHead>
+                                    <TableHead className='w-[35%]'>Linha do Tempo</TableHead>
+                                    <TableHead className='w-32 text-right'>Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                            {routesForTable.map(routeItem => (
+                                <TableRow key={routeItem.key}>
+                                    <TableCell className="align-middle">
+                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
+                                            {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                        </Button>
+                                    </TableCell>
+                                    <TableCell>
+                                        <EditableRouteName
+                                        name={routeItem.name}
+                                        onChange={(newName) =>
+                                            setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
+                                        }
+                                        />
+                                    </TableCell>
+                                    <TableCell>{routeItem.data.stops.length}</TableCell>
+                                    <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
+                                    <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
+                                    <TableCell>{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
+                                    <TableCell>
+                                        <RouteTimeline
+                                        routeKey={routeItem.key}
+                                        stops={routeItem.data.stops}
+                                        color={routeItem.data.color}
+                                        dragDelay={DRAG_DELAY}
+                                        onStopClick={(stop) => {
+                                            const id = String(stop.id ?? stop.placeId ?? "");
+                                            if (id) mapApiRef.current?.openStopInfo(id);
+                                        }}
+                                        />
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            onClick={() => handleOptimizeSingleRoute(routeItem.key)}
+                                            disabled={isOptimizing[routeItem.key]}
+                                        >
+                                            {isOptimizing[routeItem.key] ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Wand2 className="mr-2 h-4 w-4" />
+                                            )}
+                                            Otimizar
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                            </TableBody>
+                        </Table>
+                        </DndContext>
+                     ) : (
+                        <div className="flex h-48 items-center justify-center text-muted-foreground">
+                            Nenhuma rota pendente para organizar.
+                        </div>
+                     )
                   )}
                 </div>
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {routesForTable.map(routeItem => (
+                {routesForTable.length > 0 ? routesForTable.map(routeItem => (
                   <Card key={routeItem.key}>
                     <CardHeader>
                       <CardTitle>{routeItem.name}</CardTitle>
@@ -763,84 +775,65 @@ export default function OrganizeRoutePage() {
                       </p>
                     </CardContent>
                   </Card>
-                ))}
+                )) : (
+                     <div className="md:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
+                        Nenhuma rota pendente para atribuir.
+                    </div>
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="review" className="m-0">
-              <div className="grid grid-cols-3 gap-6">
-                <div className="col-span-2 space-y-4">
-                  <h4 className="font-semibold">Resumo da Rota</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Calendar className="h-4 w-4" /> Data:{' '}
-                      <span className="font-semibold text-foreground">
-                        {routeDate ? format(new Date(routeDate), 'dd/MM/yyyy', {
-                          locale: ptBR,
-                        }) : '--'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Clock className="h-4 w-4" /> Horário:{' '}
-                      <span className="font-semibold text-foreground">
-                        {routeTime}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Milestone className="h-4 w-4" /> Distância Total:{' '}
-                      <span className="font-semibold text-foreground">
-                        {formatDistance(totalDistance)} km
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Clock className="h-4 w-4" /> Tempo Estimado:{' '}
-                      <span className="font-semibold text-foreground">
-                        {formatDuration(`${totalDurationSeconds}s`)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <List className="h-4 w-4" /> Total de Paradas:{' '}
-                      <span className="font-semibold text-foreground">
-                        {totalStops}
-                      </span>
-                    </div>
-                  </div>
-                   <div className="space-y-2">
-                        <h5 className='font-medium text-sm'>Atribuições</h5>
-                        {routesForTable.map(routeItem => {
-                           const driver = drivers.find(d => d.id === assignedDrivers[routeItem.key]);
-                           return (
-                                <div key={routeItem.key} className="flex items-center justify-between rounded-md border p-3 text-sm">
-                                    <span className='font-semibold'>{routeItem.name}</span>
-                                    <div className='flex items-center gap-2'>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {routesForTable.length > 0 ? routesForTable.map(routeItem => {
+                        const driver = drivers.find(d => d.id === assignedDrivers[routeItem.key]);
+                        const isSavingRoute = isSaving[routeItem.key];
+
+                        return (
+                            <Card key={routeItem.key}>
+                                <CardHeader>
+                                    <CardTitle>{routeItem.name}</CardTitle>
+                                    <CardDescription>
+                                        {routeItem.data.stops.length} paradas • {formatDistance(routeItem.data.distanceMeters)} km • {formatDuration(routeItem.data.duration)}
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="flex items-center justify-between rounded-lg border p-3">
+                                        <span className="text-sm font-medium text-muted-foreground">Motorista</span>
                                         {driver ? (
-                                            <>
-                                                <User className='h-4 w-4 text-muted-foreground'/>
-                                                <span className='text-foreground'>{driver.name}</span>
-                                            </>
+                                            <div className="flex items-center gap-2">
+                                                <Avatar className="h-6 w-6">
+                                                    <AvatarImage src={driver.avatarUrl} alt={driver.name} />
+                                                    <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                                <span className="text-sm font-semibold">{driver.name}</span>
+                                            </div>
                                         ) : (
-                                            <span className='text-destructive'>Não atribuído</span>
+                                            <span className="text-sm font-medium text-destructive">Não Atribuído</span>
                                         )}
                                     </div>
-                                </div>
-                           )
-                        })}
-                   </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
+                                    </div>
+                                </CardContent>
+                                <CardFooter>
+                                     <Button 
+                                        className="w-full" 
+                                        onClick={() => handleDispatchRoute(routeItem.key)} 
+                                        disabled={isSavingRoute || !driver}
+                                    >
+                                        {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
+                                        {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        )
+                    }) : (
+                        <div className="md:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
+                            Nenhuma rota pendente para revisar.
+                        </div>
+                    )}
                 </div>
-                <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                  <div>
-                    <h4 className="font-semibold">Finalizar</h4>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Após revisar, salve a rota para enviá-la ao motorista e
-                      iniciar o monitoramento.
-                    </p>
-                  </div>
-                  <Button className="w-full" onClick={handleSaveAndDispatch} disabled={isSaving}>
-                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
-                    {isSaving ? 'Salvando...' : 'Salvar e Despachar Rota(s)'}
-                  </Button>
-                </div>
-              </div>
             </TabsContent>
           </CardContent>
         </Tabs>
