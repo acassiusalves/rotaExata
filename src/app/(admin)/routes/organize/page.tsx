@@ -92,6 +92,9 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
+import { db } from '@/lib/firebase/client';
+import { collection, addDoc, serverTimestamp } from "firebase/firestore"; 
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
 interface RouteData {
@@ -300,11 +303,14 @@ export default function OrganizeRoutePage() {
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
   const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isSaving, setIsSaving] = React.useState(false);
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
   const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
+  const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+
 
   // State for Add Service Dialog
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
@@ -353,9 +359,7 @@ export default function OrganizeRoutePage() {
 
       calculateRoutes();
     } else {
-      console.log('No route data found in session storage.');
-      setIsLoading(false);
-      // router.push('/routes/new');
+      router.push('/routes/new');
     }
   }, [router]);
 
@@ -450,6 +454,73 @@ export default function OrganizeRoutePage() {
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
     setter(prev => prev ? { ...prev, visible: !prev.visible } : null);
   };
+  
+  const handleAssignDriver = (routeKey: 'A' | 'B', driverId: string) => {
+    setAssignedDrivers(prev => ({...prev, [routeKey]: driverId}));
+  };
+  
+  const handleSaveAndDispatch = async () => {
+    if (!routeData) return;
+    setIsSaving(true);
+    
+    const routesToSave = routesForTable.filter(r => r.data);
+    
+    // Validation
+    for (const routeItem of routesToSave) {
+        if (!assignedDrivers[routeItem.key]) {
+            toast({
+                variant: 'destructive',
+                title: 'Motorista não atribuído',
+                description: `Por favor, atribua um motorista para a ${routeItem.name}.`,
+            });
+            setIsSaving(false);
+            return;
+        }
+    }
+
+    try {
+        const savePromises = routesToSave.map(routeItem => {
+            const driverId = assignedDrivers[routeItem.key];
+            const driver = drivers.find(d => d.id === driverId);
+            
+            const routeDoc = {
+                name: routeItem.name,
+                status: 'dispatched',
+                createdAt: serverTimestamp(),
+                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+                origin: routeData.origin,
+                stops: routeItem.data.stops,
+                distanceMeters: routeItem.data.distanceMeters,
+                duration: routeItem.data.duration,
+                encodedPolyline: routeItem.data.encodedPolyline,
+                color: routeItem.data.color,
+                driverId: driverId,
+                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+            };
+            return addDoc(collection(db, "routes"), routeDoc);
+        });
+        
+        await Promise.all(savePromises);
+
+        toast({
+            title: 'Rotas Salvas com Sucesso!',
+            description: `${routesToSave.length} rota(s) foram despachadas para os motoristas.`,
+        });
+        
+        sessionStorage.removeItem('newRouteData');
+        router.push('/routes');
+
+    } catch (error) {
+        console.error("Error saving routes:", error);
+        toast({
+            variant: 'destructive',
+            title: 'Falha ao Salvar Rota',
+            description: 'Ocorreu um erro ao tentar salvar as rotas no banco de dados.',
+        });
+    } finally {
+        setIsSaving(false);
+    }
+  };
 
 
   if (isLoading && !routeData) {
@@ -462,6 +533,7 @@ export default function OrganizeRoutePage() {
   }
 
   if (!routeData) {
+    // Should be redirected by useEffect, but as a fallback:
     return (
       <div className="flex h-screen items-center justify-center">
         <p>
@@ -478,22 +550,16 @@ export default function OrganizeRoutePage() {
   const { origin, routeDate, routeTime } = routeData;
   const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r && !!r.visible);
 
-  const totalStops = (routeA?.stops.length || 0) + (routeB?.stops.length || 0);
-  const totalDistance =
-    (routeA?.distanceMeters || 0) + (routeB?.distanceMeters || 0);
-
-  const durationA = routeA?.duration
-    ? parseInt(routeA.duration.replace('s', ''))
-    : 0;
-  const durationB = routeB?.duration
-    ? parseInt(routeB.duration.replace('s', ''))
-    : 0;
-  const totalDurationSeconds = durationA + durationB;
-
   const routesForTable = [
       { key: 'A' as const, name: routeNames.A, data: routeA },
       { key: 'B' as const, name: routeNames.B, data: routeB },
-  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data);
+  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0);
+
+  const totalStops = routesForTable.reduce((sum, r) => sum + r.data.stops.length, 0);
+  const totalDistance = routesForTable.reduce((sum, r) => sum + r.data.distanceMeters, 0);
+  const totalDurationSeconds = routesForTable.reduce((sum, r) => {
+    return sum + (r.data.duration ? parseInt(r.data.duration.replace('s', ''), 10) : 0);
+  }, 0);
 
   return (
     <>
@@ -658,48 +724,46 @@ export default function OrganizeRoutePage() {
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
-              <div className="grid grid-cols-3 gap-6">
-                <div className="col-span-2">
-                  <h4 className="mb-2 font-semibold">Selecionar Motorista</h4>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Escolha um motorista disponível..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {drivers
-                        .filter((d) => d.status === 'available')
-                        .map((driver) => (
-                          <SelectItem key={driver.id} value={driver.id}>
-                            <div className="flex items-center gap-3">
-                              <span
-                                className={`h-2 w-2 rounded-full bg-green-500`}
-                              />
-                              <span>{driver.name}</span>
-                              <span className="ml-auto text-xs text-muted-foreground">
-                                {driver.vehicle.type}
-                              </span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Apenas motoristas com status "Disponível" são mostrados.
-                  </p>
-                </div>
-                <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
-                  <div>
-                    <h4 className="font-semibold">Atribuição</h4>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Atribua a rota a um motorista para iniciar o processo de
-                      entrega.
-                    </p>
-                  </div>
-                  <Button variant="secondary" className="w-full">
-                    <User className="mr-2 h-4 w-4" />
-                    Atribuir Motorista
-                  </Button>
-                </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {routesForTable.map(routeItem => (
+                  <Card key={routeItem.key}>
+                    <CardHeader>
+                      <CardTitle>{routeItem.name}</CardTitle>
+                      <CardDescription>Atribua um motorista para esta rota.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Select 
+                        value={assignedDrivers[routeItem.key] || ''}
+                        onValueChange={(driverId) => handleAssignDriver(routeItem.key, driverId)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Escolha um motorista disponível..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {drivers
+                            .filter((d) => d.status === 'available')
+                            .map((driver) => (
+                              <SelectItem key={driver.id} value={driver.id}>
+                                <div className="flex items-center gap-3">
+                                  <Avatar className='h-6 w-6'>
+                                    <AvatarImage src={driver.avatarUrl} alt={driver.name} />
+                                    <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
+                                  </Avatar>
+                                  <span>{driver.name}</span>
+                                  <span className="ml-auto text-xs text-muted-foreground">
+                                    {driver.vehicle.type}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                       <p className="mt-2 text-xs text-muted-foreground">
+                        Apenas motoristas com status "Disponível" são mostrados.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             </TabsContent>
 
@@ -740,12 +804,28 @@ export default function OrganizeRoutePage() {
                         {totalStops}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <User className="h-4 w-4" /> Motorista:{' '}
-                      <span className="font-semibold text-foreground">--</span>
-                    </div>
-
                   </div>
+                   <div className="space-y-2">
+                        <h5 className='font-medium text-sm'>Atribuições</h5>
+                        {routesForTable.map(routeItem => {
+                           const driver = drivers.find(d => d.id === assignedDrivers[routeItem.key]);
+                           return (
+                                <div key={routeItem.key} className="flex items-center justify-between rounded-md border p-3 text-sm">
+                                    <span className='font-semibold'>{routeItem.name}</span>
+                                    <div className='flex items-center gap-2'>
+                                        {driver ? (
+                                            <>
+                                                <User className='h-4 w-4 text-muted-foreground'/>
+                                                <span className='text-foreground'>{driver.name}</span>
+                                            </>
+                                        ) : (
+                                            <span className='text-destructive'>Não atribuído</span>
+                                        )}
+                                    </div>
+                                </div>
+                           )
+                        })}
+                   </div>
                 </div>
                 <div className="col-span-1 flex flex-col justify-between rounded-lg border bg-muted/30 p-4">
                   <div>
@@ -755,9 +835,9 @@ export default function OrganizeRoutePage() {
                       iniciar o monitoramento.
                     </p>
                   </div>
-                  <Button className="w-full">
-                    <Truck className="mr-2 h-4 w-4" />
-                    Salvar e Despachar Rota
+                  <Button className="w-full" onClick={handleSaveAndDispatch} disabled={isSaving}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
+                    {isSaving ? 'Salvando...' : 'Salvar e Despachar Rota(s)'}
                   </Button>
                 </div>
               </div>
