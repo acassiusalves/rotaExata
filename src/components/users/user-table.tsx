@@ -25,6 +25,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import { Timestamp } from 'firebase/firestore';
 
 const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
     admin: { label: 'Admin', variant: 'default' },
@@ -54,8 +55,11 @@ export const columns: ColumnDef<User>[] = [
     accessorKey: 'createdAt',
     header: 'Criado em',
     cell: ({ row }) => {
-      const date = (row.getValue('createdAt') as any)?.toDate();
-      if (!date) return 'Data inválida';
+      const createdAtValue = row.getValue('createdAt') as { seconds: number; nanoseconds: number };
+      if (!createdAtValue || typeof createdAtValue.seconds !== 'number') {
+        return 'Data inválida';
+      }
+      const date = new Timestamp(createdAtValue.seconds, createdAtValue.nanoseconds).toDate();
       return <div>{format(date, 'dd/MM/yyyy HH:mm', { locale: ptBR })}</div>;
     },
   },

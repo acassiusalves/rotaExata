@@ -35,7 +35,27 @@ const users: User[] = [
   },
 ];
 
+// Helper to convert Firestore Timestamps to a serializable format
+const serializeUsers = (users: User[]): any[] => {
+  return users.map(user => {
+    const { createdAt, ...rest } = user;
+    if (createdAt instanceof Timestamp) {
+      return {
+        ...rest,
+        createdAt: {
+          seconds: createdAt.seconds,
+          nanoseconds: createdAt.nanoseconds
+        }
+      };
+    }
+    return user;
+  });
+};
+
+
 export default function UsersPage() {
+  const serializableUsers = serializeUsers(users);
+  
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -58,7 +78,7 @@ export default function UsersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UserTable users={users} />
+          <UserTable users={serializableUsers} />
         </CardContent>
       </Card>
     </div>
