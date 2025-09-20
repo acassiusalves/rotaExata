@@ -9,7 +9,7 @@ import { doc, Timestamp } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -53,6 +53,12 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col p-0">
+             <DialogHeader className="sr-only">
+              <DialogTitle>Mapa da Rota: {route.name}</DialogTitle>
+              <DialogDescription>
+                Visualização em tempo real da rota atribuída a {route.driverInfo?.name}.
+              </DialogDescription>
+            </DialogHeader>
             <div className="relative flex-1 w-full h-full">
                 <header className="absolute left-0 top-0 z-10 flex w-full items-center justify-between bg-gradient-to-b from-black/50 to-transparent p-4">
                     <div className="flex items-center gap-3 rounded-full bg-gray-900/80 p-2 pr-4 text-white shadow-lg backdrop-blur-sm">
