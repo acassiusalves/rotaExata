@@ -168,7 +168,7 @@ export default function MonitoringPage() {
                 <div>
                   <p className="font-semibold">{route.driverInfo?.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {route.driverInfo?.vehicle}
+                    {route.driverInfo?.vehicle ? `${route.driverInfo.vehicle} - ${route.driverInfo.plate}` : 'Veículo não informado'}
                   </p>
                 </div>
               </div>
