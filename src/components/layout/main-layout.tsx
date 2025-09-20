@@ -7,12 +7,14 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   
   // Special layout for new route page
-  const isFullHeightPage = ['/routes/new', '/routes/organize'].includes(pathname);
+  const isFullHeightPage = ['/routes/new', '/routes/organize'].includes(pathname) || pathname.startsWith('/routes/map/');
+
 
   if (isFullHeightPage) {
      return (
       <div className="flex h-screen w-full flex-col">
-        <Header />
+        {/* Do not render header on map page */}
+        {!pathname.startsWith('/routes/map/') && <Header />}
         <main className="flex-1 overflow-hidden">{children}</main>
       </div>
     );
