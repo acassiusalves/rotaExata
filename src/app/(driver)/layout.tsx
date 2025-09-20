@@ -11,7 +11,7 @@ export default function DriverLayout({
   
   return (
     <MainLayout>
-        {children}
+        <div className="max-w-md mx-auto w-full">{children}</div>
     </MainLayout>
   );
 }
