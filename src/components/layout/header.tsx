@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -16,6 +17,7 @@ import {
   Settings,
   LayoutDashboard,
   Smartphone,
+  Monitor,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -110,8 +112,15 @@ export function Header() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
              <DropdownMenuItem asChild>
-              <Link href="/routes">Ver Rotas</Link>
+              <Link href="/routes">Rotas Ativas</Link>
             </DropdownMenuItem>
+             <DropdownMenuItem asChild>
+              <Link href="/routes/monitoring">
+                <Monitor className="mr-2 h-4 w-4" />
+                Monitoramento
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link href="/routes/new">Criar Nova Rota</Link>
             </DropdownMenuItem>
@@ -173,6 +182,10 @@ export function Header() {
                 <DropdownMenuItem asChild>
                   <Link href="/routes">Ver Rotas</Link>
                 </DropdownMenuItem>
+                 <DropdownMenuItem asChild>
+                  <Link href="/routes/monitoring">Monitoramento</Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link href="/routes/new">Nova Rota</Link>
                 </DropdownMenuItem>
