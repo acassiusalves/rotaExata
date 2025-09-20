@@ -2,7 +2,6 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
 import {
   Home,
   Loader2,
@@ -26,6 +25,7 @@ import {
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { RouteMapDialog } from '@/components/routes/route-map-dialog';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -37,6 +37,7 @@ type RouteDocument = RouteInfo & {
     plate: string;
   } | null;
   plannedDate: Timestamp;
+  origin: PlaceValue;
 };
 
 const DateBadge: React.FC<{ date: Date }> = ({ date }) => (
@@ -76,6 +77,8 @@ const Rotograma: React.FC<{ stops: PlaceValue[], color?: string }> = ({ stops, c
 export default function MonitoringPage() {
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
+  const [isMapOpen, setIsMapOpen] = React.useState(false);
 
   React.useEffect(() => {
     const q = query(collection(db, 'routes'), orderBy('plannedDate', 'desc'));
@@ -109,6 +112,11 @@ export default function MonitoringPage() {
     }
     return name.substring(0, 2);
   };
+  
+  const handleOpenMap = (route: RouteDocument) => {
+    setSelectedRoute(route);
+    setIsMapOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -135,62 +143,71 @@ export default function MonitoringPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-md border bg-card text-card-foreground shadow-sm">
-        {/* Header */}
-        <div className="grid grid-cols-12 gap-4 border-b px-4 py-2 font-medium text-muted-foreground">
-          <div className="col-span-1">Data</div>
-          <div className="col-span-2">Operador</div>
-          <div className="col-span-1">Status</div>
-          <div className="col-span-1 text-center">Ocorrências</div>
-          <div className="col-span-1 text-center">Sucessos</div>
-          <div className="col-span-1 text-center">Falhas</div>
-          <div className="col-span-1 text-center">Sucessos</div>
-          <div className="col-span-3">Rotograma</div>
-          <div className="col-span-1 text-right"></div>
-        </div>
-        {/* Body */}
-        <div className="divide-y">
-          {routes.map((route) => (
-            <div
-              key={route.id}
-              className="grid grid-cols-12 gap-4 items-center px-4 py-3"
-            >
-              <div className="col-span-1">
-                <DateBadge date={route.plannedDate.toDate()} />
-              </div>
-              <div className="col-span-2 flex items-center gap-2">
-                <Avatar className="h-9 w-9">
-                  <AvatarFallback>
-                    {route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-semibold">{route.driverInfo?.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {route.driverInfo?.vehicle ? `${route.driverInfo.vehicle} - ${route.driverInfo.plate}` : 'Veículo não informado'}
-                  </p>
+    <>
+      <div className="space-y-4">
+        <div className="rounded-md border bg-card text-card-foreground shadow-sm">
+          {/* Header */}
+          <div className="grid grid-cols-12 gap-4 border-b px-4 py-2 font-medium text-muted-foreground">
+            <div className="col-span-1">Data</div>
+            <div className="col-span-2">Operador</div>
+            <div className="col-span-1">Status</div>
+            <div className="col-span-1 text-center">Ocorrências</div>
+            <div className="col-span-1 text-center">Sucessos</div>
+            <div className="col-span-1 text-center">Falhas</div>
+            <div className="col-span-1 text-center">Sucessos</div>
+            <div className="col-span-3">Rotograma</div>
+            <div className="col-span-1 text-right"></div>
+          </div>
+          {/* Body */}
+          <div className="divide-y">
+            {routes.map((route) => (
+              <div
+                key={route.id}
+                className="grid grid-cols-12 gap-4 items-center px-4 py-3"
+              >
+                <div className="col-span-1">
+                  <DateBadge date={route.plannedDate.toDate()} />
+                </div>
+                <div className="col-span-2 flex items-center gap-2">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback>
+                      {route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">{route.driverInfo?.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {route.driverInfo?.vehicle ? `${route.driverInfo.vehicle} - ${route.driverInfo.plate}` : 'Veículo não informado'}
+                    </p>
+                  </div>
+                </div>
+                <div className="col-span-1">
+                  <Badge variant="secondary">{route.status}</Badge>
+                </div>
+                <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
+                <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
+                <div className="col-span-1 text-center font-medium text-destructive">0</div>
+                <div className="col-span-1 text-center font-medium text-green-600">0</div>
+                <div className="col-span-3">
+                   <Rotograma stops={route.stops} color={route.color} />
+                </div>
+                <div className="col-span-1 text-right">
+                  <Button variant="link" size="sm" onClick={() => handleOpenMap(route)}>
+                    VER MAPA
+                  </Button>
                 </div>
               </div>
-              <div className="col-span-1">
-                <Badge variant="secondary">{route.status}</Badge>
-              </div>
-              <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
-              <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
-              <div className="col-span-1 text-center font-medium text-destructive">0</div>
-              <div className="col-span-1 text-center font-medium text-green-600">0</div>
-              <div className="col-span-3">
-                 <Rotograma stops={route.stops} color={route.color} />
-              </div>
-              <div className="col-span-1 text-right">
-                <Button variant="link" size="sm" asChild>
-                  <Link href={`/routes/map/${route.id}`}>VER MAPA</Link>
-                </Button>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+      {selectedRoute && (
+          <RouteMapDialog
+              isOpen={isMapOpen}
+              onClose={() => setIsMapOpen(false)}
+              route={selectedRoute}
+          />
+      )}
+    </>
   );
 }
