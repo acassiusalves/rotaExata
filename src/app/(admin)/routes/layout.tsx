@@ -34,11 +34,9 @@ export default function RoutesLayout({
             <Tabs value={pathname}>
               <TabsList>
                 {tabs.map((tab) => (
-                  <Link key={tab.href} href={tab.href} passHref>
-                    <TabsTrigger value={tab.href} asChild>
-                      <a>{tab.name}</a>
-                    </TabsTrigger>
-                  </Link>
+                  <TabsTrigger key={tab.href} value={tab.href} asChild>
+                    <Link href={tab.href}>{tab.name}</Link>
+                  </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
