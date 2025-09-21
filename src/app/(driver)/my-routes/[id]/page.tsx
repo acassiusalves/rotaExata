@@ -83,6 +83,16 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
     return () => unsubscribe();
   }, [params.id]);
 
+  const handleNavigation = (stop: PlaceValue) => {
+    if (!stop) return;
+    // Use latitude e longitude para precisão, se disponíveis.
+    const query = stop.lat && stop.lng 
+      ? `${stop.lat},${stop.lng}` 
+      : encodeURIComponent(stop.address);
+    const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    window.open(url, '_blank');
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-[calc(100vh-10rem)] items-center justify-center">
@@ -148,7 +158,7 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
                             <div className="font-semibold">{stop.customerName || 'Endereço'}</div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
                             <div className="flex gap-2 pt-2">
-                                 <Button size="sm" variant="outline">
+                                 <Button size="sm" variant="outline" onClick={() => handleNavigation(stop)}>
                                     <Navigation className="mr-2 h-4 w-4" />
                                     Navegar
                                  </Button>
