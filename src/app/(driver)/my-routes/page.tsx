@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import {
   Card,
   CardContent,
@@ -35,7 +36,7 @@ const RouteCard: React.FC<{ route: RouteDocument }> = ({ route }) => (
   <Card className="w-full shadow-md">
     <CardContent className="pt-6">
       <div className="text-center space-y-2">
-        <h3 className="font-semibold text-lg">ROTA</h3>
+        <h3 className="font-semibold text-lg">{route.name}</h3>
         <p className="text-sm text-muted-foreground">
           {format(route.plannedDate.toDate(), 'dd/MM/yyyy - HH:mm', {
             locale: ptBR,
@@ -44,7 +45,7 @@ const RouteCard: React.FC<{ route: RouteDocument }> = ({ route }) => (
         <div className="flex justify-around items-center pt-4">
           <div className="flex flex-col items-center gap-1">
             <MapPin className="h-5 w-5 text-muted-foreground" />
-            <span className="text-xs font-bold">{route.stops.length} STOPS</span>
+            <span className="text-xs font-bold">{route.stops.length} PARADAS</span>
           </div>
           <div className="flex flex-col items-center gap-1">
             <ArrowRightLeft className="h-5 w-5 text-muted-foreground" />
@@ -58,8 +59,8 @@ const RouteCard: React.FC<{ route: RouteDocument }> = ({ route }) => (
       </div>
     </CardContent>
     <CardFooter>
-      <Button variant="link" className="w-full text-accent font-bold">
-        VISUALIZAR
+      <Button asChild className="w-full text-accent font-bold" variant="link">
+        <Link href={`/my-routes/${route.id}`}>VISUALIZAR</Link>
       </Button>
     </CardFooter>
   </Card>
@@ -128,7 +129,7 @@ export default function MyRoutesPage() {
   return (
     <div className="space-y-4 py-4">
        <div className="flex items-center justify-between px-4">
-        <h1 className="text-xl font-bold">Rotas</h1>
+        <h1 className="text-xl font-bold">Minhas Rotas</h1>
       </div>
       {routes.map((route) => (
         <RouteCard key={route.id} route={route} />
