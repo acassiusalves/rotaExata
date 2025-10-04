@@ -14,6 +14,9 @@ export const inviteUser = onCall(
     const d=req.data||{};
     const email=String(d.email||"").trim().toLowerCase();
     const role=String(d.role||"").trim();
+    const displayName=String(d.displayName||"");
+    const phone=String(d.phone||"");
+
     if(!email||!role){
       throw new HttpsError(
         "invalid-argument",
@@ -29,13 +32,22 @@ export const inviteUser = onCall(
         user=await auth.createUser({
           email,
           password:crypto.randomUUID(),
-          emailVerified:false
+          emailVerified:false,
+          displayName: displayName || undefined,
         });
       }
+
+      // Update auth user if displayName is provided and different
+      if (displayName && user.displayName !== displayName) {
+        await auth.updateUser(user.uid, { displayName });
+      }
+
       await db.collection("users").doc(user.uid).set(
         {
           email,
           role,
+          displayName: displayName || '',
+          phone: phone || '',
           createdAt:FieldValue.serverTimestamp(),
           updatedAt:FieldValue.serverTimestamp()
         },
@@ -55,7 +67,8 @@ export const inviteUser = onCall(
 );
 
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
-export const authUserMirror=functionsV1.auth.user()
+export const authUserMirror=functionsV1.region("southamerica-east1")
+  .auth.user()
   .onCreate(async (u:any)=>{
     const email=(u.email||"").toLowerCase();
     const db=getFirestore();
@@ -63,10 +76,15 @@ export const authUserMirror=functionsV1.auth.user()
     await db.runTransaction(async (tx)=>{
       const snap=await tx.get(ref);
       if(snap.exists){
-        tx.set(ref,
-          {email,updatedAt:FieldValue.serverTimestamp()},
-          {merge:true}
-        );
+        const existingData = snap.data() || {};
+        const updateData: any = {
+            email,
+            updatedAt: FieldValue.serverTimestamp()
+        };
+        if (u.displayName && !existingData.displayName) {
+            updateData.displayName = u.displayName;
+        }
+        tx.set(ref, updateData, {merge: true});
       }else{
         // Define 'admin' role for specific email, otherwise default to 'vendedor'
         const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
@@ -74,6 +92,8 @@ export const authUserMirror=functionsV1.auth.user()
           {
             email,
             role: role,
+            displayName: u.displayName || '',
+            phone: u.phoneNumber || '',
             createdAt:FieldValue.serverTimestamp(),
             updatedAt:FieldValue.serverTimestamp()
           }
@@ -103,6 +123,7 @@ export const syncAuthUsers=onCall(
         {
           email: userRecord.email,
           role: role,
+          displayName: userRecord.displayName || '',
           updatedAt:FieldValue.serverTimestamp()
         },
         {merge:true}

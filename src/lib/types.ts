@@ -1,4 +1,3 @@
-
 import type { LucideIcon } from 'lucide-react';
 import type { Timestamp } from 'firebase/firestore';
 
@@ -72,6 +71,7 @@ export type DriverStatus = 'offline' | 'available' | 'busy';
 export type Driver = {
   id: string;
   name: string;
+  email: string;
   phone: string;
   status: DriverStatus;
   vehicle: {

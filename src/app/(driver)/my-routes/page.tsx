@@ -16,6 +16,7 @@ import {
   Loader2,
   Route,
   Bell,
+  ShieldAlert,
 } from 'lucide-react';
 import { db } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
@@ -23,7 +24,8 @@ import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { requestPushPermission, saveCourierToken, onForegroundNotification } from '@/lib/firebase/messaging';
+import { requestPushPermission, saveCourierToken, onForegroundNotification, isPushSupported } from '@/lib/firebase/messaging';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 type RouteDocument = {
   id: string;
@@ -75,6 +77,9 @@ export default function MyRoutesPage() {
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isPushLoading, setIsPushLoading] = React.useState(false);
+  const [pushSupported, setPushSupported] = React.useState(true);
+  const [pushBlocked, setPushBlocked] = React.useState(false);
+  const [pushError, setPushError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -84,9 +89,39 @@ export default function MyRoutesPage() {
     });
   }, [toast]);
 
+  React.useEffect(() => {
+    isPushSupported()
+      .then((supported) => {
+        setPushSupported(supported);
+        if (typeof window !== 'undefined' && 'Notification' in window) {
+          setPushBlocked(Notification.permission === 'denied');
+        }
+      })
+      .catch(() => {
+        setPushSupported(false);
+      });
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && 'Notification' in window) {
+        setPushBlocked(Notification.permission === 'denied');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   async function enablePush() {
     if (!user) {
       toast({ variant: 'destructive', title: 'Erro', description: 'Você precisa estar logado.' });
+      return;
+    }
+    if (!pushSupported) {
+      toast({ variant: 'destructive', title: 'Navegador não suportado', description: 'As notificações push não estão disponíveis neste dispositivo.' });
       return;
     }
     setIsPushLoading(true);
@@ -98,11 +133,49 @@ export default function MyRoutesPage() {
       const token = await requestPushPermission(vapidKey);
       await saveCourierToken(user.uid, token);
       toast({ title: 'Notificações ativadas!', description: 'Você receberá alertas de novas rotas.' });
+      setPushBlocked(false);
+      setPushError(null);
     } catch (e: any) {
       console.error('Push notification error:', e);
-      toast({ variant: 'destructive', title: 'Erro ao ativar notificações', description: e.message });
+      const message = /Navegador não suporta Web Push/i.test(e?.message || '')
+        ? 'As notificações push não estão disponíveis neste dispositivo.'
+        : e.message;
+      toast({ variant: 'destructive', title: 'Erro ao ativar notificações', description: message });
+      if (/Notificações bloqueadas/i.test(e?.message || '')) {
+        setPushBlocked(true);
+        setPushError('Notificações bloqueadas no navegador. Libere o envio nas permissões do site e tente novamente.');
+      } else {
+        setPushError(e?.message || 'Erro ao ativar notificações');
+      }
     } finally {
         setIsPushLoading(false);
+    }
+  }
+
+  function openNotificationSettings() {
+    if (typeof window === 'undefined') return;
+    const origin = window.location.origin;
+    const ua = navigator.userAgent.toLowerCase();
+
+    try {
+      if (ua.includes('android') && ua.includes('chrome')) {
+        window.open(`chrome://settings/content/siteDetails?site=${encodeURIComponent(origin)}`);
+      } else if (ua.includes('android') && ua.includes('samsung')) {
+        window.open('samsunginternet://settings/content/notifications');
+      } else if (ua.includes('android') && ua.includes('firefox')) {
+        window.open('about:preferences#privacy', '_blank');
+      } else {
+        toast({
+          title: 'Como liberar notificações',
+          description: 'Abra as configurações do navegador e habilite notificações para este site.',
+        });
+      }
+    } catch (error) {
+      console.error('Falha ao abrir configurações de notificações', error);
+      toast({
+        title: 'Como liberar notificações',
+        description: 'Abra manualmente as configurações do navegador e habilite notificações para este site.',
+      });
     }
   }
 
@@ -158,10 +231,25 @@ export default function MyRoutesPage() {
         <p className="mt-2 text-sm text-muted-foreground">
           Quando uma rota for atribuída a você, ela aparecerá aqui.
         </p>
-         <Button onClick={enablePush} disabled={isPushLoading} className="mt-6">
+         <Button onClick={enablePush} disabled={isPushLoading || !pushSupported} className="mt-6">
             {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
-            {isPushLoading ? 'Ativando...' : 'Ativar Notificações'}
+            {isPushLoading ? 'Ativando...' : pushSupported ? 'Ativar Notificações' : 'Não suportado'}
         </Button>
+        {!pushSupported && (
+          <p className="mt-2 text-xs text-muted-foreground">Este navegador não oferece suporte a notificações push.</p>
+        )}
+        {pushBlocked && pushSupported && (
+          <Alert className="mt-4 w-full max-w-md text-left">
+            <ShieldAlert className="h-4 w-4" />
+            <AlertTitle>Notificações bloqueadas</AlertTitle>
+            <AlertDescription className="space-y-2">
+              <p>{pushError ?? 'Libere o envio de notificações nas permissões do navegador e tente novamente.'}</p>
+              <Button variant="secondary" size="sm" onClick={openNotificationSettings}>
+                Abrir configurações
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
     );
   }
@@ -170,10 +258,27 @@ export default function MyRoutesPage() {
     <div className="space-y-4 py-4">
        <div className="flex items-center justify-between px-4">
         <h1 className="text-xl font-bold">Minhas Rotas</h1>
-         <Button onClick={enablePush} disabled={isPushLoading} variant="outline" size="sm">
+        <div className="flex flex-col items-end">
+          <Button onClick={enablePush} disabled={isPushLoading || !pushSupported} variant="outline" size="sm">
             {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
-            Notificações
-        </Button>
+            {pushSupported ? 'Notificações' : 'Não suportado'}
+          </Button>
+          {!pushSupported && (
+            <p className="mt-1 text-xs text-muted-foreground text-right">O seu navegador não suporta notificações push.</p>
+          )}
+          {pushBlocked && pushSupported && (
+            <Alert className="mt-2 w-full max-w-xs text-left">
+              <ShieldAlert className="h-4 w-4" />
+              <AlertTitle>Notificações bloqueadas</AlertTitle>
+              <AlertDescription className="space-y-2">
+                <p>{pushError ?? 'Permita notificações para receber alertas de novas rotas.'}</p>
+                <Button variant="secondary" size="sm" onClick={openNotificationSettings}>
+                  Abrir configurações
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
       </div>
       {routes.map((route) => (
         <RouteCard key={route.id} route={route} />

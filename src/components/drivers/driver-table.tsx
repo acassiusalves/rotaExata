@@ -46,7 +46,10 @@ export const columns: ColumnDef<Driver>[] = [
           <AvatarImage src={row.original.avatarUrl} alt={row.original.name} />
           <AvatarFallback>{row.original.name.charAt(0)}</AvatarFallback>
         </Avatar>
-        <div className="font-medium">{row.getValue('name')}</div>
+        <div className='flex flex-col'>
+          <div className="font-medium">{row.getValue('name')}</div>
+          <div className="text-xs text-muted-foreground">{row.original.email}</div>
+        </div>
       </div>
     ),
   },
@@ -55,7 +58,7 @@ export const columns: ColumnDef<Driver>[] = [
     header: 'Status',
     cell: ({ row }) => {
       const status = row.getValue('status') as DriverStatus;
-      const { label, className } = statusMap[status] || { label: 'Unknown', className: 'bg-gray-400' };
+      const { label, className } = statusMap[status] || { label: 'Offline', className: 'bg-gray-400' };
       return (
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${className}`} />
