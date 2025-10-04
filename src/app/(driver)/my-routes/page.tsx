@@ -14,12 +14,15 @@ import {
   ShoppingBag,
   Loader2,
   Route,
+  Bell,
 } from 'lucide-react';
 import { db } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useToast } from '@/hooks/use-toast';
+import { requestPushPermission, saveCourierToken, onForegroundNotification } from '@/lib/firebase/messaging';
 
 type RouteDocument = {
   id: string;
@@ -70,6 +73,39 @@ export default function MyRoutesPage() {
   const { user } = useAuth();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isPushLoading, setIsPushLoading] = React.useState(false);
+  const { toast } = useToast();
+
+  React.useEffect(() => {
+    // Listen for incoming messages when the app is in the foreground
+    onForegroundNotification(() => {
+      toast({ title: 'Nova rota recebida!', description: 'Uma nova rota foi atribuída a você.' });
+      // Here you could also trigger a data re-fetch
+    });
+  }, [toast]);
+
+  async function enablePush() {
+    if (!user) {
+      toast({ variant: 'destructive', title: 'Erro', description: 'Você precisa estar logado.' });
+      return;
+    }
+    setIsPushLoading(true);
+    try {
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
+      if (!vapidKey) {
+        throw new Error('VAPID key não configurada no ambiente.');
+      }
+      const token = await requestPushPermission(vapidKey);
+      await saveCourierToken(user.uid, token);
+      toast({ title: 'Notificações ativadas!', description: 'Você receberá alertas de novas rotas.' });
+    } catch (e: any) {
+      console.error('Push notification error:', e);
+      toast({ variant: 'destructive', title: 'Erro ao ativar notificações', description: e.message });
+    } finally {
+        setIsPushLoading(false);
+    }
+  }
+
 
   React.useEffect(() => {
     if (!user) {
@@ -122,6 +158,10 @@ export default function MyRoutesPage() {
         <p className="mt-2 text-sm text-muted-foreground">
           Quando uma rota for atribuída a você, ela aparecerá aqui.
         </p>
+         <Button onClick={enablePush} disabled={isPushLoading} className="mt-6">
+            {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+            {isPushLoading ? 'Ativando...' : 'Ativar Notificações'}
+        </Button>
       </div>
     );
   }
@@ -130,6 +170,10 @@ export default function MyRoutesPage() {
     <div className="space-y-4 py-4">
        <div className="flex items-center justify-between px-4">
         <h1 className="text-xl font-bold">Minhas Rotas</h1>
+         <Button onClick={enablePush} disabled={isPushLoading} variant="outline" size="sm">
+            {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+            Notificações
+        </Button>
       </div>
       {routes.map((route) => (
         <RouteCard key={route.id} route={route} />

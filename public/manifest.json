@@ -1,21 +1,22 @@
 {
-  "name": "RotaExata - Gestão de Entregas",
+  "name": "RotaExata",
   "short_name": "RotaExata",
-  "description": "Aplicativo para gestão e acompanhamento de rotas de entrega.",
-  "start_url": "/",
+  "description": "Sistema de gestão e otimização de rotas de entrega para motoristas.",
+  "start_url": "/my-routes",
   "display": "standalone",
   "background_color": "#F0F2F5",
   "theme_color": "#2962FF",
   "icons": [
     {
-      "src": "/icons/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png"
+      "src": "/icons/pwa-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
     },
     {
-      "src": "/icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "/icons/pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
     }
-  ]
+  ],
+  "gcm_sender_id": "103953800507"
 }

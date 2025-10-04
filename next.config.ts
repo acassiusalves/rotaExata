@@ -4,9 +4,13 @@ import withPWA from 'next-pwa';
 
 const pwaConfig = withPWA({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development',
   register: true,
-  sw: 'service-worker.js',
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development',
+  sw: 'sw.js',
+  fallbacks: {
+    document: '/offline.html',
+  },
 });
 
 const nextConfig: NextConfig = {
