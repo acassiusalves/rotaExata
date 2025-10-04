@@ -40,7 +40,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 
 export function Header() {
   const pathname = usePathname();
-  const { user, signOut } = useAuth();
+  const { user, userRole, signOut } = useAuth();
+  const isDriver = userRole === 'driver';
 
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -79,7 +80,7 @@ export function Header() {
           <BotMessageSquare className="h-6 w-6 text-primary" />
           <span className="sr-only">RotaExata</span>
         </Link>
-        {navItems.map((item) => (
+        {!isDriver && navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -94,50 +95,40 @@ export function Header() {
           </Link>
         ))}
         {/* Routes Dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              className={cn(
-                'gap-1 px-3 py-2 transition-colors hover:text-foreground md:flex',
-                isActive('/routes')
-                  ? 'text-foreground font-semibold'
-                  : 'text-muted-foreground'
-              )}
-            >
-              <Route className="h-4 w-4" />
-              Rotas
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-             <DropdownMenuItem asChild>
-              <Link href="/routes">Rotas Ativas</Link>
-            </DropdownMenuItem>
-             <DropdownMenuItem asChild>
-              <Link href="/routes/monitoring">
-                <Monitor className="mr-2 h-4 w-4" />
-                Monitoramento
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/routes/new">Criar Nova Rota</Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <Link
-            href="/my-routes"
-            className={cn(
-              'flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground',
-               isActive('/my-routes') && 'text-foreground font-semibold'
-            )}
-          >
-            <Smartphone className="h-4 w-4" />
-            App do Motorista
-        </Link>
-
+        {!isDriver && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className={cn(
+                  'gap-1 px-3 py-2 transition-colors hover:text-foreground md:flex',
+                  isActive('/routes')
+                    ? 'text-foreground font-semibold'
+                    : 'text-muted-foreground'
+                )}
+              >
+                <Route className="h-4 w-4" />
+                Rotas
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+               <DropdownMenuItem asChild>
+                <Link href="/routes">Rotas Ativas</Link>
+              </DropdownMenuItem>
+               <DropdownMenuItem asChild>
+                <Link href="/routes/monitoring">
+                  <Monitor className="mr-2 h-4 w-4" />
+                  Monitoramento
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/routes/new">Criar Nova Rota</Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </nav>
       <Sheet>
         <SheetTrigger asChild>
@@ -149,7 +140,7 @@ export function Header() {
         <SheetContent side="left">
           <SheetHeader className="sr-only">
             <SheetTitle>Menu de navegação</SheetTitle>
-            <SheetDescription>Selecione uma seção do painel administrativo.</SheetDescription>
+            <SheetDescription>Selecione uma seção do painel.</SheetDescription>
           </SheetHeader>
           <nav className="grid gap-6 text-lg font-medium">
             <Link
@@ -159,52 +150,58 @@ export function Header() {
               <BotMessageSquare className="h-6 w-6 text-primary" />
               <span className="sr-only">RotaExata</span>
             </Link>
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn('hover:text-foreground', {
-                  'text-muted-foreground': !isActive(item.href),
-                })}
-              >
-                {item.label}
-              </Link>
-            ))}
-             <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  'flex items-center gap-1 text-lg font-medium hover:text-foreground',
-                  {
-                    'text-muted-foreground': !isActive('/routes'),
-                  }
-                )}
-              >
-                Rotas
-                <ChevronDown className="h-4 w-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem asChild>
-                  <Link href="/routes">Ver Rotas</Link>
-                </DropdownMenuItem>
-                 <DropdownMenuItem asChild>
-                  <Link href="/routes/monitoring">Monitoramento</Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href="/routes/new">Nova Rota</Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Link
-                href="/my-routes"
-                className={cn(
-                  'flex items-center gap-2 hover:text-foreground',
-                   isActive('/my-routes') ? 'text-foreground' : 'text-muted-foreground'
-                )}
-              >
-                <Smartphone className="h-5 w-5" />
-                App do Motorista
-              </Link>
+             {!isDriver && (
+              <>
+                {navItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn('hover:text-foreground', {
+                      'text-muted-foreground': !isActive(item.href),
+                    })}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={cn(
+                      'flex items-center gap-1 text-lg font-medium hover:text-foreground',
+                      {
+                        'text-muted-foreground': !isActive('/routes'),
+                      }
+                    )}
+                  >
+                    Rotas
+                    <ChevronDown className="h-4 w-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem asChild>
+                      <Link href="/routes">Ver Rotas</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/routes/monitoring">Monitoramento</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link href="/routes/new">Nova Rota</Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
+             {isDriver && (
+                <Link
+                  href="/my-routes"
+                  className={cn(
+                    'flex items-center gap-2 hover:text-foreground',
+                    isActive('/my-routes') ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                >
+                  <Smartphone className="h-5 w-5" />
+                  Minhas Rotas
+                </Link>
+             )}
           </nav>
         </SheetContent>
       </Sheet>
@@ -232,20 +229,30 @@ export function Header() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>{user?.displayName || user?.email || 'Minha Conta'}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
+            {!isDriver && (
+                <DropdownMenuGroup>
+                    <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                        <Settings className="mr-2 h-4 w-4" />
+                        <span>Configurações</span>
+                    </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                    <Link href="/api">
+                        <Code className="mr-2 h-4 w-4" />
+                        <span>API</span>
+                    </Link>
+                    </DropdownMenuItem>
+                </DropdownMenuGroup>
+            )}
+             {isDriver && (
                 <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Settings className="mr-2 h-4 w-4" />
-                    <span>Configurações</span>
+                  <Link href="/my-routes">
+                    <Route className="mr-2 h-4 w-4" />
+                    <span>Minhas Rotas</span>
                   </Link>
                 </DropdownMenuItem>
-                 <DropdownMenuItem asChild>
-                  <Link href="/api">
-                    <Code className="mr-2 h-4 w-4" />
-                    <span>API</span>
-                  </Link>
-                </DropdownMenuItem>
-            </DropdownMenuGroup>
+             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => signOut()}>
                 <LogOut className="mr-2 h-4 w-4" />
