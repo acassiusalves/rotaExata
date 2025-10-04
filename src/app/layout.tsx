@@ -1,7 +1,7 @@
 
 import type { Metadata } from 'next';
 import './globals.css';
-import { Toaster } from '@/components/ui/toaster';
+// import { Toaster } from '@/components/ui/toaster'; // Removido daqui
 import { AuthProvider } from '@/hooks/use-auth';
 import React from 'react';
 import { ServiceWorkerRegistration } from '@/components/pwa/service-worker-registration';
@@ -33,7 +33,7 @@ export default function RootLayout({
         <AuthProvider>
           {children}
         </AuthProvider>
-        <Toaster />
+        {/* <Toaster /> Foi movido para o AuthProvider */}
         <ServiceWorkerRegistration />
       </body>
     </html>

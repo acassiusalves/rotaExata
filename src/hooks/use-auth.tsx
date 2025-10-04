@@ -6,6 +6,7 @@ import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut as fireba
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import { Toaster } from '@/components/ui/toaster';
 
 interface AuthContextType {
   user: User | null;
@@ -85,7 +86,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signOut,
   };
 
-  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+        {!loading && (
+          <>
+            {children}
+            <Toaster />
+          </>
+        )}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
