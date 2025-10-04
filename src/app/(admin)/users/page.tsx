@@ -1,5 +1,7 @@
+'use client';
 
-import { PlusCircle } from 'lucide-react';
+import * as React from 'react';
+import { PlusCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -10,41 +12,18 @@ import {
 } from '@/components/ui/card';
 import { UserTable } from '@/components/users/user-table';
 import { User } from '@/lib/types';
-import { Timestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase/client';
+import { collection, onSnapshot, Timestamp, query } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-
-// Mock data, em um app real isso viria do Firestore
-const users: User[] = [
-  {
-    uid: 'user-1',
-    email: 'acassiusalves@gmail.com',
-    role: 'admin',
-    createdAt: new Timestamp(1726513200, 0), // Sep 16 2024 16:00:00 GMT-0300 (Brasilia Time)
-  },
-  {
-    uid: 'user-2',
-    email: 'vendedor1@rotaexata.com',
-    role: 'vendedor',
-    createdAt: new Timestamp(1726426800, 0), // Sep 15 2024 16:00:00 GMT-0300
-  },
-  {
-    uid: 'user-3',
-    email: 'motorista@rotaexata.com',
-    role: 'driver',
-    createdAt: new Timestamp(1726340400, 0), // Sep 14 2024 16:00:00 GMT-0300
-  },
-];
-
 // Helper to convert Firestore Timestamps to a serializable format with formatted date string
-const serializeUsers = (users: User[]) => {
+const formatUsersForTable = (users: User[]) => {
   return users.map(user => {
     const { createdAt, ...rest } = user;
     let createdAtString = 'Data inválida';
 
     if (createdAt instanceof Timestamp) {
-      // Format date on the server to prevent hydration issues
       createdAtString = format(createdAt.toDate(), 'dd/MM/yyyy HH:mm', { locale: ptBR });
     } else if (createdAt instanceof Date) {
       createdAtString = format(createdAt, 'dd/MM/yyyy HH:mm', { locale: ptBR });
@@ -59,7 +38,30 @@ const serializeUsers = (users: User[]) => {
 
 
 export default function UsersPage() {
-  const serializableUsers = serializeUsers(users);
+  const [users, setUsers] = React.useState<any[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const q = query(collection(db, 'users'));
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const usersData: User[] = [];
+        querySnapshot.forEach((doc) => {
+          usersData.push({ uid: doc.id, ...doc.data() } as User);
+        });
+        const formattedUsers = formatUsersForTable(usersData);
+        setUsers(formattedUsers);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error("Error fetching users: ", error);
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
   
   return (
     <div className="space-y-4">
@@ -83,7 +85,13 @@ export default function UsersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UserTable users={serializableUsers} />
+          {isLoading ? (
+            <div className="flex h-64 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <UserTable users={users} />
+          )}
         </CardContent>
       </Card>
     </div>
