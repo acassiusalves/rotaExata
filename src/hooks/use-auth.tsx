@@ -67,11 +67,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }
 
   const signOut = async () => {
+    setLoading(true);
     await firebaseSignOut(auth);
     setUser(null);
     setUserRole(null);
     setMustChangePassword(false);
     router.push('/login');
+    setLoading(false);
   };
 
   const value = {
@@ -83,7 +85,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signOut,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
