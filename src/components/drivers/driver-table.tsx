@@ -32,6 +32,7 @@ const statusMap: Record<
   { label: string; className: string }
 > = {
   available: { label: 'Disponível', className: 'bg-green-500' },
+  online: { label: 'Online', className: 'bg-emerald-500' },
   busy: { label: 'Ocupado', className: 'bg-yellow-500' },
   offline: { label: 'Offline', className: 'bg-gray-500' },
 };
@@ -59,6 +60,16 @@ export const columns: ColumnDef<Driver>[] = [
     cell: ({ row }) => {
       const status = row.getValue('status') as DriverStatus;
       const { label, className } = statusMap[status] || { label: 'Offline', className: 'bg-gray-400' };
+
+      console.log('🎨 [driver-table] Renderizando status:', {
+        driverId: row.original.id,
+        email: row.original.email,
+        status: status,
+        statusType: typeof status,
+        label: label,
+        isInMap: status in statusMap
+      });
+
       return (
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${className}`} />

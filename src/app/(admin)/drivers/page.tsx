@@ -27,9 +27,23 @@ export default function DriversPage() {
       q,
       (querySnapshot) => {
         const driversData: Driver[] = [];
+        console.log('📊 [drivers-page] Snapshot recebido do Firestore:', {
+          totalDocs: querySnapshot.size,
+          timestamp: new Date().toISOString()
+        });
+
         querySnapshot.forEach((doc) => {
           // Adapt the structure from 'users' collection to 'Driver' type
           const data = doc.data();
+
+          console.log('👤 [drivers-page] Motorista encontrado:', {
+            id: doc.id,
+            email: data.email,
+            status: data.status,
+            statusType: typeof data.status,
+            lastSeenAt: data.lastSeenAt?.toDate?.()?.toISOString() || 'N/A'
+          });
+
           driversData.push({
             id: doc.id,
             name: data.displayName || data.email, // Use displayName or fallback to email
@@ -43,6 +57,12 @@ export default function DriversPage() {
             avatarUrl: data.photoURL || `https://i.pravatar.cc/150?u=${doc.id}`,
           });
         });
+
+        console.log('✅ [drivers-page] Lista de motoristas processada:', {
+          total: driversData.length,
+          motoristas: driversData.map(d => ({ id: d.id, email: d.email, status: d.status }))
+        });
+
         setDrivers(driversData);
         setIsLoading(false);
       },

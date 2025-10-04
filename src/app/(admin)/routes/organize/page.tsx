@@ -753,7 +753,7 @@ export default function OrganizeRoutePage() {
                         </SelectTrigger>
                         <SelectContent>
                           {drivers
-                            .filter((d) => d.status === 'available')
+                            .filter((d) => d.status === 'available' || d.status === 'online')
                             .map((driver) => (
                               <SelectItem key={driver.id} value={driver.id}>
                                 <div className="flex items-center gap-3">
@@ -888,4 +888,3 @@ export default function OrganizeRoutePage() {
   );
 }
 
-    

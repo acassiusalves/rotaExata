@@ -122,7 +122,10 @@ export function StatusChart() {
             ))}
           </Pie>
           <ChartLegend
-            content={<ChartLegendContent layout="vertical" align="right" verticalAlign="middle" />}
+            layout="vertical"
+            align="right"
+            verticalAlign="middle"
+            content={<ChartLegendContent />}
           />
         </PieChart>
       </ResponsiveContainer>

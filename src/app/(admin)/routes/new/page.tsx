@@ -301,7 +301,7 @@ export default function NewRoutePage() {
       const text = await readTextSmart(file);
       setCsvContent(text); // Guardar o conteúdo decodificado
 
-      Papa.parse(text, {
+      const previewConfig: Papa.ParseConfig<Record<string, string>> = {
         header: true,
         skipEmptyLines: true,
         preview: 1, // Apenas a primeira linha de dados para os cabeçalhos
@@ -317,17 +317,21 @@ export default function NewRoutePage() {
             });
             setIsImporting(false);
           }
-        },
-        error: (error) => {
-            console.error('CSV parsing error:', error);
-            toast({
-                variant: 'destructive',
-                title: 'Erro ao Ler Arquivo',
-                description: `Verifique se o arquivo é um CSV válido. Detalhe: ${error.message}`,
-            });
-            setIsImporting(false);
         }
-      });
+      };
+
+      try {
+        Papa.parse<Record<string, string>>(text, previewConfig);
+      } catch (error) {
+        console.error('CSV parsing error:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao Ler Arquivo',
+          description: `Verifique se o arquivo é um CSV válido. Detalhe: ${message}`,
+        });
+        setIsImporting(false);
+      }
 
     } catch (e) {
        console.error('File reading error:', e);
@@ -411,7 +415,7 @@ export default function NewRoutePage() {
     };
 
 
-    Papa.parse(csvContent, {
+    const fullParseConfig: Papa.ParseConfig<Record<string, string>> = {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
@@ -479,19 +483,22 @@ export default function NewRoutePage() {
         setIsImporting(false);
         setFileToProcess(null);
         setCsvContent('');
-      },
-      error: (error) => {
-        console.error('Full CSV parsing error:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao Processar Arquivo',
-          description: 'Houve um problema ao ler os dados do arquivo.',
-        });
-        setIsImporting(false);
-        setFileToProcess(null);
-        setCsvContent('');
       }
-    });
+    };
+
+    try {
+      Papa.parse<Record<string, string>>(csvContent, fullParseConfig);
+    } catch (error) {
+      console.error('Full CSV parsing error:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Processar Arquivo',
+        description: 'Houve um problema ao ler os dados do arquivo.',
+      });
+      setIsImporting(false);
+      setFileToProcess(null);
+      setCsvContent('');
+    }
   };
   
   const handleNextStep = () => {

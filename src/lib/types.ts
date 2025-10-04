@@ -66,7 +66,7 @@ export type Order = {
   }
 };
 
-export type DriverStatus = 'offline' | 'available' | 'busy';
+export type DriverStatus = 'offline' | 'available' | 'busy' | 'online';
 
 export type Driver = {
   id: string;

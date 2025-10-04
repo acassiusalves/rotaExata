@@ -28,7 +28,13 @@ function SortableStop({
   onStopClick,
   dragDelay = 200,
 }: SortableStopProps) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+  const {
+    attributes,
+    listeners: sortableListeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
     id: stop.id ?? stop.placeId ?? `${routeKey}-${index}`,
     data: { routeKey, index },
   });
@@ -46,10 +52,10 @@ function SortableStop({
       <button
         type="button"
         // dnd listeners (com activationConstraint no DndContext)
-        {...listeners}
+        {...sortableListeners}
         onPointerDown={(e) => {
           pressStart.current = performance.now();
-          listeners.onPointerDown?.(e as any);
+          sortableListeners?.onPointerDown?.(e as any);
         }}
         onClick={(e) => {
           const dt = performance.now() - pressStart.current;

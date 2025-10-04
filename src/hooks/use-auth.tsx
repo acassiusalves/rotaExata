@@ -71,22 +71,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             };
 
             const connectedRef = ref(rtdb, '.info/connected');
-            onValue(connectedRef, (snapshot) => {
+            onValue(connectedRef, async (snapshot) => {
                 if (snapshot.val() === false) {
-                    // This is a last-resort case.
-                    // The onDisconnect() triggers should be enough for most cases.
-                    updateDoc(userFirestoreRef, {
-                        status: 'offline',
-                        lastSeenAt: serverTimestamp(),
-                    });
+                    try {
+                        await updateDoc(userFirestoreRef, {
+                            status: 'offline',
+                            lastSeenAt: serverTimestamp(),
+                        });
+                        console.log('⚠️ [use-auth] Conexão perdida - Status atualizado para OFFLINE', {
+                            userId: user.uid,
+                            status: 'offline'
+                        });
+                    } catch (err) {
+                        console.error('❌ [use-auth] Falha ao registrar status offline', err);
+                    }
                     return;
                 }
+
                 goOnline(rtdb);
-                // When the client disconnects, set their status to 'offline'
-                onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
-                    // When the client is connected, set their status to 'online'
-                    set(userStatusDatabaseRef, isOnlineForDatabase);
-                });
+
+                try {
+                    await onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase);
+                    await set(userStatusDatabaseRef, isOnlineForDatabase);
+                    await updateDoc(userFirestoreRef, {
+                        status: 'online',
+                        lastSeenAt: serverTimestamp(),
+                    });
+                    console.log('✅ [use-auth] Status do motorista atualizado para ONLINE no Firestore', {
+                        userId: user.uid,
+                        email: user.email,
+                        status: 'online',
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (err) {
+                    console.error('❌ [use-auth] Falha ao registrar presença do motorista', err);
+                }
             });
         }
         // --- End Presence ---
@@ -114,6 +133,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Disconnect from RTDB before signing out
     const rtdb = getDatabase();
     goOffline(rtdb);
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+          status: 'offline',
+          lastSeenAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error('Falha ao registrar status offline no signOut', err);
+      }
+    }
     await firebaseSignOut(auth);
     setUser(null);
     setUserRole(null);

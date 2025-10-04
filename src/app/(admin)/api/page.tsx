@@ -116,8 +116,8 @@ export default function ApiPage() {
           Para que os mapas interativos funcionem no navegador, a chave de API também precisa estar disponível para o cliente. Por favor, adicione sua chave ao arquivo <code className="font-semibold text-foreground">.env</code> na raiz do projeto.
           <br /><br />
           1. Abra ou crie o arquivo <code className="font-semibold text-foreground">.env</code>.<br />
-          2. Adicione a linha: <code className="font-semibold text-foreground">NEXT_PUBLIC_GMAPS_KEY="SUA_CHAVE_DE_API_AQUI"</code><br />
-          3. Substitua "SUA_CHAVE_DE_API_AQUI" pela sua chave real.<br />
+          2. Adicione a linha: <code className="font-semibold text-foreground">NEXT_PUBLIC_GMAPS_KEY=&quot;SUA_CHAVE_DE_API_AQUI&quot;</code><br />
+          3. Substitua &quot;SUA_CHAVE_DE_API_AQUI&quot; pela sua chave real.<br />
           4. Reinicie o servidor de desenvolvimento.
         </AlertDescription>
       </Alert>
@@ -162,7 +162,7 @@ export default function ApiPage() {
         <CardHeader>
           <CardTitle>Sincronização de Usuários com Firestore</CardTitle>
           <CardDescription>
-            Use este botão para forçar a criação ou atualização do seu documento de usuário no Firestore com a permissão correta. Útil se sua permissão de 'admin' não estiver sendo reconhecida.
+            Use este botão para forçar a criação ou atualização do seu documento de usuário no Firestore com a permissão correta. Útil se sua permissão de &apos;admin&apos; não estiver sendo reconhecida.
           </CardDescription>
         </CardHeader>
         <CardFooter>
