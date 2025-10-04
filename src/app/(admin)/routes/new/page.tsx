@@ -552,187 +552,187 @@ export default function NewRoutePage() {
         onConfirm={handleImportConfirm}
       />
       <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
-        <div className="flex min-h-0 flex-col overflow-hidden border-r bg-background">
+        <div className="flex flex-col border-r bg-background">
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
-
-          <ScrollArea className="flex-1 min-h-0">
-            <div className='p-6 space-y-6'>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <MapPin className="h-5 w-5 text-muted-foreground" />
-                    <h3 className="font-semibold">Origem da Rota</h3>
+          <div className="flex-1 relative">
+            <ScrollArea className="absolute inset-0">
+                <div className="space-y-6 p-6 pb-24">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <MapPin className="h-5 w-5 text-muted-foreground" />
+                        <h3 className="font-semibold">Origem da Rota</h3>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => setIsOriginDialogOpen(true)}
+                      >
+                        <Wand2 className="mr-1 h-3 w-3" />
+                        Alterar
+                      </Button>
+                    </div>
+                    <p className="pl-8 text-sm text-muted-foreground">
+                      {origin?.address ?? 'Não definida'}
+                    </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() => setIsOriginDialogOpen(true)}
-                  >
-                    <Wand2 className="mr-1 h-3 w-3" />
-                    Alterar
-                  </Button>
-                </div>
-                <p className="pl-8 text-sm text-muted-foreground">
-                  {origin?.address ?? 'Não definida'}
-                </p>
-              </div>
 
-              <Separator />
+                  <Separator />
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-                  <h3 className="font-semibold">Início da Rota</h3>
-                </div>
-                <div className="pl-8">
-                  <p className="text-sm text-muted-foreground">
-                    <Popover
-                      open={isDatePopoverOpen}
-                      onOpenChange={setIsDatePopoverOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant={'link'}
-                          className={cn(
-                            'p-0 font-medium text-foreground hover:no-underline',
-                            !routeDate && 'text-muted-foreground'
-                          )}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <CalendarIcon className="h-5 w-5 text-muted-foreground" />
+                      <h3 className="font-semibold">Início da Rota</h3>
+                    </div>
+                    <div className="pl-8">
+                      <p className="text-sm text-muted-foreground">
+                        <Popover
+                          open={isDatePopoverOpen}
+                          onOpenChange={setIsDatePopoverOpen}
                         >
-                          {routeDate ? (
-                            format(routeDate, 'PPP', { locale: ptBR })
-                          ) : (
-                            <span>Selecione uma data</span>
-                          )}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={routeDate}
-                          onSelect={(date) => {
-                            setRouteDate(date);
-                            setIsDatePopoverOpen(false);
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-
-                    <span className="mx-2 text-muted-foreground">às</span>
-
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant={'link'}
-                          className="p-0 font-medium text-foreground hover:no-underline"
-                        >
-                          {routeTime}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Input
-                          type="time"
-                          value={routeTime}
-                          onChange={(e) => setRouteTime(e.target.value)}
-                          className="border-none"
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </p>
-                </div>
-              </div>
-              <Separator />
-               <div className="space-y-4">
-                {stops.map((stop, index) => (
-                  <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
-                    <Label htmlFor={`stop-${index}`}>
-                      Parada {index + 1}
-                      {stop.customerName && (
-                        <span className="ml-2 font-normal text-muted-foreground">
-                          - {stop.customerName}
-                          {stop.orderNumber && ` (#${stop.orderNumber})`}
-                        </span>
-                      )}
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <AutocompleteInput
-                        id={`stop-${index}`}
-                        placeholder="Endereço da parada..."
-                        value={stop}
-                        onChange={(place) => handleStopChange(index, place)}
-                      />
-                      <Popover>
-                        <PopoverTrigger asChild>
-                           <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
-                                <Info className="h-4 w-4" />
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant={'link'}
+                              className={cn(
+                                'p-0 font-medium text-foreground hover:no-underline',
+                                !routeDate && 'text-muted-foreground'
+                              )}
+                            >
+                              {routeDate ? (
+                                format(routeDate, 'PPP', { locale: ptBR })
+                              ) : (
+                                <span>Selecione uma data</span>
+                              )}
                             </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className='w-80'>
-                            <div className="grid gap-4">
-                                <h4 className="font-medium leading-none">Detalhes da Parada</h4>
-                                <div className="grid gap-2 text-sm">
-                                    <div className="grid grid-cols-2 items-center gap-4">
-                                        <span className='text-muted-foreground'>Cliente</span>
-                                        <span>{stop.customerName || '--'}</span>
-                                    </div>
-                                    <div className="grid grid-cols-2 items-center gap-4">
-                                        <span className='text-muted-foreground'>Pedido Nº</span>
-                                        <span>{stop.orderNumber || '--'}</span>
-                                    </div>
-                                    <div className="grid grid-cols-2 items-center gap-4">
-                                        <span className='text-muted-foreground'>Telefone</span>
-                                        <span>{stop.phone || '--'}</span>
-                                    </div>
-                                     <div className="grid grid-cols-2 items-center gap-4">
-                                        <span className='text-muted-foreground'>Janela</span>
-                                        <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
-                                    </div>
-                                    <div className="grid grid-cols-1 items-center gap-2">
-                                        <span className='text-muted-foreground'>Observações</span>
-                                        <p className='leading-snug'>{stop.notes || '--'}</p>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={routeDate}
+                              onSelect={(date) => {
+                                setRouteDate(date);
+                                setIsDatePopoverOpen(false);
+                              }}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+
+                        <span className="mx-2 text-muted-foreground">às</span>
+
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant={'link'}
+                              className="p-0 font-medium text-foreground hover:no-underline"
+                            >
+                              {routeTime}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0">
+                            <Input
+                              type="time"
+                              value={routeTime}
+                              onChange={(e) => setRouteTime(e.target.value)}
+                              className="border-none"
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </p>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="space-y-4">
+                    {stops.map((stop, index) => (
+                      <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
+                        <Label htmlFor={`stop-${index}`}>
+                          Parada {index + 1}
+                          {stop.customerName && (
+                            <span className="ml-2 font-normal text-muted-foreground">
+                              - {stop.customerName}
+                              {stop.orderNumber && ` (#${stop.orderNumber})`}
+                            </span>
+                          )}
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <AutocompleteInput
+                            id={`stop-${index}`}
+                            placeholder="Endereço da parada..."
+                            value={stop}
+                            onChange={(place) => handleStopChange(index, place)}
+                          />
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                                    <Info className="h-4 w-4" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className='w-80'>
+                                <div className="grid gap-4">
+                                    <h4 className="font-medium leading-none">Detalhes da Parada</h4>
+                                    <div className="grid gap-2 text-sm">
+                                        <div className="grid grid-cols-2 items-center gap-4">
+                                            <span className='text-muted-foreground'>Cliente</span>
+                                            <span>{stop.customerName || '--'}</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 items-center gap-4">
+                                            <span className='text-muted-foreground'>Pedido Nº</span>
+                                            <span>{stop.orderNumber || '--'}</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 items-center gap-4">
+                                            <span className='text-muted-foreground'>Telefone</span>
+                                            <span>{stop.phone || '--'}</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 items-center gap-4">
+                                            <span className='text-muted-foreground'>Janela</span>
+                                            <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 items-center gap-2">
+                                            <span className='text-muted-foreground'>Observações</span>
+                                            <p className='leading-snug'>{stop.notes || '--'}</p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </PopoverContent>
-                      </Popover>
-                      <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                            </PopoverContent>
+                          </Popover>
+                          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  
+                    <div className="mt-4">
+                      <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
+                        <PlusCircle className="h-5 w-5" />
+                        Adicionar novo serviço
                       </Button>
                     </div>
                   </div>
-                ))}
-              
-                <div className="mt-4">
-                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
-                    <PlusCircle className="h-5 w-5" />
-                    Adicionar novo serviço
-                  </Button>
                 </div>
-              </div>
+            </ScrollArea>
+             <div className="absolute bottom-0 left-0 w-full shrink-0 border-t bg-background p-4 flex items-center gap-3">
+                <Button
+                variant="outline"
+                className="flex-1 justify-center gap-3"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isImporting}
+                >
+                {isImporting ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                    <Upload className="h-5 w-5" />
+                )}
+                {isImporting ? 'Importando...' : 'Importar CSV'}
+                </Button>
+                <Button className="flex-1" onClick={handleNextStep}>
+                    Avançar para Organização
+                    <ArrowRight className='ml-2 h-4 w-4' />
+                </Button>
             </div>
-          </ScrollArea>
-
-          <div className="shrink-0 border-t p-4 flex items-center gap-3">
-             <Button
-              variant="outline"
-              className="flex-1 justify-center gap-3"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-            >
-              {isImporting ? (
-                 <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Upload className="h-5 w-5" />
-              )}
-              {isImporting ? 'Importando...' : 'Importar CSV'}
-            </Button>
-            <Button className="flex-1" onClick={handleNextStep}>
-                Avançar para Organização
-                <ArrowRight className='ml-2 h-4 w-4' />
-            </Button>
           </div>
         </div>
 
