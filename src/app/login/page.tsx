@@ -54,10 +54,10 @@ export default function LoginPage() {
   // This effect will run when the userRole is determined after login
   React.useEffect(() => {
     if (userRole) {
-      if (userRole === 'admin') {
+      if (userRole === 'admin' || userRole === 'seller' || userRole === 'vendedor') {
         router.push('/');
-      } else {
-        router.push('/driver/my-routes'); // Example driver page
+      } else if (userRole === 'driver') {
+        router.push('/my-routes');
       }
     }
   }, [userRole, router]);
