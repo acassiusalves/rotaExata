@@ -4,9 +4,10 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { Toaster } from '@/components/ui/toaster';
+import { getDatabase, ref, onValue, goOnline, goOffline, onDisconnect, set, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
 
 interface AuthContextType {
   user: User | null;
@@ -39,23 +40,64 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // User is signed in, fetch role from Firestore
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
+        
+        let role = 'vendedor'; // default
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
-          const role = data?.role || 'vendedor';
+          role = data?.role || 'vendedor';
           setUserRole(role);
           setMustChangePassword(data?.mustChangePassword || false);
-          setUser(user);
         } else {
           // Handle case where user exists in Auth but not in Firestore
           console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
           setUserRole('vendedor'); // default role
           setMustChangePassword(false);
-          setUser(user);
         }
+        setUser(user);
+        
+        // --- Firebase Realtime Database Presence ---
+        if (role === 'driver') {
+            const rtdb = getDatabase();
+            const userStatusDatabaseRef = ref(rtdb, '/status/' + user.uid);
+            const userFirestoreRef = doc(db, 'users', user.uid);
+
+            const isOfflineForDatabase = {
+                state: 'offline',
+                last_changed: rtdbServerTimestamp(),
+            };
+            const isOnlineForDatabase = {
+                state: 'online',
+                last_changed: rtdbServerTimestamp(),
+            };
+
+            const connectedRef = ref(rtdb, '.info/connected');
+            onValue(connectedRef, (snapshot) => {
+                if (snapshot.val() === false) {
+                    // This is a last-resort case.
+                    // The onDisconnect() triggers should be enough for most cases.
+                    updateDoc(userFirestoreRef, {
+                        status: 'offline',
+                        lastSeenAt: serverTimestamp(),
+                    });
+                    return;
+                }
+                goOnline(rtdb);
+                // When the client disconnects, set their status to 'offline'
+                onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
+                    // When the client is connected, set their status to 'online'
+                    set(userStatusDatabaseRef, isOnlineForDatabase);
+                });
+            });
+        }
+        // --- End Presence ---
+
       } else {
         setUser(null);
         setUserRole(null);
         setMustChangePassword(false);
+        // Ensure RTDB connection is closed on sign out
+        const rtdb = getDatabase();
+        goOffline(rtdb);
       }
       setLoading(false);
     });
@@ -69,6 +111,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     setLoading(true);
+    // Disconnect from RTDB before signing out
+    const rtdb = getDatabase();
+    goOffline(rtdb);
     await firebaseSignOut(auth);
     setUser(null);
     setUserRole(null);
@@ -88,12 +133,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <AuthContext.Provider value={value}>
-        {!loading && (
-          <>
-            {children}
-            <Toaster />
-          </>
-        )}
+       <>
+        {children}
+        <Toaster />
+       </>
     </AuthContext.Provider>
   );
 };
