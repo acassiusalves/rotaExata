@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, createContext, useContext } from 'react';
@@ -9,6 +10,7 @@ import { useRouter } from 'next/navigation';
 interface AuthContextType {
   user: User | null;
   userRole: string | null;
+  mustChangePassword?: boolean;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<any>;
   signOut: () => Promise<void>;
@@ -17,6 +19,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
     user: null,
     userRole: null,
+    mustChangePassword: false,
     loading: true,
     signIn: async () => {},
     signOut: async () => {},
@@ -25,6 +28,7 @@ const AuthContext = createContext<AuthContextType>({
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -35,18 +39,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
-          const role = userDocSnap.data()?.role || 'vendedor';
+          const data = userDocSnap.data();
+          const role = data?.role || 'vendedor';
           setUserRole(role);
+          setMustChangePassword(data?.mustChangePassword || false);
           setUser(user);
         } else {
           // Handle case where user exists in Auth but not in Firestore
           console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
           setUserRole('vendedor'); // default role
+          setMustChangePassword(false);
           setUser(user);
         }
       } else {
         setUser(null);
         setUserRole(null);
+        setMustChangePassword(false);
       }
       setLoading(false);
     });
@@ -62,12 +70,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await firebaseSignOut(auth);
     setUser(null);
     setUserRole(null);
+    setMustChangePassword(false);
     router.push('/login');
   };
 
   const value = {
     user,
     userRole,
+    mustChangePassword,
     loading,
     signIn,
     signOut,

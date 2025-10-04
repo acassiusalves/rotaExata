@@ -1,3 +1,4 @@
+
 import {onCall,HttpsError} from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
@@ -31,7 +32,7 @@ export const inviteUser = onCall(
       catch{
         user=await auth.createUser({
           email,
-          password:crypto.randomUUID(),
+          password: '123456', // Set default password
           emailVerified:false,
           displayName: displayName || undefined,
         });
@@ -42,23 +43,25 @@ export const inviteUser = onCall(
         await auth.updateUser(user.uid, { displayName });
       }
 
+      const userData: any = {
+        email,
+        role,
+        displayName: displayName || '',
+        phone: phone || '',
+        createdAt:FieldValue.serverTimestamp(),
+        updatedAt:FieldValue.serverTimestamp()
+      };
+
+      if (role === 'driver') {
+        userData.mustChangePassword = true;
+      }
+
       await db.collection("users").doc(user.uid).set(
-        {
-          email,
-          role,
-          displayName: displayName || '',
-          phone: phone || '',
-          createdAt:FieldValue.serverTimestamp(),
-          updatedAt:FieldValue.serverTimestamp()
-        },
+        userData,
         {merge:true}
       );
-      const appUrl=process.env.APP_URL
-        || "https://soldemaria.vercel.app/auth/finish";
-      const resetLink=await auth.generatePasswordResetLink(
-        email,{url:appUrl}
-      );
-      return {ok:true,uid:user.uid,role,resetLink};
+      
+      return {ok:true,uid:user.uid,role};
     }catch(err){
       const msg=err instanceof Error?err.message:"Falha ao convidar";
       throw new HttpsError("internal",msg);
