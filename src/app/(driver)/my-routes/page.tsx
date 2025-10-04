@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -80,7 +81,6 @@ export default function MyRoutesPage() {
     // Listen for incoming messages when the app is in the foreground
     onForegroundNotification(() => {
       toast({ title: 'Nova rota recebida!', description: 'Uma nova rota foi atribuída a você.' });
-      // Here you could also trigger a data re-fetch
     });
   }, [toast]);
 
@@ -113,11 +113,10 @@ export default function MyRoutesPage() {
         return;
     };
 
-    // Note: In a real app, you would filter by driverId
     const q = query(
         collection(db, 'routes'), 
+        where('driverId', '==', user.uid),
         where('status', 'in', ['dispatched', 'in_progress'])
-        // where('driverId', '==', user.uid)
     );
 
     const unsubscribe = onSnapshot(
@@ -135,12 +134,13 @@ export default function MyRoutesPage() {
       },
       (error) => {
         console.error('Error fetching routes: ', error);
+        toast({ variant: 'destructive', title: 'Erro ao buscar rotas', description: 'Você não tem permissão para ver estas rotas ou ocorreu um erro.' });
         setIsLoading(false);
       }
     );
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, toast]);
 
   if (isLoading) {
     return (

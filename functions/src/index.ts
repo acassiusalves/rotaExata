@@ -3,6 +3,7 @@ import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
+import {getMessaging} from "firebase-admin/messaging";
 import * as crypto from "node:crypto";
 
 initializeApp();
@@ -55,7 +56,8 @@ export const inviteUser = onCall(
 );
 
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
-export const authUserMirror=functionsV1.auth.user()
+export const authUserMirror=functionsV1.region("southamerica-east1")
+  .auth.user()
   .onCreate(async (u:any)=>{
     const email=(u.email||"").toLowerCase();
     const db=getFirestore();
@@ -112,3 +114,25 @@ export const syncAuthUsers=onCall(
     return {ok:true,synced:count};
   }
 );
+
+/* ========== Push notification when a run is assigned ========== */
+export async function notifyRunAssigned(runId: string, courierId: string) {
+  const db = getFirestore();
+  const tokensSnap = await db
+    .collection("couriers")
+    .doc(courierId)
+    .collection("tokens")
+    .get();
+
+  const tokens = tokensSnap.docs.map((doc) => doc.id);
+  if (!tokens.length) return;
+
+  await getMessaging().sendEachForMulticast({
+    tokens,
+    notification: {
+      title: "Nova corrida",
+      body: `Run #${runId} atribuída a você.`,
+    },
+    data: { runId },
+  });
+}

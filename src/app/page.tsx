@@ -10,7 +10,7 @@ export default function Page() {
 
   useEffect(() => {
     if (loading) return;
-    if (userRole === 'admin' || userRole === 'vendedor') router.replace('/dashboard');
+    if (userRole === 'admin' || userRole === 'seller' || userRole === 'vendedor') router.replace('/dashboard');
     else if (userRole === 'driver') router.replace('/my-routes');
     else router.replace('/login');
   }, [userRole, loading, router]);
