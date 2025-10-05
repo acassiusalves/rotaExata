@@ -520,7 +520,7 @@ export default function OrganizeRoutePage() {
             encodedPolyline: routeToSave.encodedPolyline,
             color: routeToSave.color,
             driverId: driverId,
-            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle.plate } : null,
+            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
         };
         await addDoc(collection(db, "routes"), routeDoc);
 
@@ -911,4 +911,3 @@ export default function OrganizeRoutePage() {
     </>
   );
 }
-

@@ -33,8 +33,7 @@ type RouteDocument = RouteInfo & {
   status: 'dispatched' | 'in_progress' | 'completed';
   driverInfo: {
     name: string;
-    vehicle: string;
-    plate: string;
+    vehicle: { type: string, plate: string };
   } | null;
   plannedDate: Timestamp;
   origin: PlaceValue;
@@ -106,6 +105,7 @@ export default function MonitoringPage() {
   }, []);
 
   const getInitials = (name: string) => {
+    if (!name) return 'N/A';
     const names = name.split(' ');
     if (names.length > 1) {
       return `${names[0][0]}${names[names.length - 1][0]}`;
@@ -175,9 +175,9 @@ export default function MonitoringPage() {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-semibold">{route.driverInfo?.name}</p>
+                    <p className="font-semibold">{route.driverInfo?.name || 'Não atribuído'}</p>
                     <p className="text-xs text-muted-foreground">
-                      {route.driverInfo?.vehicle ? `${route.driverInfo.vehicle} - ${route.driverInfo.plate}` : 'Veículo não informado'}
+                      {route.driverInfo?.vehicle?.plate ? `${route.driverInfo?.vehicle.type} - ${route.driverInfo?.vehicle.plate}` : 'Veículo não informado'}
                     </p>
                   </div>
                 </div>
