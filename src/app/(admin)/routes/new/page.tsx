@@ -550,10 +550,10 @@ export default function NewRoutePage() {
         headers={csvHeaders}
         onConfirm={handleImportConfirm}
       />
-      <div className="flex justify-center">
-        <div className="w-full max-w-7xl">
+      
+      <div className="grid h-full min-h-0 w-full grid-cols-1 lg:grid-cols-[480px_1fr]">
           {/* Left Panel */}
-          <div className="relative z-10 flex h-full min-h-0 flex-col bg-background">
+          <div className="relative z-10 flex h-full min-h-0 flex-col border-r bg-background">
             {/* Header */}
             <div className="flex-shrink-0 border-b px-6 py-4">
               <h1 className="text-xl font-semibold">Nova Rota</h1>
@@ -562,9 +562,6 @@ export default function NewRoutePage() {
             {/* Content Area */}
             <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
               <div className="p-6 space-y-6">
-                <div className="w-full max-w-[1080px] h-[720px] rounded-lg overflow-hidden mx-auto">
-                    <RouteMap height={720} origin={origin} stops={mapStops} />
-                </div>
 
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -741,7 +738,10 @@ export default function NewRoutePage() {
                 </Button>
             </div>
           </div>
-        </div>
+
+          <div className="h-full w-full overflow-hidden">
+            <RouteMap height={-1} origin={origin} stops={mapStops} />
+          </div>
       </div>
       
 
