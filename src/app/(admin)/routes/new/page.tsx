@@ -553,7 +553,7 @@ export default function NewRoutePage() {
       />
       <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[480px_1fr]">
         {/* Left Panel */}
-        <div className="flex flex-col border-r bg-background">
+        <div className="flex h-full flex-col border-r bg-background">
           {/* Header */}
           <div className="flex-shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
