@@ -98,42 +98,28 @@ export const deleteUser = onCall(
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
 
-    // TODO: Add check to ensure only admins can call this function
-    // const callerUid = req.auth?.uid;
-    // if (!callerUid) {
-    //   throw new HttpsError("unauthenticated", "Ação não autorizada.");
-    // }
-    // const callerDoc = await getFirestore().collection("users").doc(callerUid).get();
-    // if (callerDoc.data()?.role !== 'admin') {
-    //   throw new HttpsError("permission-denied", "Apenas administradores podem remover usuários.");
-    // }
-    
     try {
       const auth = getAuth();
-      const db = getFirestore();
-
-      // Delete from Firebase Authentication
       await auth.deleteUser(uid);
-
-      // Delete from Firestore
-      await db.collection("users").doc(uid).delete();
-
-      return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Falha ao remover usuário";
-      if ((err as any).code === 'auth/user-not-found') {
-          // If user not in auth, still try to delete from firestore
-          try {
-            const db = getFirestore();
-            await db.collection("users").doc(uid).delete();
-            return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
-          } catch (dbErr) {
-             const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
-             throw new HttpsError("internal", dbMsg);
-          }
+      console.log(`Usuário ${uid} removido da Autenticação.`);
+    } catch (error: any) {
+      if (error.code === 'auth/user-not-found') {
+        console.warn(`Usuário ${uid} não encontrado na Autenticação, prosseguindo com a remoção do Firestore.`);
+      } else {
+        // Para qualquer outro erro de autenticação, lançamos o erro
+        const msg = error.message || "Falha ao remover o usuário da Autenticação.";
+        throw new HttpsError("internal", `Auth Error: ${msg}`);
       }
-      throw new HttpsError("internal", msg);
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("users").doc(uid).delete();
+      console.log(`Usuário ${uid} removido do Firestore.`);
+      return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao remover o usuário do Firestore.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
   }
 );
