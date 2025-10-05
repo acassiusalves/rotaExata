@@ -48,7 +48,7 @@ export const columns: ColumnDef<Driver>[] = [
           <AvatarFallback>{row.original.name.charAt(0)}</AvatarFallback>
         </Avatar>
         <div className='flex flex-col'>
-          <div className="font-medium">{row.getValue('name')}</div>
+          <div className="font-medium">{row.original.name}</div>
           <div className="text-xs text-muted-foreground">{row.original.email}</div>
         </div>
       </div>
