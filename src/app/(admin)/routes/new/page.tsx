@@ -551,15 +551,16 @@ export default function NewRoutePage() {
         onConfirm={handleImportConfirm}
       />
 
-      <div className="grid h-full w-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[480px_1fr]">
+      <div className="grid h-[calc(100vh-140px)] w-full grid-cols-1 overflow-hidden lg:grid-cols-[480px_1fr]">
         {/* Left Panel */}
-        <div className="relative z-10 flex h-full min-h-0 flex-col border-r bg-background">
-            {/* Header */}
-            <div className="flex-shrink-0 border-b px-6 py-4">
-              <h1 className="text-xl font-semibold">Nova Rota</h1>
-            </div>
+        <div className="relative z-10 flex h-full flex-col overflow-hidden border-r bg-background">
+          {/* Header */}
+          <div className="flex-shrink-0 border-b px-6 py-4">
+            <h1 className="text-xl font-semibold">Nova Rota</h1>
+          </div>
 
-            <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+          {/* Scrollable Content Area */}
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
               <div className="p-6 space-y-6">
 
                 <div className="space-y-2">
@@ -731,12 +732,10 @@ export default function NewRoutePage() {
                         {isImporting ? 'Importando...' : 'Importar planilha CSV'}
                     </Button>
                 </div>
-                {stops.length > 0 && (
-                    <Button size="sm" className="w-full h-9" onClick={handleNextStep}>
-                        Avançar para Organização
-                        <ArrowRight className='ml-2 h-4 w-4' />
-                    </Button>
-                )}
+                <Button size="sm" className="w-full h-9" onClick={handleNextStep}>
+                    Avançar para Organização
+                    <ArrowRight className='ml-2 h-4 w-4' />
+                </Button>
             </div>
         </div>
 

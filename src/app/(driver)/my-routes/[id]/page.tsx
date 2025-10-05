@@ -38,6 +38,25 @@ type RouteDocument = RouteInfo & {
   origin: PlaceValue;
 };
 
+const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    <path d="M14.05 14.05a2.5 2.5 0 0 0-3.53 0L9.25 15.32a1.5 1.5 0 0 1-2.12 0l-.7-.7a1.5 1.5 0 0 1 0-2.12l1.27-1.27a2.5 2.5 0 0 0 0-3.53l-1.27-1.27a1.5 1.5 0 0 1 0-2.12l.7-.7a1.5 1.5 0 0 1 2.12 0L10.52 9.47a2.5 2.5 0 0 0 3.53 0l1.27-1.27a1.5 1.5 0 0 1 2.12 0l.7.7a1.5 1.5 0 0 1 0 2.12L15.32 12.8a2.5 2.5 0 0 0 0 3.53z" />
+  </svg>
+);
+
+
 const getInitials = (name: string) => {
     const names = name.split(' ');
     if (names.length > 1) {
@@ -85,13 +104,20 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
 
   const handleNavigation = (stop: PlaceValue) => {
     if (!stop) return;
-    // Use latitude e longitude para precisão, se disponíveis.
     const query = stop.lat && stop.lng 
       ? `${stop.lat},${stop.lng}` 
       : encodeURIComponent(stop.address);
     const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
     window.open(url, '_blank');
   };
+
+  const handleWhatsApp = (phone: string | undefined) => {
+    if (!phone) return;
+    const sanitizedPhone = phone.replace(/\D/g, ''); // Remove non-digit characters
+    const url = `https://wa.me/${sanitizedPhone}`;
+    window.open(url, '_blank');
+  };
+
 
   if (isLoading) {
     return (
@@ -162,9 +188,9 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
                                     <Navigation className="mr-2 h-4 w-4" />
                                     Navegar
                                  </Button>
-                                 <Button size="sm" variant="outline">
-                                    <Phone className="mr-2 h-4 w-4" />
-                                    Ligar
+                                 <Button size="sm" variant="outline" onClick={() => handleWhatsApp(stop.phone)} disabled={!stop.phone}>
+                                    <WhatsAppIcon className="mr-2 h-4 w-4" />
+                                    WhatsApp
                                 </Button>
                                 <Button size="sm" variant="default" className="ml-auto bg-green-600 hover:bg-green-700">
                                     <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -180,4 +206,3 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
     </div>
   );
 }
-

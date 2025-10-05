@@ -778,9 +778,7 @@ export default function OrganizeRoutePage() {
                           <SelectValue placeholder="Escolha um motorista disponível..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableDrivers
-                            .filter((d) => d.status === 'available' || d.status === 'online')
-                            .map((driver) => (
+                          {availableDrivers.map((driver) => (
                               <SelectItem key={driver.id} value={driver.id}>
                                 <div className="flex items-center gap-3">
                                   <Avatar className='h-6 w-6'>
@@ -797,7 +795,7 @@ export default function OrganizeRoutePage() {
                         </SelectContent>
                       </Select>
                        <p className="mt-2 text-xs text-muted-foreground">
-                        Apenas motoristas com status "Disponível" ou "Online" são mostrados.
+                        Todos os motoristas cadastrados são mostrados.
                       </p>
                     </CardContent>
                   </Card>
