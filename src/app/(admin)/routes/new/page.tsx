@@ -551,7 +551,7 @@ export default function NewRoutePage() {
         headers={csvHeaders}
         onConfirm={handleImportConfirm}
       />
-      <div className="grid w-full overflow-hidden h-[calc(100svh-4rem)] grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
+      <div className="grid w-full overflow-hidden grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
         <div className="flex flex-col border-r bg-background">
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
