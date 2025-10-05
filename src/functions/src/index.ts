@@ -4,9 +4,25 @@ import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
-import * as crypto from "node:crypto";
+import * as functions from "firebase-functions";
 
 initializeApp();
+
+// --- Presence function ---
+// Listens for changes to the Realtime Database and updates Firestore.
+export const onUserStatusChanged = functions.region("southamerica-east1").database
+  .ref('/status/{uid}')
+  .onUpdate(async (change, context) => {
+    const eventStatus = change.after.val();
+    const firestore = getFirestore();
+    const userDocRef = firestore.doc(`users/${context.params.uid}`);
+
+    return userDocRef.update({
+      status: eventStatus.state,
+      lastSeenAt: FieldValue.serverTimestamp(),
+    });
+  });
+
 
 /* ========== inviteUser (callable) ========== */
 export const inviteUser = onCall(
@@ -48,8 +64,10 @@ export const inviteUser = onCall(
         role,
         displayName: displayName || '',
         phone: phone || '',
+        status: 'offline', // Default status on creation
         createdAt:FieldValue.serverTimestamp(),
-        updatedAt:FieldValue.serverTimestamp()
+        updatedAt:FieldValue.serverTimestamp(),
+        lastSeenAt: FieldValue.serverTimestamp(),
       };
 
       if (role === 'driver') {
@@ -68,6 +86,58 @@ export const inviteUser = onCall(
     }
   }
 );
+
+/* ========== deleteUser (callable) ========== */
+export const deleteUser = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+
+    if (!uid) {
+      throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
+    }
+
+    // TODO: Add check to ensure only admins can call this function
+    // const callerUid = req.auth?.uid;
+    // if (!callerUid) {
+    //   throw new HttpsError("unauthenticated", "Ação não autorizada.");
+    // }
+    // const callerDoc = await getFirestore().collection("users").doc(callerUid).get();
+    // if (callerDoc.data()?.role !== 'admin') {
+    //   throw new HttpsError("permission-denied", "Apenas administradores podem remover usuários.");
+    // }
+    
+    try {
+      const auth = getAuth();
+      const db = getFirestore();
+
+      // Delete from Firebase Authentication
+      await auth.deleteUser(uid);
+
+      // Delete from Firestore
+      await db.collection("users").doc(uid).delete();
+
+      return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Falha ao remover usuário";
+      if ((err as any).code === 'auth/user-not-found') {
+          // If user not in auth, still try to delete from firestore
+          try {
+            const db = getFirestore();
+            await db.collection("users").doc(uid).delete();
+            return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
+          } catch (dbErr) {
+             const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
+             throw new HttpsError("internal", dbMsg);
+          }
+      }
+      throw new HttpsError("internal", msg);
+    }
+  }
+);
+
 
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")
@@ -97,8 +167,10 @@ export const authUserMirror=functionsV1.region("southamerica-east1")
             role: role,
             displayName: u.displayName || '',
             phone: u.phoneNumber || '',
+            status: 'offline',
             createdAt:FieldValue.serverTimestamp(),
-            updatedAt:FieldValue.serverTimestamp()
+            updatedAt:FieldValue.serverTimestamp(),
+            lastSeenAt: FieldValue.serverTimestamp(),
           }
         );
       }

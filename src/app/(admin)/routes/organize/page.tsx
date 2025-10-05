@@ -336,7 +336,7 @@ export default function OrganizeRoutePage() {
         const data = doc.data();
         driversData.push({
           id: doc.id,
-          name: data.displayName || data.email,
+          name: data.displayName || data.name || 'Motorista sem nome',
           email: data.email,
           phone: data.phone || 'N/A',
           status: data.status || 'offline',
@@ -344,7 +344,7 @@ export default function OrganizeRoutePage() {
           lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
           totalDeliveries: data.totalDeliveries || 0,
           rating: data.rating || 0,
-          avatarUrl: data.photoURL || `https://i.pravatar.cc/150?u=${doc.id}`,
+          avatarUrl: data.photoURL,
         })
       });
       setAvailableDrivers(driversData);

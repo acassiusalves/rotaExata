@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -15,11 +14,19 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Driver } from '@/lib/types';
 import { DriverTable } from '@/components/drivers/driver-table';
 import { AddDriverDialog } from '@/components/drivers/add-driver-dialog';
+import { DeleteDriverDialog } from '@/components/drivers/delete-driver-dialog';
+import { useToast } from '@/hooks/use-toast';
+import { functions } from '@/lib/firebase/client';
+import { httpsCallable } from 'firebase/functions';
+
 
 export default function DriversPage() {
   const [drivers, setDrivers] = React.useState<Driver[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
+  const { toast } = useToast();
 
   React.useEffect(() => {
     const q = query(collection(db, 'users'), where('role', '==', 'driver'));
@@ -32,7 +39,7 @@ export default function DriversPage() {
 
           driversData.push({
             id: doc.id,
-            name: data.displayName || data.email, // Prioriza displayName
+            name: data.displayName || data.name || 'Motorista sem nome',
             phone: data.phone || 'N/A',
             email: data.email,
             status: data.status || 'offline',
@@ -40,7 +47,7 @@ export default function DriversPage() {
             lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
             totalDeliveries: data.totalDeliveries || 0,
             rating: data.rating || 0,
-            avatarUrl: data.photoURL || `https://i.pravatar.cc/150?u=${doc.id}`,
+            avatarUrl: data.photoURL,
           });
         });
 
@@ -55,6 +62,33 @@ export default function DriversPage() {
 
     return () => unsubscribe();
   }, []);
+  
+  const handleDeleteDriver = async () => {
+    if (!driverToDelete) return;
+    setIsDeleting(true);
+
+    try {
+      const deleteUserFn = httpsCallable(functions, 'deleteUser');
+      await deleteUserFn({ uid: driverToDelete.id });
+
+      toast({
+        title: 'Motorista Removido!',
+        description: `O motorista ${driverToDelete.name} foi removido com sucesso.`,
+      });
+
+      setDriverToDelete(null); // Close dialog
+    } catch (error: any) {
+      console.error('Error deleting driver:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Remover',
+        description: error.message || 'Não foi possível remover o motorista.',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
 
   return (
     <>
@@ -66,7 +100,7 @@ export default function DriversPage() {
               Gerencie sua equipe de motoristas.
             </p>
           </div>
-          <Button onClick={() => setIsDialogOpen(true)}>
+          <Button onClick={() => setIsAddDialogOpen(true)}>
             <PlusCircle className="mr-2 h-4 w-4" />
             Adicionar Motorista
           </Button>
@@ -78,12 +112,19 @@ export default function DriversPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <DriverTable drivers={drivers} />
+              <DriverTable drivers={drivers} onDeleteClick={(driver) => setDriverToDelete(driver)} />
             )}
           </CardContent>
         </Card>
       </div>
-      <AddDriverDialog isOpen={isDialogOpen} onClose={() => setIsDialogOpen(false)} />
+      <AddDriverDialog isOpen={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} />
+      <DeleteDriverDialog
+        isOpen={!!driverToDelete}
+        onClose={() => setDriverToDelete(null)}
+        onConfirm={handleDeleteDriver}
+        driverName={driverToDelete?.name}
+        isDeleting={isDeleting}
+      />
     </>
   );
 }

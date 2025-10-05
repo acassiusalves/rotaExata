@@ -24,8 +24,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Driver, DriverStatus } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { MoreHorizontal, Star } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import { MoreHorizontal, Star, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
 
 const statusMap: Record<
   DriverStatus,
@@ -37,7 +37,7 @@ const statusMap: Record<
   offline: { label: 'Offline', className: 'bg-gray-500' },
 };
 
-export const columns: ColumnDef<Driver>[] = [
+const getDriverColumns = (onDeleteClick: (driver: Driver) => void): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
     header: 'Motorista',
@@ -60,15 +60,6 @@ export const columns: ColumnDef<Driver>[] = [
     cell: ({ row }) => {
       const status = row.getValue('status') as DriverStatus;
       const { label, className } = statusMap[status] || { label: 'Offline', className: 'bg-gray-400' };
-
-      console.log('🎨 [driver-table] Renderizando status:', {
-        driverId: row.original.id,
-        email: row.original.email,
-        status: status,
-        statusType: typeof status,
-        label: label,
-        isInMap: status in statusMap
-      });
 
       return (
         <div className="flex items-center gap-2">
@@ -116,6 +107,7 @@ export const columns: ColumnDef<Driver>[] = [
    {
     id: 'actions',
     cell: ({ row }) => {
+      const driver = row.original;
       return (
         <div className="text-right">
             <DropdownMenu>
@@ -128,7 +120,11 @@ export const columns: ColumnDef<Driver>[] = [
                 <DropdownMenuContent align="end">
                     <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
                     <DropdownMenuItem>Editar</DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive">Desativar</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
+                       <Trash2 className="mr-2 h-4 w-4" />
+                       Remover
+                    </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
         </div>
@@ -137,9 +133,11 @@ export const columns: ColumnDef<Driver>[] = [
   },
 ];
 
-export function DriverTable({ drivers }: { drivers: Driver[] }) {
+export function DriverTable({ drivers, onDeleteClick }: { drivers: Driver[], onDeleteClick: (driver: Driver) => void }) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   
+  const columns = React.useMemo(() => getDriverColumns(onDeleteClick), [onDeleteClick]);
+
   const table = useReactTable({
     data: drivers,
     columns,
