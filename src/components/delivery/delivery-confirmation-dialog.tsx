@@ -17,7 +17,6 @@ import {
   Camera,
   Upload,
   X,
-  PenTool,
   Loader2,
   CheckCircle2,
   AlertCircle,
@@ -30,7 +29,6 @@ interface DeliveryConfirmationDialogProps {
   onClose: () => void;
   onConfirm: (data: {
     photo?: string;
-    signature?: string;
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
@@ -48,7 +46,6 @@ export function DeliveryConfirmationDialog({
   address,
 }: DeliveryConfirmationDialogProps) {
   const [photo, setPhoto] = React.useState<string | null>(null);
-  const [signature, setSignature] = React.useState<string | null>(null);
   const [notes, setNotes] = React.useState('');
   const [deliveryStatus, setDeliveryStatus] = React.useState<'completed' | 'failed'>('completed');
   const [failureReason, setFailureReason] = React.useState('');
@@ -58,27 +55,119 @@ export function DeliveryConfirmationDialog({
 
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const signatureCanvasRef = React.useRef<HTMLCanvasElement>(null);
   const [isCameraActive, setIsCameraActive] = React.useState(false);
-  const [isDrawing, setIsDrawing] = React.useState(false);
   const streamRef = React.useRef<MediaStream | null>(null);
 
   // Camera handling
   const startCamera = async () => {
     try {
+      console.log('Solicitando acesso à câmera...');
+
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('API de câmera não suportada neste navegador');
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
         audio: false,
       });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
-        setIsCameraActive(true);
+      console.log('Stream obtida:', stream);
+      console.log('Tracks da stream:', stream.getTracks());
+
+      if (!videoRef.current) {
+        throw new Error('Elemento de vídeo não encontrado');
       }
+
+      videoRef.current.srcObject = stream;
+      streamRef.current = stream;
+
+      // Ativar câmera imediatamente e tentar reproduzir
+      setIsCameraActive(true);
+
+      // Tentar reproduzir o vídeo de múltiplas formas
+      try {
+        await videoRef.current.play();
+        console.log('Vídeo reproduzindo via play() direto');
+      } catch (playError) {
+        console.log('Erro no play() direto, tentando com evento:', playError);
+
+        // Tentar com evento loadedmetadata
+        await new Promise<void>((resolve, reject) => {
+          if (!videoRef.current) {
+            reject(new Error('Referência do vídeo perdida'));
+            return;
+          }
+
+          const video = videoRef.current;
+
+          const onLoadedMetadata = () => {
+            console.log('loadedmetadata disparado');
+            video.play()
+              .then(() => {
+                console.log('Vídeo reproduzindo via evento');
+                resolve();
+              })
+              .catch(reject);
+          };
+
+          const onCanPlay = () => {
+            console.log('canplay disparado');
+            video.play()
+              .then(() => {
+                console.log('Vídeo reproduzindo via canplay');
+                resolve();
+              })
+              .catch(reject);
+          };
+
+          video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+          video.addEventListener('canplay', onCanPlay, { once: true });
+
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            video.removeEventListener('loadedmetadata', onLoadedMetadata);
+            video.removeEventListener('canplay', onCanPlay);
+            // Não rejeitar, apenas logar - a câmera pode funcionar mesmo sem os eventos
+            console.warn('Timeout aguardando eventos de vídeo - continuando mesmo assim');
+            resolve();
+          }, 5000);
+        });
+      }
+
+      console.log('Câmera ativada com sucesso');
+      console.log('Estado do vídeo:', {
+        readyState: videoRef.current?.readyState,
+        videoWidth: videoRef.current?.videoWidth,
+        videoHeight: videoRef.current?.videoHeight,
+        paused: videoRef.current?.paused
+      });
     } catch (err) {
-      console.error('Error accessing camera:', err);
-      setError('Não foi possível acessar a câmera. Verifique as permissões.');
+      console.error('Erro ao acessar câmera:', err);
+
+      let errorMessage = 'Não foi possível acessar a câmera.';
+
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          errorMessage = 'Permissão de câmera negada. Verifique as configurações do navegador.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          errorMessage = 'Nenhuma câmera encontrada no dispositivo.';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          errorMessage = 'Câmera está em uso por outro aplicativo. Feche outros apps e tente novamente.';
+        } else if (err.message.includes('não suportada')) {
+          errorMessage = err.message;
+        } else {
+          errorMessage = `Erro: ${err.message}`;
+        }
+      }
+
+      setError(errorMessage);
+      stopCamera();
     }
   };
 
@@ -119,61 +208,6 @@ export function DeliveryConfirmationDialog({
     reader.readAsDataURL(file);
   };
 
-  // Signature handling
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    setIsDrawing(true);
-    draw(e);
-  };
-
-  const stopDrawing = () => {
-    setIsDrawing(false);
-    if (signatureCanvasRef.current) {
-      const context = signatureCanvasRef.current.getContext('2d');
-      if (context) {
-        context.beginPath();
-      }
-    }
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !signatureCanvasRef.current) return;
-
-    const canvas = signatureCanvasRef.current;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = ('touches' in e)
-      ? e.touches[0].clientX - rect.left
-      : e.clientX - rect.left;
-    const y = ('touches' in e)
-      ? e.touches[0].clientY - rect.top
-      : e.clientY - rect.top;
-
-    context.lineWidth = 2;
-    context.lineCap = 'round';
-    context.strokeStyle = '#000';
-
-    context.lineTo(x, y);
-    context.stroke();
-    context.beginPath();
-    context.moveTo(x, y);
-  };
-
-  const clearSignature = () => {
-    if (!signatureCanvasRef.current) return;
-    const context = signatureCanvasRef.current.getContext('2d');
-    if (context) {
-      context.clearRect(0, 0, signatureCanvasRef.current.width, signatureCanvasRef.current.height);
-    }
-    setSignature(null);
-  };
-
-  const saveSignature = () => {
-    if (!signatureCanvasRef.current) return;
-    const signatureData = signatureCanvasRef.current.toDataURL('image/png');
-    setSignature(signatureData);
-  };
 
   const handleSubmit = async () => {
     if (deliveryStatus === 'completed' && !photo) {
@@ -197,7 +231,6 @@ export function DeliveryConfirmationDialog({
     try {
       await onConfirm({
         photo: photo || undefined,
-        signature: signature || undefined,
         notes: notes || undefined,
         status: deliveryStatus,
         failureReason: deliveryStatus === 'failed' ? failureReason : undefined,
@@ -206,7 +239,6 @@ export function DeliveryConfirmationDialog({
 
       // Reset form
       setPhoto(null);
-      setSignature(null);
       setNotes('');
       setDeliveryStatus('completed');
       setFailureReason('');
@@ -226,18 +258,6 @@ export function DeliveryConfirmationDialog({
       stopCamera();
     };
   }, []);
-
-  React.useEffect(() => {
-    // Initialize signature canvas
-    if (signatureCanvasRef.current && !signature) {
-      const canvas = signatureCanvasRef.current;
-      const context = canvas.getContext('2d');
-      if (context) {
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
-    }
-  }, [signature]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -320,7 +340,9 @@ export function DeliveryConfirmationDialog({
                             ref={videoRef}
                             autoPlay
                             playsInline
-                            className="w-full rounded-lg"
+                            muted
+                            className="w-full rounded-lg bg-black"
+                            style={{ maxHeight: '400px' }}
                           />
                           <div className="flex gap-2 mt-2">
                             <Button onClick={capturePhoto} className="flex-1">
@@ -388,52 +410,6 @@ export function DeliveryConfirmationDialog({
                   )}
                 </TabsContent>
               </Tabs>
-
-              {/* Signature */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Assinatura (Opcional)</Label>
-                  {!signature && (
-                    <Button onClick={clearSignature} variant="ghost" size="sm">
-                      Limpar
-                    </Button>
-                  )}
-                </div>
-
-                {!signature ? (
-                  <div className="border rounded-lg p-2 bg-white">
-                    <canvas
-                      ref={signatureCanvasRef}
-                      width={400}
-                      height={200}
-                      className="w-full touch-none cursor-crosshair"
-                      onMouseDown={startDrawing}
-                      onMouseMove={draw}
-                      onMouseUp={stopDrawing}
-                      onMouseLeave={stopDrawing}
-                      onTouchStart={startDrawing}
-                      onTouchMove={draw}
-                      onTouchEnd={stopDrawing}
-                    />
-                    <Button onClick={saveSignature} variant="outline" size="sm" className="w-full mt-2">
-                      <PenTool className="mr-2 h-4 w-4" />
-                      Salvar Assinatura
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <img src={signature} alt="Assinatura" className="w-full rounded-lg border" />
-                    <Button
-                      onClick={() => setSignature(null)}
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-2 right-2"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-              </div>
 
               {/* Payment Method */}
               <div className="space-y-2">

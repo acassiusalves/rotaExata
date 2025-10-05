@@ -214,7 +214,6 @@ export default function RouteDetailsPage() {
 
   const handleConfirmDelivery = async (data: {
     photo?: string;
-    signature?: string;
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
@@ -229,7 +228,6 @@ export default function RouteDetailsPage() {
         deliveryStatus: data.status,
         completedAt: Timestamp.now(),
         photoUrl: data.photo,
-        signatureUrl: data.signature,
         notes: data.notes,
         failureReason: data.failureReason,
         paymentMethod: data.paymentMethod,
