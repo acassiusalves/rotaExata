@@ -2,29 +2,25 @@
 'use client';
 
 import * as React from 'react';
-import { notFound, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
   ChevronLeft,
-  CircleUserRound,
   Navigation,
-  Phone,
-  CheckCircle2,
-  Circle,
   Loader2,
   MapPin,
   Clock,
   Milestone,
+  PlayCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { db } from '@/lib/firebase/client';
 import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
-import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
+import { notFound } from 'next/navigation';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -103,6 +99,26 @@ export default function RouteDetailsPage() {
     const url = `https://wa.me/55${sanitizedPhone}`; // Adiciona o código do Brasil
     window.open(url, '_blank');
   };
+  
+  const handleNavigateRoute = () => {
+    if (!route || !route.origin || route.stops.length === 0) return;
+
+    const origin = route.origin.lat && route.origin.lng 
+        ? `${route.origin.lat},${route.origin.lng}`
+        : encodeURIComponent(route.origin.address);
+
+    const destination = route.stops[route.stops.length - 1];
+    const destinationStr = destination.lat && destination.lng
+        ? `${destination.lat},${destination.lng}`
+        : encodeURIComponent(destination.address);
+    
+    const waypoints = route.stops.slice(0, -1).map(stop => 
+        stop.lat && stop.lng ? `${stop.lat},${stop.lng}` : encodeURIComponent(stop.address)
+    ).join('|');
+
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destinationStr}&waypoints=${waypoints}&travelmode=driving`;
+    window.open(url, '_blank');
+  };
 
 
   if (isLoading) {
@@ -167,7 +183,15 @@ export default function RouteDetailsPage() {
                             )}
                         </div>
                         <div className="flex-1 space-y-2">
-                            <div className="font-semibold">{stop.customerName || 'Endereço'}</div>
+                            <div className="flex justify-between items-start">
+                                <div className="font-semibold">{stop.customerName || 'Endereço'}</div>
+                                {index === 0 && (
+                                    <Button size="sm" onClick={handleNavigateRoute}>
+                                        <PlayCircle className="mr-2 h-4 w-4" />
+                                        Iniciar Rota
+                                    </Button>
+                                )}
+                            </div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
                             <div className="flex gap-2 pt-2">
                                  <Button size="sm" variant="outline" onClick={() => handleNavigation(stop)}>
