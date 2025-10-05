@@ -16,7 +16,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       <div className="flex h-screen w-full flex-col">
         {/* Do not render header on map page */}
         {!pathname.startsWith('/routes/map/') && <Header />}
-        <main className="flex-1 overflow-hidden">{children}</main>
+        <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
       </div>
     );
   }
