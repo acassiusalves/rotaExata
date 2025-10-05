@@ -556,9 +556,9 @@ export default function NewRoutePage() {
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
-          <div className="flex-1 relative">
-            <ScrollArea className="absolute inset-0">
-                <div className="space-y-6 p-6 pb-24">
+          <div className="flex-1 flex flex-col overflow-y-hidden">
+            <ScrollArea className="flex-1">
+                <div className="space-y-6 p-6 pb-6">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -714,7 +714,7 @@ export default function NewRoutePage() {
                   </div>
                 </div>
             </ScrollArea>
-             <div className="absolute bottom-0 left-0 w-full shrink-0 border-t bg-background p-4 flex items-center gap-3">
+             <div className="shrink-0 border-t bg-background p-4 flex items-center gap-3">
                 <Button
                 variant="outline"
                 className="flex-1 justify-center gap-3"
