@@ -42,7 +42,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
@@ -553,14 +552,14 @@ export default function NewRoutePage() {
       />
       <div className="grid h-full min-h-0 w-full grid-cols-1 lg:grid-cols-[480px_1fr]">
         {/* Left Panel */}
-        <div className="flex h-full min-h-0 flex-col border-r bg-background">
+        <div className="relative z-10 flex h-full min-h-0 flex-col border-r bg-background">
           {/* Header */}
           <div className="flex-shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
 
           {/* Scrollable Content Area */}
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+          <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
             <div className="p-6 space-y-6">
               <div className="space-y-2">
                   <div className="flex items-center justify-between">
