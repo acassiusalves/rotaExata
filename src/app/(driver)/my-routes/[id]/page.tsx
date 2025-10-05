@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { notFound } from 'next/navigation';
+import { notFound, useParams } from 'next/navigation';
 import {
   ChevronLeft,
   CircleUserRound,
@@ -58,12 +58,15 @@ const formatDuration = (durationString: string = '0s') => {
 };
 
 
-export default function RouteDetailsPage({ params }: { params: { id: string } }) {
+export default function RouteDetailsPage() {
+  const params = useParams();
+  const routeId = params.id as string;
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const docRef = doc(db, 'routes', params.id);
+    if (!routeId) return;
+    const docRef = doc(db, 'routes', routeId);
     const unsubscribe = onSnapshot(
       docRef,
       (docSnap) => {
@@ -83,7 +86,7 @@ export default function RouteDetailsPage({ params }: { params: { id: string } })
     );
 
     return () => unsubscribe();
-  }, [params.id]);
+  }, [routeId]);
 
   const handleNavigation = (stop: PlaceValue) => {
     if (!stop) return;
