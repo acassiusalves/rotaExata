@@ -4,8 +4,6 @@ import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
-import {getMessaging} from "firebase-admin/messaging";
-import * as crypto from "node:crypto";
 import * as functions from "firebase-functions";
 
 initializeApp();
@@ -89,6 +87,51 @@ export const inviteUser = onCall(
   }
 );
 
+/* ========== deleteUser (callable) ========== */
+export const deleteUser = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+
+    if (!uid) {
+      throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
+    }
+    
+    try {
+      const auth = getAuth();
+      const db = getFirestore();
+
+      // Delete from Firebase Authentication
+      await auth.deleteUser(uid);
+
+      // Delete from Firestore
+      await db.collection("users").doc(uid).delete();
+
+      return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
+
+    } catch (err) {
+      const error = err as any;
+      const msg = error.message || "Falha ao remover usuário";
+
+      // If user not in auth, it's not a critical failure,
+      // still try to delete from firestore as the main goal.
+      if (error.code === 'auth/user-not-found') {
+          try {
+            const db = getFirestore();
+            await db.collection("users").doc(uid).delete();
+            return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
+          } catch (dbErr) {
+             const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
+             throw new HttpsError("internal", dbMsg);
+          }
+      }
+      throw new HttpsError("internal", msg);
+    }
+  }
+);
+
+
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")
   .auth.user()
@@ -165,25 +208,3 @@ export const syncAuthUsers=onCall(
     }
   }
 );
-
-/* ========== Push notification when a run is assigned ========== */
-export async function notifyRunAssigned(runId: string, courierId: string) {
-  const db = getFirestore();
-  const tokensSnap = await db
-    .collection("couriers")
-    .doc(courierId)
-    .collection("tokens")
-    .get();
-
-  const tokens = tokensSnap.docs.map((doc) => doc.id);
-  if (!tokens.length) return;
-
-  await getMessaging().sendEachForMulticast({
-    tokens,
-    notification: {
-      title: "Nova corrida",
-      body: `Run #${runId} atribuída a você.`,
-    },
-    data: { runId },
-  });
-}
