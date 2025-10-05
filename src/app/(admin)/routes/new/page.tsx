@@ -553,12 +553,15 @@ export default function NewRoutePage() {
       />
       <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
         <div className="flex h-full flex-col border-r bg-background">
+          {/* Header */}
           <div className="flex-shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-6 space-y-6">
+          {/* Scrollable Content */}
+          <div className="flex-1 min-h-0">
+            <ScrollArea className="h-full">
+                <div className="p-6 space-y-6">
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -705,11 +708,13 @@ export default function NewRoutePage() {
                     </div>
                     ))}
                 </div>
-            </div>
+                </div>
+            </ScrollArea>
           </div>
 
+          {/* Footer */}
           <div className="flex-shrink-0 border-t bg-background p-4 space-y-3">
-               <div className="space-y-2">
+              <div className="space-y-2">
                   <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
                       <PlusCircle className="h-5 w-5" />
                       Adicionar novo serviço
