@@ -70,8 +70,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { drivers } from '@/lib/data';
-import type { PlaceValue, RouteInfo } from '@/lib/types';
+import type { PlaceValue, RouteInfo, Driver } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -94,7 +93,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { db } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp } from "firebase/firestore"; 
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from "firebase/firestore"; 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
@@ -312,6 +311,7 @@ export default function OrganizeRoutePage() {
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
   const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
   const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+  const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
 
 
   // State for Add Service Dialog
@@ -326,6 +326,32 @@ export default function OrganizeRoutePage() {
     useSensor(PointerSensor, { activationConstraint: { delay: DRAG_DELAY, tolerance: 5 } }),
     useSensor(KeyboardSensor)
   );
+  
+  React.useEffect(() => {
+    // Fetch available drivers from Firestore
+    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const driversData: Driver[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        driversData.push({
+          id: doc.id,
+          name: data.displayName || data.email,
+          email: data.email,
+          phone: data.phone || 'N/A',
+          status: data.status || 'offline',
+          vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
+          lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
+          totalDeliveries: data.totalDeliveries || 0,
+          rating: data.rating || 0,
+          avatarUrl: data.photoURL || `https://i.pravatar.cc/150?u=${doc.id}`,
+        })
+      });
+      setAvailableDrivers(driversData);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
@@ -480,7 +506,7 @@ export default function OrganizeRoutePage() {
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
-        const driver = drivers.find(d => d.id === driverId);
+        const driver = availableDrivers.find(d => d.id === driverId);
         
         const routeDoc = {
             name: routeName,
@@ -494,7 +520,7 @@ export default function OrganizeRoutePage() {
             encodedPolyline: routeToSave.encodedPolyline,
             color: routeToSave.color,
             driverId: driverId,
-            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle.plate } : null,
         };
         await addDoc(collection(db, "routes"), routeDoc);
 
@@ -736,7 +762,7 @@ export default function OrganizeRoutePage() {
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {routesForTable.length > 0 ? routesForTable.map(routeItem => (
                   <Card key={routeItem.key}>
                     <CardHeader>
@@ -752,7 +778,7 @@ export default function OrganizeRoutePage() {
                           <SelectValue placeholder="Escolha um motorista disponível..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {drivers
+                          {availableDrivers
                             .filter((d) => d.status === 'available' || d.status === 'online')
                             .map((driver) => (
                               <SelectItem key={driver.id} value={driver.id}>
@@ -771,12 +797,12 @@ export default function OrganizeRoutePage() {
                         </SelectContent>
                       </Select>
                        <p className="mt-2 text-xs text-muted-foreground">
-                        Apenas motoristas com status "Disponível" são mostrados.
+                        Apenas motoristas com status "Disponível" ou "Online" são mostrados.
                       </p>
                     </CardContent>
                   </Card>
                 )) : (
-                     <div className="md:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
+                     <div className="lg:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
                         Nenhuma rota pendente para atribuir.
                     </div>
                 )}
@@ -784,9 +810,9 @@ export default function OrganizeRoutePage() {
             </TabsContent>
 
             <TabsContent value="review" className="m-0">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {routesForTable.length > 0 ? routesForTable.map(routeItem => {
-                        const driver = drivers.find(d => d.id === assignedDrivers[routeItem.key]);
+                        const driver = availableDrivers.find(d => d.id === assignedDrivers[routeItem.key]);
                         const isSavingRoute = isSaving[routeItem.key];
 
                         return (
@@ -829,7 +855,7 @@ export default function OrganizeRoutePage() {
                             </Card>
                         )
                     }) : (
-                        <div className="md:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
+                        <div className="lg:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
                             Nenhuma rota pendente para revisar.
                         </div>
                     )}
