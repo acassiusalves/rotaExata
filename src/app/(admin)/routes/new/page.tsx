@@ -556,8 +556,10 @@ export default function NewRoutePage() {
           <div className="flex items-center justify-between shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
+          
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="p-6 space-y-6">
+            {/* Seção superior (não rolável) */}
+            <div className="p-6 space-y-6 shrink-0">
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -646,8 +648,9 @@ export default function NewRoutePage() {
                 <Separator />
             </div>
             
+            {/* Área de rolagem para a lista de paradas */}
             <ScrollArea className="flex-1 px-6">
-                <div className="space-y-4 pb-6">
+                <div className="space-y-4 pb-4">
                     {stops.map((stop, index) => (
                     <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
                         <Label htmlFor={`stop-${index}`}>
@@ -706,8 +709,12 @@ export default function NewRoutePage() {
                         </div>
                     </div>
                     ))}
-                
-                    <div className="mt-4 space-y-2">
+                </div>
+            </ScrollArea>
+
+            {/* Rodapé fixo com botões de ação */}
+            <div className="shrink-0 border-t bg-background p-4 space-y-3">
+                 <div className="space-y-2">
                     <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
                         <PlusCircle className="h-5 w-5" />
                         Adicionar novo serviço
@@ -725,12 +732,8 @@ export default function NewRoutePage() {
                         )}
                         {isImporting ? 'Importando...' : 'Importar planilha CSV'}
                     </Button>
-                    </div>
                 </div>
-            </ScrollArea>
-
-            <div className="shrink-0 border-t bg-background p-4 flex items-center gap-3">
-                <Button className="flex-1" onClick={handleNextStep}>
+                <Button className="w-full" onClick={handleNextStep}>
                     Avançar para Organização
                     <ArrowRight className='ml-2 h-4 w-4' />
                 </Button>
