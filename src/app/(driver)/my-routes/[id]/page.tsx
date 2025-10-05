@@ -12,16 +12,22 @@ import {
   Milestone,
   PlayCircle,
   CheckCircle2,
+  StopCircle,
+  RadioTower,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { db } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
 import { notFound } from 'next/navigation';
+import { useGeolocationTracking } from '@/hooks/use-geolocation-tracking';
+import { useToast } from '@/hooks/use-toast';
+import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -60,6 +66,17 @@ export default function RouteDetailsPage() {
   const routeId = params.id as string;
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selectedStopIndex, setSelectedStopIndex] = React.useState<number | null>(null);
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
+  const { toast } = useToast();
+
+  // GPS Tracking
+  const { location, isTracking, startTracking, stopTracking, error } = useGeolocationTracking({
+    routeId,
+    enableHighAccuracy: true,
+    updateInterval: 5000, // 5 segundos
+    distanceFilter: 10, // 10 metros
+  });
 
   React.useEffect(() => {
     if (!routeId) return;
@@ -104,7 +121,7 @@ export default function RouteDetailsPage() {
   const handleNavigateRoute = () => {
     if (!route || !route.origin || route.stops.length === 0) return;
 
-    const origin = route.origin.lat && route.origin.lng 
+    const origin = route.origin.lat && route.origin.lng
         ? `${route.origin.lat},${route.origin.lng}`
         : encodeURIComponent(route.origin.address);
 
@@ -112,8 +129,8 @@ export default function RouteDetailsPage() {
     const destinationStr = destination.lat && destination.lng
         ? `${destination.lat},${destination.lng}`
         : encodeURIComponent(destination.address);
-    
-    const waypoints = route.stops.slice(0, -1).map(stop => 
+
+    const waypoints = route.stops.slice(0, -1).map(stop =>
         stop.lat && stop.lng ? `${stop.lat},${stop.lng}` : encodeURIComponent(stop.address)
     ).join('|');
 
@@ -121,6 +138,105 @@ export default function RouteDetailsPage() {
     window.open(url, '_blank');
   };
 
+  const handleStartRoute = async () => {
+    if (!route) return;
+
+    try {
+      const routeRef = doc(db, 'routes', routeId);
+      await updateDoc(routeRef, {
+        status: 'in_progress',
+        startedAt: Timestamp.now(),
+        currentStopIndex: 0,
+      });
+
+      startTracking();
+
+      toast({
+        title: 'Rota iniciada!',
+        description: 'Seu rastreamento está ativo.',
+      });
+    } catch (error) {
+      console.error('Error starting route:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Não foi possível iniciar a rota.',
+      });
+    }
+  };
+
+  const handleStopRoute = async () => {
+    if (!route) return;
+
+    try {
+      stopTracking();
+
+      const routeRef = doc(db, 'routes', routeId);
+      await updateDoc(routeRef, {
+        status: 'completed',
+        completedAt: Timestamp.now(),
+      });
+
+      toast({
+        title: 'Rota finalizada!',
+        description: 'Obrigado pelo trabalho.',
+      });
+    } catch (error) {
+      console.error('Error stopping route:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Não foi possível finalizar a rota.',
+      });
+    }
+  };
+
+  const handleConfirmDelivery = async (data: {
+    photo?: string;
+    signature?: string;
+    notes?: string;
+    status: 'completed' | 'failed';
+    failureReason?: string;
+  }) => {
+    if (!route || selectedStopIndex === null) return;
+
+    try {
+      const updatedStops = [...route.stops];
+      updatedStops[selectedStopIndex] = {
+        ...updatedStops[selectedStopIndex],
+        deliveryStatus: data.status,
+        completedAt: Timestamp.now(),
+        photoUrl: data.photo,
+        signatureUrl: data.signature,
+        notes: data.notes,
+        failureReason: data.failureReason,
+      };
+
+      const routeRef = doc(db, 'routes', routeId);
+      await updateDoc(routeRef, {
+        stops: updatedStops,
+        currentStopIndex: selectedStopIndex + 1,
+      });
+
+      toast({
+        title: data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada',
+        description: data.status === 'completed'
+          ? 'A entrega foi registrada com sucesso.'
+          : 'A falha na entrega foi registrada.',
+      });
+
+      setIsConfirmDialogOpen(false);
+      setSelectedStopIndex(null);
+    } catch (error) {
+      console.error('Error confirming delivery:', error);
+      throw error;
+    }
+  };
+
+  const handleOpenConfirmDialog = (index: number) => {
+    setSelectedStopIndex(index);
+    setIsConfirmDialogOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -142,8 +258,28 @@ export default function RouteDetailsPage() {
                     <ChevronLeft className="h-6 w-6" />
                 </Link>
             </Button>
-            <h1 className="text-lg font-semibold">{route.name}</h1>
+            <div className="flex-1">
+                <h1 className="text-lg font-semibold">{route.name}</h1>
+                {isTracking && (
+                    <Badge variant="default" className="flex items-center gap-1 w-fit">
+                        <RadioTower className="h-3 w-3 animate-pulse" />
+                        <span className="text-xs">Rastreando</span>
+                    </Badge>
+                )}
+            </div>
             <div className="ml-auto flex items-center gap-2">
+                {route.status === 'dispatched' && (
+                    <Button size="sm" onClick={handleStartRoute}>
+                        <PlayCircle className="mr-2 h-4 w-4" />
+                        Iniciar
+                    </Button>
+                )}
+                {route.status === 'in_progress' && (
+                    <Button size="sm" variant="destructive" onClick={handleStopRoute}>
+                        <StopCircle className="mr-2 h-4 w-4" />
+                        Finalizar
+                    </Button>
+                )}
                 <Avatar className="h-8 w-8">
                     <AvatarFallback>{route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}</AvatarFallback>
                 </Avatar>
@@ -186,27 +322,42 @@ export default function RouteDetailsPage() {
                         <div className="flex-1 space-y-2">
                             <div className="flex justify-between items-start">
                                 <div className="font-semibold">{stop.customerName || 'Endereço'}</div>
-                                {index === 0 && (
-                                    <Button size="sm" onClick={handleNavigateRoute}>
-                                        <PlayCircle className="mr-2 h-4 w-4" />
-                                        Iniciar Rota
-                                    </Button>
+                                {stop.deliveryStatus === 'completed' && (
+                                    <Badge variant="default" className="bg-green-600">
+                                        <CheckCircle2 className="mr-1 h-3 w-3" />
+                                        Entregue
+                                    </Badge>
                                 )}
                             </div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
+                            {stop.orderNumber && (
+                                <p className="text-xs text-muted-foreground">Pedido: #{stop.orderNumber}</p>
+                            )}
+                            {stop.notes && (
+                                <p className="text-xs text-muted-foreground italic">{stop.notes}</p>
+                            )}
                             <div className="flex gap-2 pt-2">
                                  <Button size="sm" variant="outline" onClick={() => handleNavigation(stop)}>
                                     <Navigation className="mr-2 h-4 w-4" />
                                     Navegar
                                  </Button>
-                                 <Button size="sm" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)} disabled={!stop.phone}>
-                                    <WhatsAppIcon className="mr-2 h-4 w-4" />
-                                    WhatsApp
-                                </Button>
-                                <Button size="sm" variant="default" className="ml-auto bg-green-600 hover:bg-green-700">
-                                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                                    Confirmar
-                                </Button>
+                                 {stop.phone && (
+                                     <Button size="sm" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)}>
+                                        <WhatsAppIcon className="mr-2 h-4 w-4" />
+                                        WhatsApp
+                                    </Button>
+                                 )}
+                                {route.status === 'in_progress' && stop.deliveryStatus !== 'completed' && (
+                                    <Button
+                                        size="sm"
+                                        variant="default"
+                                        className="ml-auto bg-green-600 hover:bg-green-700"
+                                        onClick={() => handleOpenConfirmDialog(index)}
+                                    >
+                                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                                        Confirmar
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -214,6 +365,20 @@ export default function RouteDetailsPage() {
             ))}
         </div>
       </main>
+
+      {/* Delivery Confirmation Dialog */}
+      {selectedStopIndex !== null && (
+        <DeliveryConfirmationDialog
+          isOpen={isConfirmDialogOpen}
+          onClose={() => {
+            setIsConfirmDialogOpen(false);
+            setSelectedStopIndex(null);
+          }}
+          onConfirm={handleConfirmDelivery}
+          customerName={route.stops[selectedStopIndex]?.customerName}
+          address={route.stops[selectedStopIndex]?.address}
+        />
+      )}
     </div>
   );
 }

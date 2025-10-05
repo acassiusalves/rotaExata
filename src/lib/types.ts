@@ -8,6 +8,8 @@ export type NavItem = {
   label?: string;
 };
 
+export type DeliveryStatus = 'pending' | 'en_route' | 'arrived' | 'completed' | 'failed';
+
 export type PlaceValue = {
   id: string;
   address: string;
@@ -22,6 +24,22 @@ export type PlaceValue = {
   timeWindowStart?: string;
   timeWindowEnd?: string;
   addressString?: string;
+  // Campos de rastreamento
+  deliveryStatus?: DeliveryStatus;
+  arrivedAt?: Timestamp | Date;
+  completedAt?: Timestamp | Date;
+  photoUrl?: string;
+  signatureUrl?: string;
+  failureReason?: string;
+};
+
+export type DriverLocation = {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  heading?: number;
+  speed?: number;
+  timestamp: Timestamp | Date;
 };
 
 export type RouteInfo = {
@@ -32,6 +50,12 @@ export type RouteInfo = {
   color?: string; // Optional color for rendering
   visible?: boolean;
   status?: 'dispatched' | 'in_progress' | 'completed';
+  // Rastreamento em tempo real
+  currentLocation?: DriverLocation;
+  currentStopIndex?: number;
+  startedAt?: Timestamp | Date;
+  completedAt?: Timestamp | Date;
+  actualPath?: Array<{ lat: number; lng: number; timestamp: Timestamp | Date }>;
 };
 
 export type OrderStatus =

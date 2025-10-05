@@ -2,14 +2,16 @@
 "use client";
 
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { X, Navigation, Share2, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RouteMap } from '@/components/maps/RouteMap';
-import { doc, Timestamp } from 'firebase/firestore';
-import type { PlaceValue, RouteInfo } from '@/lib/types';
+import { doc, Timestamp, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase/client';
+import type { PlaceValue, RouteInfo, DriverLocation } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -39,6 +41,73 @@ interface RouteMapDialogProps {
 }
 
 export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
+  const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
+  const [currentStopIndex, setCurrentStopIndex] = React.useState<number>(0);
+  const [copied, setCopied] = React.useState(false);
+  const { toast } = useToast();
+
+  // Subscribe to real-time updates
+  React.useEffect(() => {
+    if (!route?.id || !isOpen) return;
+
+    const routeRef = doc(db, 'routes', route.id);
+    const unsubscribe = onSnapshot(routeRef, (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        if (data.currentLocation) {
+          setDriverLocation(data.currentLocation as DriverLocation);
+        }
+        if (data.currentStopIndex !== undefined) {
+          setCurrentStopIndex(data.currentStopIndex);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [route?.id, isOpen]);
+
+  const handleCopyTrackingLink = async () => {
+    const trackingUrl = `${window.location.origin}/track/${route.id}`;
+
+    try {
+      await navigator.clipboard.writeText(trackingUrl);
+      setCopied(true);
+      toast({
+        title: 'Link copiado!',
+        description: 'O link de rastreamento foi copiado para a área de transferência.',
+      });
+
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Não foi possível copiar o link.',
+      });
+    }
+  };
+
+  const handleShareTrackingLink = async () => {
+    const trackingUrl = `${window.location.origin}/track/${route.id}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Rastreamento: ${route.name}`,
+          text: `Acompanhe sua entrega em tempo real`,
+          url: trackingUrl,
+        });
+      } catch (err) {
+        // User cancelled or error occurred
+        console.log('Share cancelled or failed:', err);
+      }
+    } else {
+      // Fallback to copy
+      handleCopyTrackingLink();
+    }
+  };
+
   if (!route) return null;
 
   const mapRoute: RouteInfo = {
@@ -48,6 +117,8 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     duration: route.duration,
     color: route.color,
     visible: true,
+    currentLocation: driverLocation || undefined,
+    currentStopIndex,
   };
 
   return (
@@ -72,14 +143,51 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                             <p className="text-xs font-mono uppercase text-gray-300">{route.driverInfo?.plate}</p>
                         </div>
                     </div>
-                     <Button variant="ghost" size="icon" className="rounded-full bg-gray-900/80 text-white hover:bg-gray-700 hover:text-white" onClick={onClose}>
-                        <X className="h-6 w-6" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-full bg-gray-900/80 text-white hover:bg-gray-700 hover:text-white"
+                            onClick={handleShareTrackingLink}
+                        >
+                            <Share2 className="h-4 w-4 mr-2" />
+                            Compartilhar
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-full bg-gray-900/80 text-white hover:bg-gray-700 hover:text-white"
+                            onClick={handleCopyTrackingLink}
+                        >
+                            {copied ? <Check className="h-5 w-5" /> : <Copy className="h-5 w-5" />}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="rounded-full bg-gray-900/80 text-white hover:bg-gray-700 hover:text-white" onClick={onClose}>
+                            <X className="h-6 w-6" />
+                        </Button>
+                    </div>
                 </header>
-                <div className="absolute left-4 top-20 z-10">
-                    <Badge variant="secondary" className="shadow-lg">Rota enviada ao operador</Badge>
+                <div className="absolute left-4 top-20 z-10 flex flex-col gap-2">
+                    <Badge variant="secondary" className="shadow-lg">
+                        {route.status === 'in_progress' ? 'Em andamento' : 'Rota enviada ao operador'}
+                    </Badge>
+                    {driverLocation && (
+                        <Badge variant="default" className="shadow-lg flex items-center gap-2">
+                            <Navigation className="h-3 w-3" />
+                            Rastreando em tempo real
+                        </Badge>
+                    )}
+                    {route.status === 'in_progress' && (
+                        <Badge variant="outline" className="shadow-lg bg-white">
+                            Parada {currentStopIndex + 1} de {route.stops.length}
+                        </Badge>
+                    )}
                 </div>
-                <RouteMap height={-1} origin={route.origin} routes={[mapRoute]} />
+                <RouteMap
+                    height={-1}
+                    origin={route.origin}
+                    routes={[mapRoute]}
+                    driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : undefined}
+                />
             </div>
         </DialogContent>
     </Dialog>

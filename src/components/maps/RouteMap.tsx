@@ -44,10 +44,11 @@ type Props = {
   routes?: RouteInfo[];
   unassignedStops?: PlaceValue[];
   height?: number;
+  driverLocation?: { lat: number; lng: number; heading?: number };
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360 }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -55,6 +56,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   const markersRef = React.useRef<google.maps.Marker[]>([]);
   const polylinesRef = React.useRef<google.maps.Polyline[]>([]);
   const activeInfoWindowRef = React.useRef<google.maps.InfoWindow | null>(null);
+  const driverMarkerRef = React.useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const entriesRef = React.useRef<Map<string, { marker: any; info: google.maps.InfoWindow }>>(
     new Map()
   );
@@ -193,7 +195,47 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     }
 
   }, [origin, stops, routes, unassignedStops]);
-  
+
+  // Update driver location marker
+  React.useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !driverLocation) {
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.map = null;
+        driverMarkerRef.current = null;
+      }
+      return;
+    }
+
+    // Create or update driver marker
+    if (!driverMarkerRef.current) {
+      // Create truck icon
+      const truckIcon = document.createElement('div');
+      truckIcon.innerHTML = `
+        <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="20" cy="20" r="18" fill="#2563eb" stroke="white" stroke-width="3"/>
+          <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
+        </svg>
+      `;
+      truckIcon.style.transform = driverLocation.heading ? `rotate(${driverLocation.heading}deg)` : '';
+
+      driverMarkerRef.current = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: driverLocation,
+        content: truckIcon,
+        title: "Motorista",
+      });
+    } else {
+      // Update position
+      driverMarkerRef.current.position = driverLocation;
+
+      // Update rotation if heading available
+      if (driverLocation.heading && driverMarkerRef.current.content instanceof HTMLElement) {
+        driverMarkerRef.current.content.style.transform = `rotate(${driverLocation.heading}deg)`;
+      }
+    }
+  }, [driverLocation]);
+
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 
   return <div ref={divRef} style={mapStyle} className="w-full rounded-lg border" />;
