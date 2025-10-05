@@ -560,8 +560,8 @@ export default function NewRoutePage() {
           </div>
 
           {/* Scrollable Content Area */}
-          <ScrollArea className="flex-1 min-h-0">
-              <div className="p-6 space-y-6">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+            <div className="p-6 space-y-6">
               <div className="space-y-2">
                   <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -708,8 +708,8 @@ export default function NewRoutePage() {
                   </div>
                   ))}
               </div>
-              </div>
-          </ScrollArea>
+            </div>
+          </div>
 
           {/* Footer */}
           <div className="flex-shrink-0 border-t bg-background p-4 space-y-3">
