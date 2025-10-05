@@ -557,8 +557,7 @@ export default function NewRoutePage() {
           <div className="flex-shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
-
-          {/* Scrollable Content Area */}
+          
           <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
             <div className="p-6 space-y-6">
               <div className="space-y-2">
@@ -584,68 +583,65 @@ export default function NewRoutePage() {
 
               <Separator />
 
-              <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-                  <h3 className="font-semibold">Início da Rota</h3>
-                  </div>
-                  <div className="pl-8">
-                  <p className="text-sm text-muted-foreground">
-                      <Popover
-                      open={isDatePopoverOpen}
-                      onOpenChange={setIsDatePopoverOpen}
-                      >
-                      <PopoverTrigger asChild>
-                          <Button
-                          variant={'link'}
-                          className={cn(
-                              'p-0 font-medium text-foreground hover:no-underline',
-                              !routeDate && 'text-muted-foreground'
-                          )}
-                          >
-                          {routeDate ? (
-                              format(routeDate, 'PPP', { locale: ptBR })
-                          ) : (
-                              <span>Selecione uma data</span>
-                          )}
-                          </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                          mode="single"
-                          selected={routeDate}
-                          onSelect={(date) => {
-                              setRouteDate(date);
-                              setIsDatePopoverOpen(false);
-                          }}
-                          initialFocus
-                          />
-                      </PopoverContent>
-                      </Popover>
+              <div className="flex items-center gap-3">
+                <CalendarIcon className="h-5 w-5 text-muted-foreground" />
+                <h3 className="font-semibold">Início da Rota</h3>
+                <div className="flex items-center text-sm text-muted-foreground">
+                    <Popover
+                    open={isDatePopoverOpen}
+                    onOpenChange={setIsDatePopoverOpen}
+                    >
+                    <PopoverTrigger asChild>
+                        <Button
+                        variant={'link'}
+                        className={cn(
+                            'p-0 font-medium text-foreground hover:no-underline h-auto',
+                            !routeDate && 'text-muted-foreground'
+                        )}
+                        >
+                        {routeDate ? (
+                            format(routeDate, 'PPP', { locale: ptBR })
+                        ) : (
+                            <span>Selecione uma data</span>
+                        )}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                        mode="single"
+                        selected={routeDate}
+                        onSelect={(date) => {
+                            setRouteDate(date);
+                            setIsDatePopoverOpen(false);
+                        }}
+                        initialFocus
+                        />
+                    </PopoverContent>
+                    </Popover>
 
-                      <span className="mx-2 text-muted-foreground">às</span>
+                    <span className="mx-2 text-muted-foreground">às</span>
 
-                      <Popover>
-                      <PopoverTrigger asChild>
-                          <Button
-                          variant={'link'}
-                          className="p-0 font-medium text-foreground hover:no-underline"
-                          >
-                          {routeTime}
-                          </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                          <Input
-                          type="time"
-                          value={routeTime}
-                          onChange={(e) => setRouteTime(e.target.value)}
-                          className="border-none"
-                          />
-                      </PopoverContent>
-                      </Popover>
-                  </p>
-                  </div>
+                    <Popover>
+                    <PopoverTrigger asChild>
+                        <Button
+                        variant={'link'}
+                        className="p-0 font-medium text-foreground hover:no-underline h-auto"
+                        >
+                        {routeTime}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                        <Input
+                        type="time"
+                        value={routeTime}
+                        onChange={(e) => setRouteTime(e.target.value)}
+                        className="border-none"
+                        />
+                    </PopoverContent>
+                    </Popover>
+                </div>
               </div>
+
               <Separator />
               <div className="space-y-4 pb-4">
                   {stops.map((stop, index) => (
@@ -710,28 +706,30 @@ export default function NewRoutePage() {
             </div>
           </div>
 
+
           {/* Footer */}
-          <div className="flex-shrink-0 border-t bg-background p-4 space-y-3">
-              <div className="space-y-2">
-                  <Button variant="ghost" className="w-full justify-start gap-3" onClick={() => setIsAddServiceDialogOpen(true)}>
-                      <PlusCircle className="h-5 w-5" />
+          <div className="flex-shrink-0 border-t bg-background p-3 space-y-2">
+              <div className="space-y-1.5">
+                  <Button variant="ghost" size="sm" className="w-full justify-start gap-2 h-8 text-sm" onClick={() => setIsAddServiceDialogOpen(true)}>
+                      <PlusCircle className="h-4 w-4" />
                       Adicionar novo serviço
                   </Button>
                   <Button
                       variant="outline"
-                      className="w-full justify-start gap-3"
+                      size="sm"
+                      className="w-full justify-start gap-2 h-8 text-sm"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isImporting}
                   >
                       {isImporting ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                      <Upload className="h-5 w-5" />
+                      <Upload className="h-4 w-4" />
                       )}
                       {isImporting ? 'Importando...' : 'Importar planilha CSV'}
                   </Button>
               </div>
-              <Button className="w-full" onClick={handleNextStep}>
+              <Button size="sm" className="w-full h-9" onClick={handleNextStep}>
                   Avançar para Organização
                   <ArrowRight className='ml-2 h-4 w-4' />
               </Button>

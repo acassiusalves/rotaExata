@@ -595,12 +595,12 @@ export default function OrganizeRoutePage() {
 
   return (
     <>
-    <div className="flex h-[calc(100svh-4rem)] w-full flex-col overflow-hidden">
-      <div className="flex-1 bg-muted">
+    <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
+      <div className="h-[50vh] shrink-0 bg-muted">
         <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} unassignedStops={unassignedStops} />
       </div>
 
-      <div className="shrink-0 border-t bg-background">
+      <div className="flex-1 min-h-0 overflow-y-auto border-t bg-background">
         <Tabs defaultValue="organize" className="w-full">
           <CardHeader className="p-4 pb-0">
             <div className="flex items-start justify-between">
