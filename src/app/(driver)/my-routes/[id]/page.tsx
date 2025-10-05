@@ -374,6 +374,11 @@ export default function RouteDetailsPage() {
                 </div>
             </CardContent>
         </Card>
+        
+        <Button size="lg" variant="outline" className="w-full" onClick={handleNavigateRoute}>
+            <Navigation className="mr-2 h-4 w-4" />
+            Iniciar Rota Completa no Mapa
+        </Button>
 
         <div className="space-y-4">
             {route.stops.map((stop, index) => (
@@ -410,9 +415,8 @@ export default function RouteDetailsPage() {
                                     Navegar
                                  </Button>
                                  {stop.phone && (
-                                     <Button size="sm" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)}>
-                                        <WhatsAppIcon className="mr-2 h-4 w-4" />
-                                        WhatsApp
+                                     <Button size="icon" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)}>
+                                        <WhatsAppIcon className="h-4 w-4" />
                                     </Button>
                                  )}
                                 {(route.status === 'in_progress' || route.status === 'dispatched') && stop.deliveryStatus !== 'completed' && (
