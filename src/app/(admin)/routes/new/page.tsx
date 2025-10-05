@@ -557,7 +557,7 @@ export default function NewRoutePage() {
           <div className="flex-shrink-0 border-b px-6 py-4">
             <h1 className="text-xl font-semibold">Nova Rota</h1>
           </div>
-          
+          {/* Scrollable Content Area */}
           <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
             <div className="p-6 space-y-6">
               <div className="space-y-2">
