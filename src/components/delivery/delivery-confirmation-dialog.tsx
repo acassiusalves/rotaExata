@@ -80,15 +80,19 @@ export function DeliveryConfirmationDialog({
       console.log('Stream obtida:', stream);
       console.log('Tracks da stream:', stream.getTracks());
 
+      streamRef.current = stream;
+
+      // Ativar câmera primeiro para renderizar o elemento video
+      setIsCameraActive(true);
+
+      // Aguardar o próximo ciclo de renderização para o videoRef estar disponível
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       if (!videoRef.current) {
-        throw new Error('Elemento de vídeo não encontrado');
+        throw new Error('Elemento de vídeo não foi renderizado');
       }
 
       videoRef.current.srcObject = stream;
-      streamRef.current = stream;
-
-      // Ativar câmera imediatamente e tentar reproduzir
-      setIsCameraActive(true);
 
       // Tentar reproduzir o vídeo de múltiplas formas
       try {
