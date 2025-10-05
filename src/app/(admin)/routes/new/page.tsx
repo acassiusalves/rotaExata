@@ -520,7 +520,7 @@ export default function NewRoutePage() {
     // Save data to session storage to pass to the next page
     const routeData = {
       origin,
-      stops: stops.filter(s => s.placeId), // Ensure we only pass valid stops
+      stops: stops.filter(s => s.placeId), // Ensure we only pass to valid stops
       routeDate: routeDate?.toISOString(),
       routeTime,
     };
@@ -551,7 +551,7 @@ export default function NewRoutePage() {
         onConfirm={handleImportConfirm}
       />
       <div className="flex justify-center">
-        <div className="w-full max-w-[480px] border-r">
+        <div className="w-full max-w-7xl">
           {/* Left Panel */}
           <div className="relative z-10 flex h-full min-h-0 flex-col bg-background">
             {/* Header */}
@@ -560,10 +560,10 @@ export default function NewRoutePage() {
             </div>
             
             {/* Content Area */}
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+            <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
               <div className="p-6 space-y-6">
-                <div className="w-full h-[480px] rounded-lg overflow-hidden">
-                    <RouteMap height={480} origin={origin} stops={mapStops} />
+                <div className="w-full max-w-[1080px] h-[720px] rounded-lg overflow-hidden mx-auto">
+                    <RouteMap height={720} origin={origin} stops={mapStops} />
                 </div>
 
                 <div className="space-y-2">
