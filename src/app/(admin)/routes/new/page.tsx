@@ -119,7 +119,7 @@ export default function NewRoutePage() {
     savedOrigins[0].value
   );
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
-  const [routeDate, setRouteDate] = React.useState<Date | undefined>(new Date());
+  const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
   const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isImporting, setIsImporting] = React.useState(false);
@@ -139,7 +139,7 @@ export default function NewRoutePage() {
   const { toast } = useToast();
   
   React.useEffect(() => {
-    // This runs only on the client, after hydration
+    // This runs only on the client, after hydration, preventing hydration mismatch
     setRouteDate(new Date());
   }, []);
 
