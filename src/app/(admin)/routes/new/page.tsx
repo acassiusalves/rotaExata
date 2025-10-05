@@ -551,7 +551,7 @@ export default function NewRoutePage() {
         headers={csvHeaders}
         onConfirm={handleImportConfirm}
       />
-      <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[minmax(360px,32%)_1fr]">
+      <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[480px_1fr]">
         <div className="flex h-full flex-col border-r bg-background">
           {/* Header */}
           <div className="flex-shrink-0 border-b px-6 py-4">
