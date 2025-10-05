@@ -165,8 +165,29 @@ export default function RouteDetailsPage() {
     }
   };
 
+  const getCompletionPercentage = () => {
+    if (!route || route.stops.length === 0) return 0;
+    const completedCount = route.stops.filter(stop => stop.deliveryStatus === 'completed').length;
+    return (completedCount / route.stops.length) * 100;
+  };
+
+  const canFinishRoute = () => {
+    return getCompletionPercentage() >= 80;
+  };
+
   const handleStopRoute = async () => {
     if (!route) return;
+
+    // Validação de 80% de conclusão
+    if (!canFinishRoute()) {
+      const completionPercentage = getCompletionPercentage().toFixed(0);
+      toast({
+        variant: 'destructive',
+        title: 'Não é possível finalizar',
+        description: `Você precisa concluir pelo menos 80% das entregas. Atual: ${completionPercentage}%`,
+      });
+      return;
+    }
 
     try {
       stopTracking();
@@ -197,6 +218,7 @@ export default function RouteDetailsPage() {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
+    paymentMethod?: string;
   }) => {
     if (!route || selectedStopIndex === null) return;
 
@@ -210,6 +232,7 @@ export default function RouteDetailsPage() {
         signatureUrl: data.signature,
         notes: data.notes,
         failureReason: data.failureReason,
+        paymentMethod: data.paymentMethod,
       };
 
       const routeRef = doc(db, 'routes', routeId);
@@ -275,9 +298,15 @@ export default function RouteDetailsPage() {
                     </Button>
                 )}
                 {route.status === 'in_progress' && (
-                    <Button size="sm" variant="destructive" onClick={handleStopRoute}>
+                    <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleStopRoute}
+                        disabled={!canFinishRoute()}
+                        title={!canFinishRoute() ? `Complete pelo menos 80% das entregas (${getCompletionPercentage().toFixed(0)}% concluído)` : ''}
+                    >
                         <StopCircle className="mr-2 h-4 w-4" />
-                        Finalizar
+                        Finalizar {!canFinishRoute() && `(${getCompletionPercentage().toFixed(0)}%)`}
                     </Button>
                 )}
                 <Avatar className="h-8 w-8">
@@ -287,6 +316,47 @@ export default function RouteDetailsPage() {
       </header>
 
       <main className="p-4 space-y-4">
+        {route.status === 'dispatched' && (
+          <Card className="border-blue-300 bg-blue-50">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <PlayCircle className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="font-semibold text-blue-900">Rota pronta para iniciar</p>
+                  <p className="text-sm text-blue-700">Clique em "Iniciar" no topo para começar as entregas</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {route.status === 'in_progress' && (
+          <Card className={!canFinishRoute() ? 'border-orange-300' : 'border-green-300'}>
+            <CardContent className="pt-6">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold">Progresso das Entregas</span>
+                  <span className={`font-bold ${canFinishRoute() ? 'text-green-600' : 'text-orange-600'}`}>
+                    {getCompletionPercentage().toFixed(0)}%
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-gray-200">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      canFinishRoute() ? 'bg-green-600' : 'bg-orange-500'
+                    }`}
+                    style={{ width: `${getCompletionPercentage()}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {route.stops.filter(s => s.deliveryStatus === 'completed').length} de {route.stops.length} entregas concluídas
+                  {!canFinishRoute() && ' • Mínimo 80% para finalizar'}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
             <CardContent className="grid grid-cols-3 gap-4 pt-6 text-center text-sm">
                 <div className="flex flex-col items-center gap-1">
@@ -347,12 +417,14 @@ export default function RouteDetailsPage() {
                                         WhatsApp
                                     </Button>
                                  )}
-                                {route.status === 'in_progress' && stop.deliveryStatus !== 'completed' && (
+                                {(route.status === 'in_progress' || route.status === 'dispatched') && stop.deliveryStatus !== 'completed' && (
                                     <Button
                                         size="sm"
                                         variant="default"
                                         className="ml-auto bg-green-600 hover:bg-green-700"
                                         onClick={() => handleOpenConfirmDialog(index)}
+                                        disabled={route.status === 'dispatched'}
+                                        title={route.status === 'dispatched' ? 'Inicie a rota primeiro' : ''}
                                     >
                                         <CheckCircle2 className="mr-2 h-4 w-4" />
                                         Confirmar

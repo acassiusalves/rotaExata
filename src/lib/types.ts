@@ -31,6 +31,7 @@ export type PlaceValue = {
   photoUrl?: string;
   signatureUrl?: string;
   failureReason?: string;
+  paymentMethod?: string;
 };
 
 export type DriverLocation = {

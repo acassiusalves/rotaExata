@@ -34,6 +34,7 @@ interface DeliveryConfirmationDialogProps {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
+    paymentMethod?: string;
   }) => Promise<void>;
   customerName?: string;
   address?: string;
@@ -51,6 +52,7 @@ export function DeliveryConfirmationDialog({
   const [notes, setNotes] = React.useState('');
   const [deliveryStatus, setDeliveryStatus] = React.useState<'completed' | 'failed'>('completed');
   const [failureReason, setFailureReason] = React.useState('');
+  const [paymentMethod, setPaymentMethod] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -179,6 +181,11 @@ export function DeliveryConfirmationDialog({
       return;
     }
 
+    if (deliveryStatus === 'completed' && !paymentMethod) {
+      setError('Por favor, selecione a forma de pagamento.');
+      return;
+    }
+
     if (deliveryStatus === 'failed' && !failureReason) {
       setError('Por favor, selecione o motivo da falha.');
       return;
@@ -194,6 +201,7 @@ export function DeliveryConfirmationDialog({
         notes: notes || undefined,
         status: deliveryStatus,
         failureReason: deliveryStatus === 'failed' ? failureReason : undefined,
+        paymentMethod: deliveryStatus === 'completed' ? paymentMethod : undefined,
       });
 
       // Reset form
@@ -202,6 +210,7 @@ export function DeliveryConfirmationDialog({
       setNotes('');
       setDeliveryStatus('completed');
       setFailureReason('');
+      setPaymentMethod('');
       onClose();
     } catch (err) {
       console.error('Error confirming delivery:', err);
@@ -424,6 +433,37 @@ export function DeliveryConfirmationDialog({
                     </Button>
                   </div>
                 )}
+              </div>
+
+              {/* Payment Method */}
+              <div className="space-y-2">
+                <Label>Forma de Pagamento *</Label>
+                <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="dinheiro" id="dinheiro" />
+                    <Label htmlFor="dinheiro" className="cursor-pointer font-normal">Dinheiro</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="pix" id="pix" />
+                    <Label htmlFor="pix" className="cursor-pointer font-normal">PIX</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="cartao_credito" id="cartao_credito" />
+                    <Label htmlFor="cartao_credito" className="cursor-pointer font-normal">Cartão de Crédito</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="cartao_debito" id="cartao_debito" />
+                    <Label htmlFor="cartao_debito" className="cursor-pointer font-normal">Cartão de Débito</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="boleto" id="boleto" />
+                    <Label htmlFor="boleto" className="cursor-pointer font-normal">Boleto</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="outro" id="outro_pagamento" />
+                    <Label htmlFor="outro_pagamento" className="cursor-pointer font-normal">Outro</Label>
+                  </div>
+                </RadioGroup>
               </div>
             </>
           )}
