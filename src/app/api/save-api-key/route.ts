@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { adminDb } from '@/lib/firebase/admin';
 
 async function saveApiKeyToFirestore(key: string): Promise<void> {
+  if (!adminDb) {
+    throw new Error('Firebase Admin not initialized. Please configure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables.');
+  }
+
   try {
     await adminDb.collection('settings').doc('googleMaps').set({
       apiKey: key,
