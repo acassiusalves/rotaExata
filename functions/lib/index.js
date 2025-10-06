@@ -33,21 +33,34 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.inviteUser = void 0;
-exports.notifyRunAssigned = notifyRunAssigned;
+exports.syncAuthUsers = exports.authUserMirror = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
-const messaging_1 = require("firebase-admin/messaging");
-const crypto = __importStar(require("node:crypto"));
 (0, app_1.initializeApp)();
+// --- Presence function ---
+// Listens for changes to the Realtime Database and updates Firestore.
+// COMMENTED OUT: Requires Realtime Database to be configured
+// export const onUserStatusChanged = functions.region("southamerica-east1").database
+//   .ref('/status/{uid}')
+//   .onUpdate(async (change, context) => {
+//     const eventStatus = change.after.val();
+//     const firestore = getFirestore();
+//     const userDocRef = firestore.doc(`users/${context.params.uid}`);
+//     return userDocRef.update({
+//       status: eventStatus.state,
+//       lastSeenAt: FieldValue.serverTimestamp(),
+//     });
+//   });
 /* ========== inviteUser (callable) ========== */
 exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
     const email = String(d.email || "").trim().toLowerCase();
     const role = String(d.role || "").trim();
+    const displayName = String(d.displayName || "");
+    const phone = String(d.phone || "");
     if (!email || !role) {
         throw new https_1.HttpsError("invalid-argument", "email e role são obrigatórios");
     }
@@ -61,23 +74,68 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         catch {
             user = await auth.createUser({
                 email,
-                password: crypto.randomUUID(),
-                emailVerified: false
+                password: '123456', // Set default password
+                emailVerified: false,
+                displayName: displayName || undefined,
             });
         }
-        await db.collection("users").doc(user.uid).set({
+        // Update auth user if displayName is provided and different
+        if (displayName && user.displayName !== displayName) {
+            await auth.updateUser(user.uid, { displayName });
+        }
+        const userData = {
             email,
             role,
+            displayName: displayName || '',
+            phone: phone || '',
+            status: 'offline', // Default status on creation
             createdAt: firestore_1.FieldValue.serverTimestamp(),
-            updatedAt: firestore_1.FieldValue.serverTimestamp()
-        }, { merge: true });
-        const appUrl = process.env.APP_URL
-            || "https://soldemaria.vercel.app/auth/finish";
-        const resetLink = await auth.generatePasswordResetLink(email, { url: appUrl });
-        return { ok: true, uid: user.uid, role, resetLink };
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
+        };
+        if (role === 'driver') {
+            userData.mustChangePassword = true;
+        }
+        await db.collection("users").doc(user.uid).set(userData, { merge: true });
+        return { ok: true, uid: user.uid, role };
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : "Falha ao convidar";
+        throw new https_1.HttpsError("internal", msg);
+    }
+});
+/* ========== deleteUser (callable) ========== */
+exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+    if (!uid) {
+        throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
+    }
+    try {
+        const auth = (0, auth_1.getAuth)();
+        const db = (0, firestore_1.getFirestore)();
+        // Delete from Firebase Authentication
+        await auth.deleteUser(uid);
+        // Delete from Firestore
+        await db.collection("users").doc(uid).delete();
+        return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
+    }
+    catch (err) {
+        const error = err;
+        const msg = error.message || "Falha ao remover usuário";
+        // If user not in auth, it's not a critical failure,
+        // still try to delete from firestore as the main goal.
+        if (error.code === 'auth/user-not-found') {
+            try {
+                const db = (0, firestore_1.getFirestore)();
+                await db.collection("users").doc(uid).delete();
+                return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
+            }
+            catch (dbErr) {
+                const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
+                throw new https_1.HttpsError("internal", dbMsg);
+            }
+        }
         throw new https_1.HttpsError("internal", msg);
     }
 });
@@ -91,7 +149,15 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
     await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         if (snap.exists) {
-            tx.set(ref, { email, updatedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+            const existingData = snap.data() || {};
+            const updateData = {
+                email,
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
+            };
+            if (u.displayName && !existingData.displayName) {
+                updateData.displayName = u.displayName;
+            }
+            tx.set(ref, updateData, { merge: true });
         }
         else {
             // Define 'admin' role for specific email, otherwise default to 'vendedor'
@@ -99,54 +165,43 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
             tx.set(ref, {
                 email,
                 role: role,
+                displayName: u.displayName || '',
+                phone: u.phoneNumber || '',
+                status: 'offline',
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
-                updatedAt: firestore_1.FieldValue.serverTimestamp()
+                updatedAt: firestore_1.FieldValue.serverTimestamp(),
+                lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
             });
         }
     });
 });
-/* ========== Backfill: Auth -> Firestore (rodar 1x) ========== */
-exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, async () => {
+/* ========== syncAuthUsers (callable) ========== */
+exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const email = String(d.email || "").trim().toLowerCase();
+    if (!email) {
+        throw new https_1.HttpsError("invalid-argument", "O email é obrigatório.");
+    }
     const auth = (0, auth_1.getAuth)();
     const db = (0, firestore_1.getFirestore)();
-    let token = undefined;
-    let count = 0;
-    do {
-        const page = await auth.listUsers(1000, token);
-        for (const ur of page.users) {
-            const email = (ur.email || "").toLowerCase();
-            // Also apply the admin role logic here during backfill
-            const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
-            await db.collection("users").doc(ur.uid).set({
-                email,
-                role: role,
-                createdAt: firestore_1.FieldValue.serverTimestamp(),
-                updatedAt: firestore_1.FieldValue.serverTimestamp()
-            }, { merge: true });
-            count++;
+    try {
+        const userRecord = await auth.getUserByEmail(email);
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+        await db.collection("users").doc(userRecord.uid).set({
+            email: userRecord.email,
+            role: role,
+            displayName: userRecord.displayName || '',
+            updatedAt: firestore_1.FieldValue.serverTimestamp()
+        }, { merge: true });
+        return { ok: true, synced: 1, uid: userRecord.uid, role: role };
+    }
+    catch (error) {
+        console.error(`Failed to sync user ${email}:`, error);
+        if (error.code === 'auth/user-not-found') {
+            throw new https_1.HttpsError("not-found", `Usuário com email ${email} não encontrado.`);
         }
-        token = page.pageToken;
-    } while (token);
-    return { ok: true, synced: count };
+        const msg = error instanceof Error ? error.message : "Falha ao sincronizar usuário.";
+        throw new https_1.HttpsError("internal", msg);
+    }
 });
-/* ========== Push notification when a run is assigned ========== */
-async function notifyRunAssigned(runId, courierId) {
-    const db = (0, firestore_1.getFirestore)();
-    const tokensSnap = await db
-        .collection("couriers")
-        .doc(courierId)
-        .collection("tokens")
-        .get();
-    const tokens = tokensSnap.docs.map((doc) => doc.id);
-    if (!tokens.length)
-        return;
-    await (0, messaging_1.getMessaging)().sendEachForMulticast({
-        tokens,
-        notification: {
-            title: "Nova corrida",
-            body: `Run #${runId} atribuída a você.`,
-        },
-        data: { runId },
-    });
-}
 //# sourceMappingURL=index.js.map

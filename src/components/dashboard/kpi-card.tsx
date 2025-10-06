@@ -6,9 +6,10 @@ interface KpiCardProps {
   value: string;
   icon: LucideIcon;
   trend?: string;
+  isLoading?: boolean;
 }
 
-export function KpiCard({ title, value, icon: Icon, trend }: KpiCardProps) {
+export function KpiCard({ title, value, icon: Icon, trend, isLoading }: KpiCardProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

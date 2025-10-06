@@ -6,7 +6,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { activityFeed } from '@/lib/data';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -16,56 +15,76 @@ import {
   Truck,
   CheckCircle,
   XCircle,
+  Route,
 } from 'lucide-react';
+import type { RouteInfo } from '@/lib/types';
+import { Timestamp } from 'firebase/firestore';
+
+
+type ActivityEvent = {
+  id: string;
+  type: 'route_created' | 'route_dispatched';
+  timestamp: Date;
+  actor: {
+    name: string;
+  };
+  details: string;
+};
 
 const eventIcons = {
-  status_change: Package,
-  assignment: UserCheck,
-  note: FileText,
+  route_created: Route,
+  route_dispatched: Truck,
 };
 
-const getStatusIcon = (details: string) => {
-  if (details.includes('em rota'))
-    return <Truck className="h-4 w-4 text-blue-500" />;
-  if (details.includes('entregue'))
-    return <CheckCircle className="h-4 w-4 text-green-500" />;
-  if (details.includes('cancelado'))
-    return <XCircle className="h-4 w-4 text-red-500" />;
-  if (details.includes('coleta realizada'))
-    return <Package className="h-4 w-4 text-yellow-500" />;
-  return <FileText className="h-4 w-4 text-gray-500" />;
-};
+interface ActivityFeedProps {
+  routes: (RouteInfo & { id: string, name: string, status: string, plannedDate: Timestamp, driverInfo?: { name: string } | null, createdAt?: Timestamp })[];
+}
 
-export function ActivityFeed() {
+export function ActivityFeed({ routes }: ActivityFeedProps) {
+
+  const sortedRoutes = routes
+    .filter(route => route.createdAt)
+    .sort((a, b) => b.createdAt!.toMillis() - a.createdAt!.toMillis());
+
   return (
     <Card className="col-span-1 lg:col-span-1">
       <CardHeader>
         <CardTitle>Atividade Recente</CardTitle>
         <CardDescription>
-          Últimas atualizações de pedidos e motoristas.
+          Últimas rotas criadas e despachadas.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-96">
           <div className="space-y-6">
-            {activityFeed.map((event) => (
-              <div key={event.id} className="flex items-start gap-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-                  {getStatusIcon(event.details)}
+            {sortedRoutes.map((route) => {
+              const Icon = route.status === 'dispatched' || route.status === 'in_progress' ? Truck : Route;
+              const details = route.status === 'dispatched' || route.status === 'in_progress'
+                ? `Rota "${route.name}" despachada para ${route.driverInfo?.name || 'motorista'}.`
+                : `Rota "${route.name}" foi criada.`;
+
+              return (
+                <div key={route.id} className="flex items-start gap-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                    <Icon className="h-4 w-4 text-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{details}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(route.createdAt!.toDate(), {
+                        addSuffix: true,
+                        locale: ptBR,
+                      })}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{event.details}</p>
-                  <p className="text-xs text-muted-foreground">
-                    por {event.actor.name}
-                    {' - '}
-                    {formatDistanceToNow(event.timestamp, {
-                      addSuffix: true,
-                      locale: ptBR,
-                    })}
-                  </p>
+              )
+            })}
+             {sortedRoutes.length === 0 && (
+                <div className="text-center text-muted-foreground py-10">
+                    Nenhuma atividade recente.
                 </div>
-              </div>
-            ))}
+             )}
           </div>
         </ScrollArea>
       </CardContent>

@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import {
   Bar,
   BarChart,
@@ -21,20 +22,12 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart';
+import type { RouteInfo } from '@/lib/types';
+import { Timestamp } from 'firebase/firestore';
 
-const deliveriesData = [
-  { hour: '08:00', deliveries: 2 },
-  { hour: '09:00', deliveries: 5 },
-  { hour: '10:00', deliveries: 12 },
-  { hour: '11:00', deliveries: 15 },
-  { hour: '12:00', deliveries: 8 },
-  { hour: '13:00', deliveries: 7 },
-  { hour: '14:00', deliveries: 18 },
-  { hour: '15:00', deliveries: 22 },
-  { hour: '16:00', deliveries: 20 },
-  { hour: '17:00', deliveries: 16 },
-  { hour: '18:00', deliveries: 10 },
-];
+interface ChartProps {
+  routes: (RouteInfo & { plannedDate: Timestamp, status: string })[];
+}
 
 const deliveriesChartConfig = {
   deliveries: {
@@ -43,7 +36,34 @@ const deliveriesChartConfig = {
   },
 } satisfies ChartConfig;
 
-export function DeliveriesChart() {
+export function DeliveriesChart({ routes }: ChartProps) {
+  const deliveriesData = React.useMemo(() => {
+    const today = new Date();
+    const hourlyCounts: { [key: string]: number } = {};
+
+    for (let i = 8; i <= 18; i++) {
+        const hour = i.toString().padStart(2, '0');
+        hourlyCounts[`${hour}:00`] = 0;
+    }
+    
+    routes.forEach(route => {
+        const routeDate = route.plannedDate.toDate();
+        if (routeDate.toDateString() === today.toDateString()) {
+            const hour = routeDate.getHours().toString().padStart(2, '0');
+            const hourKey = `${hour}:00`;
+            if (hourKey in hourlyCounts) {
+                hourlyCounts[hourKey] += route.stops?.length || 0;
+            }
+        }
+    });
+
+    return Object.entries(hourlyCounts).map(([hour, deliveries]) => ({
+      hour,
+      deliveries,
+    }));
+  }, [routes]);
+
+
   return (
     <ChartContainer config={deliveriesChartConfig} className="h-[300px] w-full">
       <BarChart
@@ -80,24 +100,34 @@ export function DeliveriesChart() {
   );
 }
 
-const statusData = [
-  { name: 'Em Rota', value: 45, color: 'hsl(var(--chart-1))' },
-  { name: 'Atribuído', value: 25, color: 'hsl(var(--chart-2))' },
-  { name: 'Entregue', value: 85, color: 'hsl(var(--chart-3))' },
-  { name: 'Criado', value: 15, color: 'hsl(var(--chart-4))' },
-  { name: 'Cancelado', value: 5, color: 'hsl(var(--chart-5))' },
-];
-
 const statusChartConfig = {
-    "Em Rota": { label: "Em Rota" },
-    "Atribuído": { label: "Atribuído" },
-    "Entregue": { label: "Entregue" },
-    "Criado": { label: "Criado" },
-    "Cancelado": { label: "Cancelado" },
+    dispatched: { label: "Despachada", color: "hsl(var(--chart-4))" },
+    in_progress: { label: "Em Andamento", color: "hsl(var(--chart-1))" },
+    completed: { label: "Concluída", color: "hsl(var(--chart-2))" },
 } satisfies ChartConfig;
 
 
-export function StatusChart() {
+export function StatusChart({ routes }: ChartProps) {
+  const statusData = React.useMemo(() => {
+    const counts = {
+      dispatched: 0,
+      in_progress: 0,
+      completed: 0,
+    };
+    routes.forEach(route => {
+      if (route.status in counts) {
+        counts[route.status as keyof typeof counts]++;
+      }
+    });
+    
+    return Object.entries(counts).map(([name, value]) => ({
+        name: statusChartConfig[name as keyof typeof statusChartConfig].label,
+        value,
+        color: statusChartConfig[name as keyof typeof statusChartConfig].color
+    })).filter(item => item.value > 0);
+  }, [routes]);
+
+
   return (
     <ChartContainer config={statusChartConfig} className="h-[300px] w-full">
       <ResponsiveContainer width="100%" height="100%">

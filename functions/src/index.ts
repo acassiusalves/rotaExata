@@ -4,24 +4,24 @@ import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
-import * as functions from "firebase-functions";
 
 initializeApp();
 
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
-export const onUserStatusChanged = functions.region("southamerica-east1").database
-  .ref('/status/{uid}')
-  .onUpdate(async (change, context) => {
-    const eventStatus = change.after.val();
-    const firestore = getFirestore();
-    const userDocRef = firestore.doc(`users/${context.params.uid}`);
+// COMMENTED OUT: Requires Realtime Database to be configured
+// export const onUserStatusChanged = functions.region("southamerica-east1").database
+//   .ref('/status/{uid}')
+//   .onUpdate(async (change, context) => {
+//     const eventStatus = change.after.val();
+//     const firestore = getFirestore();
+//     const userDocRef = firestore.doc(`users/${context.params.uid}`);
 
-    return userDocRef.update({
-      status: eventStatus.state,
-      lastSeenAt: FieldValue.serverTimestamp(),
-    });
-  });
+//     return userDocRef.update({
+//       status: eventStatus.state,
+//       lastSeenAt: FieldValue.serverTimestamp(),
+//     });
+//   });
 
 
 /* ========== inviteUser (callable) ========== */
