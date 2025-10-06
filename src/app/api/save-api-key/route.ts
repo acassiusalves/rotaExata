@@ -7,13 +7,20 @@ async function saveApiKeyToFirestore(key: string): Promise<void> {
   }
 
   try {
+    console.log('Attempting to save API key to Firestore...');
     await adminDb.collection('settings').doc('googleMaps').set({
       apiKey: key,
       updatedAt: new Date().toISOString()
     }, { merge: true });
+    console.log('API key saved successfully to Firestore');
   } catch (error: any) {
-    console.error('Failed to save API key to Firestore:', error);
-    throw new Error('Could not save API key to database.');
+    console.error('Failed to save API key to Firestore:', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      stack: error?.stack
+    });
+    throw new Error(`Could not save API key to database: ${error?.message || 'Unknown error'}`);
   }
 }
 

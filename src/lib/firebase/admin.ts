@@ -9,6 +9,13 @@ if (!getApps().length) {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
+  console.log('Firebase Admin initialization check:', {
+    hasProjectId: !!projectId,
+    hasClientEmail: !!clientEmail,
+    hasPrivateKey: !!privateKey,
+    privateKeyLength: privateKey?.length
+  });
+
   if (projectId && clientEmail && privateKey) {
     try {
       initializeApp({
@@ -19,6 +26,7 @@ if (!getApps().length) {
         })
       });
       adminDb = getFirestore();
+      console.log('Firebase Admin initialized successfully');
     } catch (error) {
       console.error('Failed to initialize Firebase Admin:', error);
     }
@@ -27,6 +35,7 @@ if (!getApps().length) {
   }
 } else {
   adminDb = getFirestore();
+  console.log('Firebase Admin already initialized');
 }
 
 export async function getGoogleMapsApiKey(): Promise<string | null> {
