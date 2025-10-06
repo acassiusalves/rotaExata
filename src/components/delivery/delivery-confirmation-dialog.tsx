@@ -336,7 +336,8 @@ export function DeliveryConfirmationDialog({
       onClose();
     } catch (err) {
       console.error('Error confirming delivery:', err);
-      setError('Erro ao confirmar entrega. Tente novamente.');
+      const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      setError(`Erro ao confirmar entrega: ${errorMessage}. Tente novamente.`);
     } finally {
       setIsSubmitting(false);
     }
