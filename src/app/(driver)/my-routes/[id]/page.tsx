@@ -104,11 +104,11 @@ export default function RouteDetailsPage() {
 
   const handleNavigation = (stop: PlaceValue) => {
     if (!stop) return;
-    const query = stop.lat && stop.lng 
-      ? `${stop.lat},${stop.lng}` 
+    const query = stop.lat && stop.lng
+      ? `${stop.lat},${stop.lng}`
       : encodeURIComponent(stop.address);
     const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
-    window.open(url, '_blank');
+    window.location.href = url;
   };
 
   const handleWhatsApp = (phone: string | undefined) => {
@@ -135,7 +135,7 @@ export default function RouteDetailsPage() {
     ).join('|');
 
     const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destinationStr}&waypoints=${waypoints}&travelmode=driving`;
-    window.open(url, '_blank');
+    window.location.href = url;
   };
 
   const handleStartRoute = async () => {
