@@ -45,7 +45,6 @@ export function Header() {
 
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { href: '/orders', icon: Package, label: 'Pedidos' },
     { href: '/users', icon: Users, label: 'Usuários' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/history', icon: History, label: 'Histórico' },
@@ -211,7 +210,7 @@ export function Header() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Buscar pedidos..."
+              placeholder="Buscar..."
               className="pl-8 sm:w-[300px] md:w-[200px] lg:w-[300px]"
             />
           </div>
