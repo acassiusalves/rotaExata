@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { PlaceValue } from '@/lib/types';
+import { getGoogleMapsApiKey } from '@/lib/firebase/admin';
 
 // Define the structure for a leg in the Google Directions API response
 interface RouteLeg {
@@ -26,6 +27,13 @@ export async function POST(req: Request) {
       });
     }
 
+    // Get API key from Firestore or fallback to env variable
+    const apiKey = await getGoogleMapsApiKey() || process.env.GMAPS_SERVER_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json({ error: "API_KEY_NOT_CONFIGURED", detail: "Google Maps API key not configured" }, { status: 500 });
+    }
+
     const waypoints = stops.map((stop) => ({
       location: { latLng: { latitude: stop.lat, longitude: stop.lng } },
     }));
@@ -39,7 +47,7 @@ export async function POST(req: Request) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Goog-Api-Key': process.env.GMAPS_SERVER_KEY!,
+          'X-Goog-Api-Key': apiKey,
           'X-Goog-FieldMask':
             'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
         },

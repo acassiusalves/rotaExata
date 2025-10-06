@@ -1,41 +1,16 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from 'fs';
-import path from 'path';
+import { adminDb } from '@/lib/firebase/admin';
 
-// !! SECURITY WARNING !!
-// This is a simplified example to demonstrate the concept.
-// In a real-world, production application, you should:
-// 1. NEVER write API keys to the .env file from a public endpoint. This is a major security risk.
-// 2. Store secrets in a secure vault or a dedicated secret management service (like Google Secret Manager, AWS Secrets Manager, or a secure database).
-// 3. Authenticate and authorize this endpoint properly to ensure only admins can change keys.
-
-async function setEnvVar(key: string, value: string): Promise<void> {
-    const envFilePath = path.resolve(process.cwd(), '.env');
-    try {
-        let envFileContent = await fs.readFile(envFilePath, 'utf8');
-        
-        const keyRegex = new RegExp(`^${key}=.*$`, 'm');
-        const newEntry = `${key}="${value}"`;
-
-        if (keyRegex.test(envFileContent)) {
-            // Key exists, replace it
-            envFileContent = envFileContent.replace(keyRegex, newEntry);
-        } else {
-            // Key doesn't exist, add it
-            envFileContent += `\n${newEntry}`;
-        }
-
-        await fs.writeFile(envFilePath, envFileContent, 'utf8');
-        
-    } catch (error: any) {
-        // If the file doesn't exist, create it.
-        if (error.code === 'ENOENT') {
-            await fs.writeFile(envFilePath, `${key}="${value}"\n`, 'utf8');
-        } else {
-            console.error('Failed to write to .env file:', error);
-            throw new Error('Could not write to environment file.');
-        }
-    }
+async function saveApiKeyToFirestore(key: string): Promise<void> {
+  try {
+    await adminDb.collection('settings').doc('googleMaps').set({
+      apiKey: key,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error: any) {
+    console.error('Failed to save API key to Firestore:', error);
+    throw new Error('Could not save API key to database.');
+  }
 }
 
 
@@ -76,11 +51,8 @@ export async function POST(req: Request) {
         console.warn("Google Maps API key validation returned a non-OK status, but it may still be partially valid.", validationBody);
     }
     
-    // If validation is successful (or not definitively a failure), save the key.
-    // ** THIS IS THE INSECURE PART FOR DEMONSTRATION ONLY **
-    await setEnvVar('GMAPS_SERVER_KEY', key);
-    // We also set the public key here for client-side map rendering convenience.
-    await setEnvVar('NEXT_PUBLIC_GMAPS_KEY', key);
+    // If validation is successful (or not definitively a failure), save the key to Firestore
+    await saveApiKeyToFirestore(key);
 
     return NextResponse.json({ message: "API key saved and validated successfully." });
 
