@@ -500,6 +500,15 @@ export default function RouteDetailsPage() {
           onConfirm={handleConfirmDelivery}
           customerName={route.stops[selectedStopIndex]?.customerName}
           address={route.stops[selectedStopIndex]?.address}
+          stopLocation={
+            route.stops[selectedStopIndex]?.lat && route.stops[selectedStopIndex]?.lng
+              ? {
+                  lat: route.stops[selectedStopIndex].lat!,
+                  lng: route.stops[selectedStopIndex].lng!,
+                }
+              : undefined
+          }
+          currentLocation={location}
         />
       )}
     </div>

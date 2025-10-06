@@ -34,6 +34,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { db } from '@/lib/firebase/client';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
@@ -47,6 +49,8 @@ interface DeliveryConfirmationDialogProps {
   }) => Promise<void>;
   customerName?: string;
   address?: string;
+  stopLocation?: { lat: number; lng: number };
+  currentLocation?: { lat: number; lng: number } | null;
 }
 
 export function DeliveryConfirmationDialog({
@@ -55,6 +59,8 @@ export function DeliveryConfirmationDialog({
   onConfirm,
   customerName,
   address,
+  stopLocation,
+  currentLocation,
 }: DeliveryConfirmationDialogProps) {
   const [photo, setPhoto] = React.useState<string | null>(null);
   const [notes, setNotes] = React.useState('');
@@ -66,11 +72,68 @@ export function DeliveryConfirmationDialog({
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [validationSettings, setValidationSettings] = React.useState<{
+    enabled: boolean;
+    maxDistance: number;
+  } | null>(null);
 
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [isCameraActive, setIsCameraActive] = React.useState(false);
   const streamRef = React.useRef<MediaStream | null>(null);
+
+  // Função para calcular distância entre dois pontos (Haversine formula)
+  const calculateDistance = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number => {
+    const R = 6371; // Raio da Terra em km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) *
+        Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distância em km
+  };
+
+  // Load validation settings
+  React.useEffect(() => {
+    const loadValidationSettings = async () => {
+      try {
+        const settingsRef = doc(db, 'settings', 'general');
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          setValidationSettings({
+            enabled: data.deliveryDistanceValidation ?? false,
+            maxDistance: data.maxDeliveryDistance ?? 0.5,
+          });
+        } else {
+          setValidationSettings({
+            enabled: false,
+            maxDistance: 0.5,
+          });
+        }
+      } catch (error) {
+        console.error('Error loading validation settings:', error);
+        setValidationSettings({
+          enabled: false,
+          maxDistance: 0.5,
+        });
+      }
+    };
+
+    if (isOpen) {
+      loadValidationSettings();
+    }
+  }, [isOpen]);
 
   // Camera handling
   const startCamera = async () => {
@@ -205,6 +268,29 @@ export function DeliveryConfirmationDialog({
 
   const handleSubmit = async () => {
     setError(null);
+
+    // Validação de distância (somente para entregas bem-sucedidas)
+    if (
+      deliveryStatus === 'completed' &&
+      validationSettings?.enabled &&
+      stopLocation &&
+      currentLocation
+    ) {
+      const distance = calculateDistance(
+        currentLocation.lat,
+        currentLocation.lng,
+        stopLocation.lat,
+        stopLocation.lng
+      );
+
+      if (distance > validationSettings.maxDistance) {
+        setError(
+          `Você está muito longe do endereço de entrega (${distance.toFixed(2)} km). É necessário estar a no máximo ${validationSettings.maxDistance} km para confirmar a entrega.`
+        );
+        return;
+      }
+    }
+
     if (deliveryStatus === 'completed' && !photo) {
       setError('Por favor, tire uma foto da entrega.');
       return;

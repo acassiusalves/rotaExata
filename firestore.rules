@@ -47,5 +47,13 @@ service cloud.firestore {
       // Drivers can update their assigned routes (e.g., change status)
       allow update: if isAuthed() && resource.data.driverId == request.auth.uid;
     }
+
+    // RULES FOR SETTINGS
+    match /settings/{settingId} {
+      // Admins can read and write settings
+      allow read, write: if isAppAdmin();
+      // Authenticated users can read settings (drivers need to check validation settings)
+      allow read: if isAuthed();
+    }
   }
 }

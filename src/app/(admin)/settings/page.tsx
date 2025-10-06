@@ -1,3 +1,6 @@
+'use client';
+
+import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -10,8 +13,59 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { db } from '@/lib/firebase/client';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useToast } from '@/hooks/use-toast';
 
 export default function SettingsPage() {
+  const [deliveryDistanceValidation, setDeliveryDistanceValidation] = React.useState(false);
+  const [maxDeliveryDistance, setMaxDeliveryDistance] = React.useState(0.5);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const { toast } = useToast();
+
+  React.useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settingsRef = doc(db, 'settings', 'general');
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          setDeliveryDistanceValidation(data.deliveryDistanceValidation ?? false);
+          setMaxDeliveryDistance(data.maxDeliveryDistance ?? 0.5);
+        }
+      } catch (error) {
+        console.error('Error loading settings:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const handleSaveDeliveryValidation = async () => {
+    try {
+      const settingsRef = doc(db, 'settings', 'general');
+      await setDoc(settingsRef, {
+        deliveryDistanceValidation,
+        maxDeliveryDistance,
+      }, { merge: true });
+
+      toast({
+        title: 'Configurações salvas!',
+        description: 'As configurações de validação de entrega foram atualizadas.',
+      });
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Não foi possível salvar as configurações.',
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -121,6 +175,57 @@ export default function SettingsPage() {
           </CardContent>
           <CardFooter>
             <Button>Salvar Área</Button>
+          </CardFooter>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Validação de Entrega</CardTitle>
+            <CardDescription>
+              Configure a validação por distância para confirmação de entregas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
+              <Label htmlFor="delivery-validation" className="flex flex-col space-y-1">
+                <span>Validar Localização na Entrega</span>
+                <span className="font-normal leading-snug text-muted-foreground">
+                  Exigir que o motorista esteja próximo ao endereço para confirmar a entrega.
+                </span>
+              </Label>
+              <Switch
+                id="delivery-validation"
+                checked={deliveryDistanceValidation}
+                onCheckedChange={setDeliveryDistanceValidation}
+                disabled={isLoading}
+              />
+            </div>
+            {deliveryDistanceValidation && (
+              <div className="space-y-2">
+                <Label htmlFor="max-delivery-distance">
+                  Distância Máxima Permitida (Km)
+                </Label>
+                <Input
+                  id="max-delivery-distance"
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="10"
+                  value={maxDeliveryDistance}
+                  onChange={(e) => setMaxDeliveryDistance(parseFloat(e.target.value) || 0.5)}
+                  placeholder="Ex: 0.5"
+                  disabled={isLoading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  O motorista só poderá confirmar a entrega se estiver a até {maxDeliveryDistance} km do endereço cadastrado.
+                </p>
+              </div>
+            )}
+          </CardContent>
+          <CardFooter>
+            <Button onClick={handleSaveDeliveryValidation} disabled={isLoading}>
+              Salvar Validação
+            </Button>
           </CardFooter>
         </Card>
       </div>
