@@ -254,15 +254,19 @@ export default function RouteDetailsPage() {
 
     try {
       const updatedStops = [...route.stops];
-      updatedStops[selectedStopIndex] = {
+      const updatedStop: any = {
         ...updatedStops[selectedStopIndex],
         deliveryStatus: data.status,
         completedAt: Timestamp.now(),
-        photoUrl: data.photo,
-        notes: data.notes,
-        failureReason: data.failureReason,
-        payments: data.payments,
       };
+
+      // Só adiciona campos se não forem undefined
+      if (data.photo) updatedStop.photoUrl = data.photo;
+      if (data.notes) updatedStop.notes = data.notes;
+      if (data.failureReason) updatedStop.failureReason = data.failureReason;
+      if (data.payments) updatedStop.payments = data.payments;
+
+      updatedStops[selectedStopIndex] = updatedStop;
 
       const routeRef = doc(db, 'routes', routeId);
       await updateDoc(routeRef, {
