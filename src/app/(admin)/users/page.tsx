@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -16,6 +17,7 @@ import { db } from '@/lib/firebase/client';
 import { collection, onSnapshot, Timestamp, query } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 
 // Helper to convert Firestore Timestamps to a serializable format with formatted date string
 const formatUsersForTable = (users: User[]) => {
@@ -40,6 +42,8 @@ const formatUsersForTable = (users: User[]) => {
 export default function UsersPage() {
   const [users, setUsers] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = React.useState(false);
+
 
   React.useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -64,36 +68,42 @@ export default function UsersPage() {
   }, []);
   
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">Usuários</h2>
-          <p className="text-muted-foreground">
-            Gerencie os usuários e suas permissões no sistema.
-          </p>
+    <>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">Usuários</h2>
+            <p className="text-muted-foreground">
+              Gerencie os usuários e suas permissões no sistema.
+            </p>
+          </div>
+          <Button onClick={() => setIsInviteDialogOpen(true)}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Convidar Usuário
+          </Button>
         </div>
-        <Button>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Convidar Usuário
-        </Button>
+        <Card>
+          <CardHeader>
+            <CardTitle>Usuários Cadastrados</CardTitle>
+            <CardDescription>
+              Lista de todos os usuários com acesso ao sistema.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex h-64 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <UserTable users={users} />
+            )}
+          </CardContent>
+        </Card>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Usuários Cadastrados</CardTitle>
-          <CardDescription>
-            Lista de todos os usuários com acesso ao sistema.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex h-64 items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <UserTable users={users} />
-          )}
-        </CardContent>
-      </Card>
-    </div>
+      <InviteUserDialog
+        isOpen={isInviteDialogOpen}
+        onClose={() => setIsInviteDialogOpen(false)}
+      />
+    </>
   );
 }
