@@ -1,14 +1,46 @@
 import { NextResponse } from "next/server";
-import { adminDb } from '@/lib/firebase/admin';
+import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
 
 async function saveApiKeyToFirestore(key: string): Promise<void> {
-  if (!adminDb) {
+  // Re-initialize with fresh credentials to ensure proper auth
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  console.log('Environment check:', {
+    hasProjectId: !!projectId,
+    hasClientEmail: !!clientEmail,
+    hasPrivateKey: !!privateKey,
+    privateKeyStart: privateKey?.substring(0, 30)
+  });
+
+  if (!projectId || !clientEmail || !privateKey) {
     throw new Error('Firebase Admin not initialized. Please configure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables.');
   }
 
   try {
+    // Get or initialize app
+    let app;
+    const apps = getApps();
+
+    if (apps.length === 0) {
+      console.log('Initializing Firebase Admin in API route...');
+      app = initializeApp({
+        credential: cert({
+          projectId,
+          clientEmail,
+          privateKey: privateKey.replace(/\\n/g, '\n'),
+        })
+      });
+    } else {
+      app = apps[0];
+    }
+
+    const db = getFirestore(app);
+
     console.log('Attempting to save API key to Firestore...');
-    await adminDb.collection('settings').doc('googleMaps').set({
+    await db.collection('settings').doc('googleMaps').set({
       apiKey: key,
       updatedAt: new Date().toISOString()
     }, { merge: true });
