@@ -406,24 +406,14 @@ export default function RouteDetailsPage() {
             </CardContent>
         </Card>
         
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="lg" variant="outline" className="w-full">
-              <Navigation className="mr-2 h-4 w-4" />
-              Iniciar Rota Completa no Mapa
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="center" className="w-56">
-            <DropdownMenuItem onClick={() => handleNavigateRoute('google')}>
-              <MapPin className="mr-2 h-4 w-4" />
-              Abrir no Google Maps
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleNavigateRoute('waze')}>
-              <Navigation className="mr-2 h-4 w-4" />
-              Abrir no Waze
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button
+          size="lg"
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
+          onClick={() => handleNavigateRoute('google')}
+        >
+          <Navigation className="mr-2 h-5 w-5" />
+          Iniciar Rota Completa em Ordem
+        </Button>
 
         <div className="space-y-4">
             {route.stops.map((stop, index) => (
