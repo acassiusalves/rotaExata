@@ -10,6 +10,14 @@ export type NavItem = {
 
 export type DeliveryStatus = 'pending' | 'en_route' | 'arrived' | 'completed' | 'failed';
 
+export type Payment = {
+  id: string; // Um ID único para a chave no React
+  method: string;
+  value: number;
+  installments?: number;
+};
+
+
 export type PlaceValue = {
   id: string;
   address: string;
@@ -31,8 +39,7 @@ export type PlaceValue = {
   photoUrl?: string;
   signatureUrl?: string;
   failureReason?: string;
-  paymentMethod?: string;
-  creditCardInstallments?: number;
+  payments?: Payment[]; // Substituído paymentMethod e creditCardInstallments
 };
 
 export type DriverLocation = {

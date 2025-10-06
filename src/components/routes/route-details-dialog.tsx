@@ -32,7 +32,7 @@ import {
   Truck,
   CreditCard,
 } from 'lucide-react';
-import type { PlaceValue, RouteInfo } from '@/lib/types';
+import type { PlaceValue, RouteInfo, Payment } from '@/lib/types';
 import { Timestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -64,6 +64,11 @@ const getPaymentMethodLabel = (value?: string) => {
   };
   return value ? map[value] || 'Não informado' : 'Não informado';
 };
+
+const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
 
 const getFailureReasonLabel = (value?: string) => {
     const map: Record<string, string> = {
@@ -170,17 +175,22 @@ export function RouteDetailsDialog({
                                 <Clock className="h-4 w-4 text-muted-foreground" />
                                 <span>Concluído às: {formatTimestamp(stop.completedAt)}</span>
                             </div>
-                             <div className="flex items-center gap-2">
-                                <Wallet className="h-4 w-4 text-muted-foreground" />
-                                <span>Pagamento: {getPaymentMethodLabel(stop.paymentMethod)}</span>
-                            </div>
-                            {stop.paymentMethod === 'cartao_credito' && stop.creditCardInstallments && (
-                                <div className="flex items-center gap-2">
-                                    <CreditCard className="h-4 w-4 text-muted-foreground" />
-                                    <span>Parcelas: {stop.creditCardInstallments}x</span>
-                                </div>
-                            )}
                           </div>
+
+                          {stop.payments && stop.payments.length > 0 && (
+                            <div>
+                                <h5 className="text-xs font-semibold mb-2 flex items-center gap-2"><Wallet className="h-4 w-4" /> Pagamentos</h5>
+                                <div className='space-y-2'>
+                                {stop.payments.map(p => (
+                                    <div key={p.id} className="text-sm flex justify-between items-center bg-muted/50 p-2 rounded-md">
+                                        <span>{getPaymentMethodLabel(p.method)} {p.installments ? ` (${p.installments}x)` : ''}</span>
+                                        <span className="font-mono">{formatCurrency(p.value)}</span>
+                                    </div>
+                                ))}
+                                </div>
+                            </div>
+                          )}
+
                            {stop.notes && (
                             <div>
                                 <h5 className="text-xs font-semibold mb-1">Obs. do Motorista:</h5>

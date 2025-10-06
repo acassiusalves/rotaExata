@@ -20,10 +20,20 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Input } from '../ui/input';
+import { Payment } from '@/lib/types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 
 interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
@@ -33,8 +43,7 @@ interface DeliveryConfirmationDialogProps {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
-    paymentMethod?: string;
-    creditCardInstallments?: number;
+    payments?: Payment[];
   }) => Promise<void>;
   customerName?: string;
   address?: string;
@@ -51,8 +60,10 @@ export function DeliveryConfirmationDialog({
   const [notes, setNotes] = React.useState('');
   const [deliveryStatus, setDeliveryStatus] = React.useState<'completed' | 'failed'>('completed');
   const [failureReason, setFailureReason] = React.useState('');
-  const [paymentMethod, setPaymentMethod] = React.useState('');
-  const [creditCardInstallments, setCreditCardInstallments] = React.useState<number | undefined>(undefined);
+  
+  // Alterado para suportar múltiplos pagamentos
+  const [payments, setPayments] = React.useState<Payment[]>([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
+
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -66,7 +77,6 @@ export function DeliveryConfirmationDialog({
     try {
       console.log('Solicitando acesso à câmera...');
 
-      // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('API de câmera não suportada neste navegador');
       }
@@ -84,11 +94,8 @@ export function DeliveryConfirmationDialog({
       console.log('Tracks da stream:', stream.getTracks());
 
       streamRef.current = stream;
-
-      // Ativar câmera primeiro para renderizar o elemento video
       setIsCameraActive(true);
 
-      // Aguardar o próximo ciclo de renderização para o videoRef estar disponível
       await new Promise(resolve => setTimeout(resolve, 100));
 
       if (!videoRef.current) {
@@ -97,82 +104,37 @@ export function DeliveryConfirmationDialog({
 
       videoRef.current.srcObject = stream;
 
-      // Tentar reproduzir o vídeo de múltiplas formas
       try {
         await videoRef.current.play();
         console.log('Vídeo reproduzindo via play() direto');
       } catch (playError) {
         console.log('Erro no play() direto, tentando com evento:', playError);
-
-        // Tentar com evento loadedmetadata
         await new Promise<void>((resolve, reject) => {
           if (!videoRef.current) {
             reject(new Error('Referência do vídeo perdida'));
             return;
           }
-
           const video = videoRef.current;
-
-          const onLoadedMetadata = () => {
-            console.log('loadedmetadata disparado');
-            video.play()
-              .then(() => {
-                console.log('Vídeo reproduzindo via evento');
-                resolve();
-              })
-              .catch(reject);
-          };
-
-          const onCanPlay = () => {
-            console.log('canplay disparado');
-            video.play()
-              .then(() => {
-                console.log('Vídeo reproduzindo via canplay');
-                resolve();
-              })
-              .catch(reject);
-          };
-
+          const onLoadedMetadata = () => { video.play().then(resolve).catch(reject); };
           video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-          video.addEventListener('canplay', onCanPlay, { once: true });
-
-          // Timeout after 5 seconds
           setTimeout(() => {
             video.removeEventListener('loadedmetadata', onLoadedMetadata);
-            video.removeEventListener('canplay', onCanPlay);
-            // Não rejeitar, apenas logar - a câmera pode funcionar mesmo sem os eventos
-            console.warn('Timeout aguardando eventos de vídeo - continuando mesmo assim');
             resolve();
           }, 5000);
         });
       }
 
       console.log('Câmera ativada com sucesso');
-      console.log('Estado do vídeo:', {
-        readyState: videoRef.current?.readyState,
-        videoWidth: videoRef.current?.videoWidth,
-        videoHeight: videoRef.current?.videoHeight,
-        paused: videoRef.current?.paused
-      });
     } catch (err) {
       console.error('Erro ao acessar câmera:', err);
-
       let errorMessage = 'Não foi possível acessar a câmera.';
-
       if (err instanceof Error) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          errorMessage = 'Permissão de câmera negada. Verifique as configurações do navegador.';
-        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          errorMessage = 'Nenhuma câmera encontrada no dispositivo.';
-        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-          errorMessage = 'Câmera está em uso por outro aplicativo. Feche outros apps e tente novamente.';
-        } else if (err.message.includes('não suportada')) {
-          errorMessage = err.message;
-        } else {
-          errorMessage = `Erro: ${err.message}`;
-        }
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') errorMessage = 'Permissão de câmera negada. Verifique as configurações do navegador.';
+        else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') errorMessage = 'Nenhuma câmera encontrada no dispositivo.';
+        else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') errorMessage = 'Câmera está em uso por outro aplicativo.';
+        else if (err.message.includes('não suportada')) errorMessage = err.message;
+        else errorMessage = `Erro: ${err.message}`;
       }
-
       setError(errorMessage);
       stopCamera();
     }
@@ -188,17 +150,13 @@ export function DeliveryConfirmationDialog({
 
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
-
     if (!context) return;
-
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     context.drawImage(video, 0, 0);
-
     const photoData = canvas.toDataURL('image/jpeg', 0.8);
     setPhoto(photoData);
     stopCamera();
@@ -207,24 +165,58 @@ export function DeliveryConfirmationDialog({
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (e) => {
       setPhoto(e.target?.result as string);
     };
     reader.readAsDataURL(file);
   };
+  
+  const resetForm = () => {
+    setPhoto(null);
+    setNotes('');
+    setDeliveryStatus('completed');
+    setFailureReason('');
+    setPayments([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
+  };
+
+
+  const handlePaymentChange = (index: number, field: keyof Payment, value: string | number) => {
+    const newPayments = [...payments];
+    (newPayments[index] as any)[field] = value;
+
+    // Reset installments if method is not credit card
+    if (field === 'method' && value !== 'cartao_credito') {
+      delete newPayments[index].installments;
+    }
+    
+    setPayments(newPayments);
+  };
+
+  const addPayment = () => {
+    setPayments([...payments, { id: `payment-${Date.now()}`, method: '', value: 0 }]);
+  };
+
+  const removePayment = (index: number) => {
+    const newPayments = payments.filter((_, i) => i !== index);
+    setPayments(newPayments);
+  };
 
 
   const handleSubmit = async () => {
+    setError(null);
     if (deliveryStatus === 'completed' && !photo) {
       setError('Por favor, tire uma foto da entrega.');
       return;
     }
 
-    if (deliveryStatus === 'completed' && !paymentMethod) {
-      setError('Por favor, selecione a forma de pagamento.');
-      return;
+    if (deliveryStatus === 'completed') {
+      for (const payment of payments) {
+        if (!payment.method || payment.value <= 0) {
+          setError('Preencha todas as formas de pagamento e valores (maior que zero).');
+          return;
+        }
+      }
     }
 
     if (deliveryStatus === 'failed' && !failureReason) {
@@ -233,25 +225,17 @@ export function DeliveryConfirmationDialog({
     }
 
     setIsSubmitting(true);
-    setError(null);
-
+    
     try {
       await onConfirm({
         photo: photo || undefined,
         notes: notes || undefined,
         status: deliveryStatus,
         failureReason: deliveryStatus === 'failed' ? failureReason : undefined,
-        paymentMethod: deliveryStatus === 'completed' ? paymentMethod : undefined,
-        creditCardInstallments: deliveryStatus === 'completed' && paymentMethod === 'cartao_credito' ? creditCardInstallments : undefined,
+        payments: deliveryStatus === 'completed' ? payments : undefined,
       });
 
-      // Reset form
-      setPhoto(null);
-      setNotes('');
-      setDeliveryStatus('completed');
-      setFailureReason('');
-      setPaymentMethod('');
-      setCreditCardInstallments(undefined);
+      resetForm();
       onClose();
     } catch (err) {
       console.error('Error confirming delivery:', err);
@@ -305,22 +289,10 @@ export function DeliveryConfirmationDialog({
             <div className="space-y-2">
               <Label>Motivo da Falha</Label>
               <RadioGroup value={failureReason} onValueChange={setFailureReason}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="ausente" id="ausente" />
-                  <Label htmlFor="ausente" className="cursor-pointer">Cliente ausente</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="recusou" id="recusou" />
-                  <Label htmlFor="recusou" className="cursor-pointer">Cliente recusou</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="endereco_incorreto" id="endereco_incorreto" />
-                  <Label htmlFor="endereco_incorreto" className="cursor-pointer">Endereço incorreto</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="outro" id="outro" />
-                  <Label htmlFor="outro" className="cursor-pointer">Outro motivo</Label>
-                </div>
+                <div className="flex items-center space-x-2"> <RadioGroupItem value="ausente" id="ausente" /> <Label htmlFor="ausente" className="cursor-pointer">Cliente ausente</Label> </div>
+                <div className="flex items-center space-x-2"> <RadioGroupItem value="recusou" id="recusou" /> <Label htmlFor="recusou" className="cursor-pointer">Cliente recusou</Label> </div>
+                <div className="flex items-center space-x-2"> <RadioGroupItem value="endereco_incorreto" id="endereco_incorreto" /> <Label htmlFor="endereco_incorreto" className="cursor-pointer">Endereço incorreto</Label> </div>
+                <div className="flex items-center space-x-2"> <RadioGroupItem value="outro" id="outro" /> <Label htmlFor="outro" className="cursor-pointer">Outro motivo</Label> </div>
               </RadioGroup>
             </div>
           )}
@@ -330,14 +302,8 @@ export function DeliveryConfirmationDialog({
               {/* Photo Capture */}
               <Tabs defaultValue="camera" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="camera">
-                    <Camera className="mr-2 h-4 w-4" />
-                    Câmera
-                  </TabsTrigger>
-                  <TabsTrigger value="upload">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload
-                  </TabsTrigger>
+                  <TabsTrigger value="camera"> <Camera className="mr-2 h-4 w-4" /> Câmera </TabsTrigger>
+                  <TabsTrigger value="upload"> <Upload className="mr-2 h-4 w-4" /> Upload </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="camera" className="space-y-2">
@@ -345,41 +311,20 @@ export function DeliveryConfirmationDialog({
                     <>
                       {isCameraActive ? (
                         <div className="relative">
-                          <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className="w-full rounded-lg bg-black"
-                            style={{ maxHeight: '400px' }}
-                          />
+                          <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg bg-black" style={{ maxHeight: '400px' }} />
                           <div className="flex gap-2 mt-2">
-                            <Button onClick={capturePhoto} className="flex-1">
-                              Capturar Foto
-                            </Button>
-                            <Button onClick={stopCamera} variant="outline">
-                              Cancelar
-                            </Button>
+                            <Button onClick={capturePhoto} className="flex-1"> Capturar Foto </Button>
+                            <Button onClick={stopCamera} variant="outline"> Cancelar </Button>
                           </div>
                         </div>
                       ) : (
-                        <Button onClick={startCamera} variant="outline" className="w-full">
-                          <Camera className="mr-2 h-4 w-4" />
-                          Abrir Câmera
-                        </Button>
+                        <Button onClick={startCamera} variant="outline" className="w-full"> <Camera className="mr-2 h-4 w-4" /> Abrir Câmera </Button>
                       )}
                     </>
                   ) : (
                     <div className="relative">
                       <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
-                      <Button
-                        onClick={() => setPhoto(null)}
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-2 right-2"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                      <Button onClick={() => setPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
                   <canvas ref={canvasRef} className="hidden" />
@@ -391,78 +336,83 @@ export function DeliveryConfirmationDialog({
                       <Label htmlFor="photo-upload" className="cursor-pointer">
                         <div className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary transition-colors">
                           <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            Clique para selecionar uma foto
-                          </p>
+                          <p className="mt-2 text-sm text-muted-foreground"> Clique para selecionar uma foto </p>
                         </div>
                       </Label>
-                      <input
-                        id="photo-upload"
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleFileUpload}
-                      />
+                      <input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
                     </div>
                   ) : (
                     <div className="relative">
                       <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
-                      <Button
-                        onClick={() => setPhoto(null)}
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-2 right-2"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                      <Button onClick={() => setPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
                 </TabsContent>
               </Tabs>
 
               {/* Payment Method */}
-              <div className="space-y-2">
-                <Label>Forma de Pagamento *</Label>
-                <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="dinheiro" id="dinheiro" />
-                    <Label htmlFor="dinheiro" className="cursor-pointer font-normal">Dinheiro</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="pix" id="pix" />
-                    <Label htmlFor="pix" className="cursor-pointer font-normal">PIX</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="cartao_credito" id="cartao_credito" />
-                    <Label htmlFor="cartao_credito" className="cursor-pointer font-normal">Cartão de Crédito</Label>
-                  </div>
-                   {paymentMethod === 'cartao_credito' && (
-                    <div className="pl-6 pt-2">
-                      <Label htmlFor="installments">Número de Parcelas</Label>
-                      <Input
-                        id="installments"
-                        type="number"
-                        placeholder="Ex: 1"
-                        value={creditCardInstallments || ''}
-                        onChange={(e) => setCreditCardInstallments(parseInt(e.target.value, 10))}
-                        min="1"
-                        className="mt-1"
-                      />
+              <div className="space-y-4">
+                <Label>Forma(s) de Pagamento *</Label>
+                {payments.map((payment, index) => (
+                  <div key={payment.id} className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-center justify-between">
+                       <Label htmlFor={`payment-method-${index}`} className="text-sm">Pagamento {index + 1}</Label>
+                       {payments.length > 1 && (
+                         <Button variant="ghost" size="icon" onClick={() => removePayment(index)} className="h-7 w-7">
+                           <Trash2 className="h-4 w-4 text-destructive" />
+                         </Button>
+                       )}
                     </div>
-                  )}
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="cartao_debito" id="cartao_debito" />
-                    <Label htmlFor="cartao_debito" className="cursor-pointer font-normal">Cartão de Débito</Label>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                       <div className="space-y-1">
+                          <Select value={payment.method} onValueChange={(value) => handlePaymentChange(index, 'method', value)}>
+                            <SelectTrigger id={`payment-method-${index}`}>
+                              <SelectValue placeholder="Selecione..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="dinheiro">Dinheiro</SelectItem>
+                              <SelectItem value="pix">PIX</SelectItem>
+                              <SelectItem value="cartao_credito">Cartão de Crédito</SelectItem>
+                              <SelectItem value="cartao_debito">Cartão de Débito</SelectItem>
+                              <SelectItem value="boleto">Boleto</SelectItem>
+                              <SelectItem value="outro">Outro</SelectItem>
+                            </SelectContent>
+                          </Select>
+                       </div>
+                        <div className="space-y-1">
+                           <Input
+                             type="number"
+                             placeholder="Valor R$"
+                             value={payment.value || ''}
+                             onChange={(e) => handlePaymentChange(index, 'value', parseFloat(e.target.value))}
+                             min="0.01"
+                             step="0.01"
+                           />
+                        </div>
+                    </div>
+                    {payment.method === 'cartao_credito' && (
+                      <div className="pl-1 pt-2">
+                        <Label htmlFor={`installments-${index}`}>Número de Parcelas</Label>
+                        <Input
+                          id={`installments-${index}`}
+                          type="number"
+                          placeholder="Ex: 1"
+                          value={payment.installments || ''}
+                          onChange={(e) => handlePaymentChange(index, 'installments', parseInt(e.target.value, 10))}
+                          min="1"
+                          className="mt-1"
+                        />
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="boleto" id="boleto" />
-                    <Label htmlFor="boleto" className="cursor-pointer font-normal">Boleto</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="outro" id="outro_pagamento" />
-                    <Label htmlFor="outro_pagamento" className="cursor-pointer font-normal">Outro</Label>
-                  </div>
-                </RadioGroup>
+                ))}
+                {payments.length < 2 && (
+                   <Button variant="outline" size="sm" onClick={addPayment} className="w-full">
+                     <Plus className="mr-2 h-4 w-4" />
+                     Adicionar outra forma de pagamento
+                   </Button>
+                )}
               </div>
             </>
           )}

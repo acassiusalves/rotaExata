@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { db } from '@/lib/firebase/client';
 import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
-import type { PlaceValue, RouteInfo } from '@/lib/types';
+import type { PlaceValue, RouteInfo, Payment } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
@@ -248,8 +248,7 @@ export default function RouteDetailsPage() {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
-    paymentMethod?: string;
-    creditCardInstallments?: number;
+    payments?: Payment[];
   }) => {
     if (!route || selectedStopIndex === null) return;
 
@@ -262,8 +261,7 @@ export default function RouteDetailsPage() {
         photoUrl: data.photo,
         notes: data.notes,
         failureReason: data.failureReason,
-        paymentMethod: data.paymentMethod,
-        creditCardInstallments: data.creditCardInstallments,
+        payments: data.payments,
       };
 
       const routeRef = doc(db, 'routes', routeId);
