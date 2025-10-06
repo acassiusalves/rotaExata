@@ -270,12 +270,23 @@ export function DeliveryConfirmationDialog({
     setError(null);
 
     // Validação de distância (somente para entregas bem-sucedidas)
-    if (
-      deliveryStatus === 'completed' &&
-      validationSettings?.enabled &&
-      stopLocation &&
-      currentLocation
-    ) {
+    if (deliveryStatus === 'completed' && validationSettings?.enabled) {
+      // Verifica se a localização está disponível
+      if (!currentLocation) {
+        setError(
+          'Não foi possível obter sua localização. Certifique-se de que o GPS está ativo e que você iniciou a rota.'
+        );
+        return;
+      }
+
+      // Verifica se o endereço tem coordenadas
+      if (!stopLocation) {
+        setError(
+          'Este endereço não possui coordenadas cadastradas. A validação de distância não pode ser realizada.'
+        );
+        return;
+      }
+
       const distance = calculateDistance(
         currentLocation.lat,
         currentLocation.lng,
