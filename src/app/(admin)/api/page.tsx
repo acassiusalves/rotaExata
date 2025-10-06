@@ -24,8 +24,33 @@ export default function ApiPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
   const [isSyncing, setIsSyncing] = React.useState(false);
+  const [isLoadingKey, setIsLoadingKey] = React.useState(true);
   const { toast } = useToast();
   const { user } = useAuth();
+
+  // Load existing API key on mount
+  React.useEffect(() => {
+    const loadApiKey = async () => {
+      try {
+        setIsLoadingKey(true);
+        const response = await fetch('/api/get-api-key');
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.key) {
+            setApiKey(data.key);
+            setIsSaved(true);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load API key:', error);
+      } finally {
+        setIsLoadingKey(false);
+      }
+    };
+
+    loadApiKey();
+  }, []);
 
 
   const handleSave = async () => {
@@ -136,16 +161,16 @@ export default function ApiPage() {
               <Input
                 id="gmaps-key"
                 type="password"
-                placeholder="Cole sua chave de API aqui"
+                placeholder={isLoadingKey ? "Carregando..." : "Cole sua chave de API aqui"}
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
                   setIsSaved(false);
                 }}
-                disabled={isLoading}
+                disabled={isLoading || isLoadingKey}
                 className={isSaved ? 'border-green-500 pr-10' : ''}
               />
-              {isSaved && (
+              {isSaved && !isLoadingKey && (
                 <CheckCircle className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-500" />
               )}
             </div>
