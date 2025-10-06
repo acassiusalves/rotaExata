@@ -145,8 +145,8 @@ export const authUserMirror=functionsV1.region("southamerica-east1")
         }
         tx.set(ref, updateData, {merge: true});
       }else{
-        // Define 'admin' role for specific email, otherwise default to 'vendedor'
-        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+        // Define 'admin' role for specific email, otherwise default to 'socio'
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
         tx.set(ref,
           {
             email,
@@ -178,7 +178,7 @@ export const syncAuthUsers=onCall(
     
     try {
       const userRecord = await auth.getUserByEmail(email);
-      const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+      const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
       
       await db.collection("users").doc(userRecord.uid).set(
         {

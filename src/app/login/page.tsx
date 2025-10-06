@@ -54,7 +54,7 @@ export default function LoginPage() {
   // This effect will run when the userRole is determined after login
   React.useEffect(() => {
     if (userRole) {
-      if (userRole === 'admin' || userRole === 'seller' || userRole === 'vendedor') {
+      if (['admin', 'socio', 'gestor'].includes(userRole)) {
         router.push('/');
       } else if (userRole === 'driver') {
         router.push('/my-routes');

@@ -41,16 +41,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         
-        let role = 'vendedor'; // default
+        let role = 'socio'; // default
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
-          role = data?.role || 'vendedor';
+          role = data?.role || 'socio';
           setUserRole(role);
           setMustChangePassword(data?.mustChangePassword || false);
         } else {
           // Handle case where user exists in Auth but not in Firestore
           console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
-          setUserRole('vendedor'); // default role
+          setUserRole('socio'); // default role
           setMustChangePassword(false);
         }
         setUser(user);

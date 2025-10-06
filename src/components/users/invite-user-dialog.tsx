@@ -39,7 +39,7 @@ import { Loader2 } from 'lucide-react';
 const userSchema = z.object({
   displayName: z.string().min(3, 'O nome é obrigatório.'),
   email: z.string().email('O email fornecido é inválido.'),
-  role: z.enum(['vendedor', 'admin'], {
+  role: z.enum(['socio', 'gestor', 'admin'], {
     errorMap: () => ({ message: 'Selecione uma função válida.' }),
   }),
 });
@@ -59,7 +59,7 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
     defaultValues: {
       displayName: '',
       email: '',
-      role: 'vendedor',
+      role: 'socio',
     },
   });
 
@@ -76,7 +76,7 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
       if (result.data.ok) {
         toast({
           title: 'Convite Enviado!',
-          description: `Um email foi enviado para ${data.email} para que o usuário defina a senha e acesse o sistema.`,
+          description: `Um email foi enviado para ${data.email} para que o usuário defina a senha e acesse o painel.`,
         });
         form.reset();
         onClose();
@@ -153,8 +153,9 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="vendedor">Vendedor</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="socio">Sócio</SelectItem>
+                      <SelectItem value="gestor">Gestor</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

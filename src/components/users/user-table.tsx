@@ -26,17 +26,26 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
     admin: { label: 'Admin', variant: 'default' },
-    vendedor: { label: 'Vendedor', variant: 'secondary' },
+    socio: { label: 'Sócio', variant: 'secondary' },
+    gestor: { label: 'Gestor', variant: 'outline' },
     driver: { label: 'Motorista', variant: 'outline' },
+    vendedor: { label: 'Vendedor', variant: 'secondary' }, // Manter para compatibilidade
 };
 
 
 export const columns: ColumnDef<any>[] = [
   {
+    accessorKey: 'displayName',
+    header: 'Nome',
+    cell: ({ row }) => (
+      <div className="font-medium">{row.getValue('displayName') || row.original.email}</div>
+    ),
+  },
+  {
     accessorKey: 'email',
     header: 'Email',
     cell: ({ row }) => (
-      <div className="font-medium">{row.getValue('email')}</div>
+      <div>{row.getValue('email')}</div>
     ),
   },
   {
