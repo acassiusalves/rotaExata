@@ -46,6 +46,11 @@ function SortableStop({
 
   const pressStart = React.useRef<number>(0);
 
+  const isManual = stop.isManuallyAdded;
+  const buttonBgColor = isManual ? 'bg-green-100' : 'bg-gray-100';
+  const buttonTextColor = isManual ? 'text-green-700' : 'text-gray-700';
+  const buttonBorderColor = isManual ? 'border-green-300' : 'border-gray-300';
+
   return (
     <div ref={setNodeRef} style={style} {...attributes} className="flex items-center">
       <div className="h-1 w-3" style={{ backgroundColor: color }} />
@@ -64,9 +69,9 @@ function SortableStop({
             onStopClick?.(stop, index);
           }
         }}
-        className="flex h-6 w-6 cursor-grab items-center justify-center rounded-md border bg-gray-100 text-xs font-semibold text-gray-700 active:cursor-grabbing"
+        className={`flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs font-semibold active:cursor-grabbing`}
         style={{ touchAction: "none" }}
-        title={`Parada ${index + 1}: ${stop.customerName ?? ""}`}
+        title={`Parada ${index + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}`}
       >
         {index + 1}
       </button>

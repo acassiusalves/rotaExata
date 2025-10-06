@@ -82,7 +82,11 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+  defaultDropAnimationSideEffects,
 } from '@dnd-kit/core';
+import type { DropAnimation } from '@dnd-kit/core';
 import {
   arrayMove,
 } from '@dnd-kit/sortable';
@@ -92,6 +96,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
 import { db } from '@/lib/firebase/client';
 import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from "firebase/firestore"; 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -316,17 +322,84 @@ export default function OrganizeRoutePage() {
 
   // State for Add Service Dialog
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
-  const [newService, setNewService] = React.useState<PlaceValue | null>(null);
+  const [selectedRouteForNewService, setSelectedRouteForNewService] = React.useState<'A' | 'B' | 'unassigned'>('unassigned');
+  const [manualService, setManualService] = React.useState({
+    customerName: '',
+    phone: '',
+    locationLink: '',
+    cep: '',
+    rua: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    cidade: '',
+    notes: '',
+  });
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
   const DRAG_DELAY = 200;
-  
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: DRAG_DELAY, tolerance: 5 } }),
     useSensor(KeyboardSensor)
   );
-  
+
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [activeStop, setActiveStop] = React.useState<PlaceValue | null>(null);
+  const [activeRouteKey, setActiveRouteKey] = React.useState<'A' | 'B' | null>(null);
+  const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
+
+  // Map resize state
+  const [mapHeight, setMapHeight] = React.useState(50); // percentage
+  const [isResizing, setIsResizing] = React.useState(false);
+  const startYRef = React.useRef<number>(0);
+  const startHeightRef = React.useRef<number>(50);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsResizing(true);
+    startYRef.current = e.clientY;
+    startHeightRef.current = mapHeight;
+  };
+
+  React.useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+
+      const deltaY = e.clientY - startYRef.current;
+      const windowHeight = window.innerHeight - 64; // subtract header height
+      const deltaPercentage = (deltaY / windowHeight) * 100;
+      const newHeight = startHeightRef.current + deltaPercentage;
+
+      // Limit between 20% and 80%
+      if (newHeight >= 20 && newHeight <= 80) {
+        setMapHeight(newHeight);
+      } else if (newHeight < 20) {
+        setMapHeight(20);
+      } else if (newHeight > 80) {
+        setMapHeight(80);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, mapHeight]);
+
   React.useEffect(() => {
     // Fetch available drivers from Firestore
     const q = query(collection(db, 'users'), where('role', '==', 'driver'));
@@ -391,50 +464,300 @@ export default function OrganizeRoutePage() {
     }
   }, [router]);
 
-  const handleAddService = () => {
-    if (newService) {
-      setUnassignedStops(prev => [...prev, newService]);
-      setNewService(null);
-      setIsAddServiceDialogOpen(false);
-      toast({ title: "Serviço Adicionado!", description: "O novo serviço está pronto para ser alocado." });
+  const geocodeAddress = React.useCallback(
+    (address: string): Promise<PlaceValue | null> => {
+      return new Promise((resolve) => {
+        try {
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ address, region: 'BR' }, (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              const place = results[0];
+              const location = place.geometry.location;
+              resolve({
+                id: `geocoded-${place.place_id}-${Date.now()}`,
+                address: place.formatted_address,
+                placeId: place.place_id,
+                lat: location.lat(),
+                lng: location.lng(),
+              });
+            } else {
+              console.warn(`Geocoding failed for "${address}": ${status}`);
+              resolve(null);
+            }
+          });
+        } catch (e) {
+          console.error('Geocoding error:', e);
+          resolve(null);
+        }
+      });
+    },
+    []
+  );
+
+  const reverseGeocode = React.useCallback(
+    (lat: number, lng: number): Promise<Partial<typeof manualService> | null> => {
+      return new Promise((resolve) => {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            const place = results[0];
+            const address: Partial<typeof manualService> = {};
+
+            const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
+
+            address.rua = get('route');
+            address.numero = get('street_number');
+            address.bairro = get('sublocality_level_1') || get('political');
+            address.cidade = get('administrative_area_level_2');
+            address.cep = get('postal_code');
+
+            resolve(address);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    },
+    []
+  );
+
+  const handleManualServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { id, value } = e.target;
+    setManualService(prev => ({...prev, [id]: value}));
+
+    if (id === 'locationLink') {
+      handleLocationLinkPaste(value);
+    }
+  };
+
+  const handleLocationLinkPaste = async (url: string) => {
+    const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (!match) return;
+
+    const lat = parseFloat(match[1]);
+    const lng = parseFloat(match[2]);
+
+    toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
+
+    const addressDetails = await reverseGeocode(lat, lng);
+    if (addressDetails) {
+      setManualService(prev => ({
+        ...prev,
+        ...addressDetails,
+      }));
+      toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
     } else {
-      toast({ variant: 'destructive', title: "Endereço inválido", description: "Por favor, selecione um endereço válido." });
+      toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+    }
+  };
+
+  const handleAddService = async () => {
+    const { rua, numero, bairro, cidade, cep } = manualService;
+    if (!rua || !numero || !bairro || !cidade) {
+      toast({
+        variant: 'destructive',
+        title: 'Campos Obrigatórios',
+        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+      });
+      return;
+    }
+
+    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+
+    const geocoded = await geocodeAddress(addressString);
+
+    if (geocoded) {
+      const newStop: PlaceValue = {
+        ...geocoded,
+        id: `manual-${Date.now()}`,
+        address: geocoded.address,
+        customerName: manualService.customerName,
+        phone: manualService.phone,
+        notes: manualService.notes,
+        isManuallyAdded: true,
+      };
+
+      // Add to selected route or unassigned
+      if (selectedRouteForNewService === 'unassigned') {
+        setUnassignedStops(prev => [...prev, newStop]);
+        toast({
+          title: 'Serviço Adicionado!',
+          description: 'O novo serviço está na lista de não alocados.',
+        });
+      } else {
+        // Add to route A or B and recalculate
+        const targetRoute = selectedRouteForNewService === 'A' ? routeA : routeB;
+        const setter = selectedRouteForNewService === 'A' ? setRouteA : setRouteB;
+
+        if (!targetRoute || !routeData) {
+          toast({
+            variant: 'destructive',
+            title: 'Erro',
+            description: 'Rota não encontrada.',
+          });
+          return;
+        }
+
+        const newStops = [...targetRoute.stops, newStop];
+        setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+
+        // Recalculate route
+        const newRouteInfo = await computeRoute(routeData.origin, newStops);
+        if (newRouteInfo) {
+          setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops, color: targetRoute.color, visible: targetRoute.visible } : null);
+        }
+
+        toast({
+          title: 'Serviço Adicionado!',
+          description: `O serviço foi adicionado à ${routeNames[selectedRouteForNewService]}.`,
+        });
+      }
+
+      setManualService({
+        customerName: '',
+        phone: '',
+        locationLink: '',
+        cep: '',
+        rua: '',
+        numero: '',
+        complemento: '',
+        bairro: '',
+        cidade: '',
+        notes: '',
+      });
+      setSelectedRouteForNewService('unassigned');
+      setIsAddServiceDialogOpen(false);
+    } else {
+      toast({
+        variant: 'destructive',
+        title: 'Falha na Geocodificação',
+        description: 'Não foi possível encontrar o endereço. Verifique os dados e tente novamente.',
+      });
     }
   };
 
 
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    setActiveId(active.id as string);
+
+    // Find the stop being dragged
+    const routeKey = active.data.current?.routeKey as 'A' | 'B';
+    const index = active.data.current?.index as number;
+
+    setActiveRouteKey(routeKey);
+    setActiveIndex(index);
+
+    if (routeKey && index !== undefined) {
+      const route = routeKey === 'A' ? routeA : routeB;
+      if (route) {
+        setActiveStop(route.stops[index]);
+      }
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
+
+    setActiveId(null);
+    setActiveStop(null);
+    setActiveRouteKey(null);
+    setActiveIndex(null);
 
     if (!over || active.id === over.id) {
       return;
     }
-    
-    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B';
-    const overRouteKey = over.data.current?.routeKey  as 'A' | 'B';
 
-    if (!activeRouteKey || activeRouteKey !== overRouteKey) {
-        // Handle moving between routes if needed in the future
-        console.warn("Moving stops between different routes is not supported yet.");
+    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B';
+    const overRouteKey = over.data.current?.routeKey as 'A' | 'B';
+
+    if (!activeRouteKey || !overRouteKey) {
         return;
     }
 
-    const currentRoute = activeRouteKey === 'A' ? routeA : routeB;
-    const setter = activeRouteKey === 'A' ? setRouteA : setRouteB;
-    if (!currentRoute || !routeData) return;
+    // Case 1: Moving within the same route
+    if (activeRouteKey === overRouteKey) {
+      const currentRoute = activeRouteKey === 'A' ? routeA : routeB;
+      const setter = activeRouteKey === 'A' ? setRouteA : setRouteB;
+      if (!currentRoute || !routeData) return;
 
-    const oldIndex = active.data.current?.index as number;
-    const newIndex = over.data.current?.index as number;
-    
-    const newStops = arrayMove(currentRoute.stops, oldIndex, newIndex);
+      const oldIndex = active.data.current?.index as number;
+      const newIndex = over.data.current?.index as number;
 
-    // Update state optimistically
-    setter((prev) => (prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null));
+      const newStops = arrayMove(currentRoute.stops, oldIndex, newIndex);
 
-    // Recalculate route
-    const newRouteInfo = await computeRoute(routeData.origin, newStops);
-    if (newRouteInfo) {
-      setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: newStops } : null));
+      // Update state optimistically
+      setter((prev) => (prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null));
+
+      // Recalculate route
+      const newRouteInfo = await computeRoute(routeData.origin, newStops);
+      if (newRouteInfo) {
+        setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: newStops } : null));
+      }
+    }
+    // Case 2: Moving between different routes
+    else {
+      const sourceRoute = activeRouteKey === 'A' ? routeA : routeB;
+      const targetRoute = overRouteKey === 'A' ? routeA : routeB;
+      const sourceSetter = activeRouteKey === 'A' ? setRouteA : setRouteB;
+      const targetSetter = overRouteKey === 'A' ? setRouteA : setRouteB;
+
+      if (!sourceRoute || !targetRoute || !routeData) return;
+
+      const activeIndex = active.data.current?.index as number;
+      const overIndex = over.data.current?.index as number;
+
+      // Remove from source
+      const stopToMove = sourceRoute.stops[activeIndex];
+      const newSourceStops = sourceRoute.stops.filter((_, i) => i !== activeIndex);
+
+      // Add to target at the position of the over item
+      const newTargetStops = [...targetRoute.stops];
+      newTargetStops.splice(overIndex, 0, stopToMove);
+
+      // Update both routes optimistically
+      sourceSetter((prev) => (prev ? { ...prev, stops: newSourceStops, encodedPolyline: '' } : null));
+      targetSetter((prev) => (prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null));
+
+      // Recalculate both routes
+      const [newSourceRouteInfo, newTargetRouteInfo] = await Promise.all([
+        newSourceStops.length > 0 ? computeRoute(routeData.origin, newSourceStops) : Promise.resolve(null),
+        computeRoute(routeData.origin, newTargetStops),
+      ]);
+
+      if (newSourceRouteInfo) {
+        sourceSetter((prev) => (prev ? {
+          ...prev,
+          ...newSourceRouteInfo,
+          stops: newSourceStops,
+          color: sourceRoute.color,
+          visible: sourceRoute.visible
+        } : null));
+      } else if (newSourceStops.length === 0) {
+        // Keep the route but with empty stops
+        sourceSetter((prev) => (prev ? {
+          ...prev,
+          stops: [],
+          encodedPolyline: '',
+          distanceMeters: 0,
+          duration: '0s'
+        } : null));
+      }
+
+      if (newTargetRouteInfo) {
+        targetSetter((prev) => (prev ? {
+          ...prev,
+          ...newTargetRouteInfo,
+          stops: newTargetStops,
+          color: targetRoute.color,
+          visible: targetRoute.visible
+        } : null));
+      }
+
+      toast({
+        title: 'Serviço Movido!',
+        description: `O serviço foi movido de ${routeNames[activeRouteKey]} para ${routeNames[overRouteKey]}.`,
+      });
     }
   };
 
@@ -596,11 +919,24 @@ export default function OrganizeRoutePage() {
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
-      <div className="h-[50vh] shrink-0 bg-muted">
+      <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}vh` }}>
         <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} unassignedStops={unassignedStops} />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto border-t bg-background">
+      {/* Resize Handle */}
+      <div
+        className="h-1 bg-border hover:bg-primary hover:h-1.5 transition-all cursor-ns-resize flex items-center justify-center group relative z-10"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="absolute inset-x-0 -top-2 -bottom-2" />
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+          <svg width="24" height="8" viewBox="0 0 24 8" fill="none" className="text-muted-foreground">
+            <path d="M3 2h18M3 6h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto bg-background">
         <Tabs defaultValue="organize" className="w-full">
           <CardHeader className="p-4 pb-0">
             <div className="flex items-start justify-between">
@@ -686,7 +1022,7 @@ export default function OrganizeRoutePage() {
                     </div>
                   ) : (
                     routesForTable.length > 0 ? (
-                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                             <Table>
                             <TableHeader>
                                 <TableRow>
@@ -751,6 +1087,29 @@ export default function OrganizeRoutePage() {
                             ))}
                             </TableBody>
                         </Table>
+                        <DragOverlay
+                          dropAnimation={{
+                            sideEffects: defaultDropAnimationSideEffects({
+                              styles: {
+                                active: {
+                                  opacity: '0.5',
+                                },
+                              },
+                            }),
+                          }}
+                        >
+                          {activeId && activeStop && activeIndex !== null ? (
+                            <div
+                              className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
+                                activeStop.isManuallyAdded
+                                  ? 'border-green-300 bg-green-100 text-green-700'
+                                  : 'border-gray-300 bg-gray-100 text-gray-700'
+                              }`}
+                            >
+                              {activeIndex + 1}
+                            </div>
+                          ) : null}
+                        </DragOverlay>
                         </DndContext>
                      ) : (
                         <div className="flex h-48 items-center justify-center text-muted-foreground">
@@ -864,47 +1223,81 @@ export default function OrganizeRoutePage() {
       </div>
     </div>
     <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
-        <DialogContent
-            onInteractOutside={(e) => {
-                const el = e.target as HTMLElement;
-                if (el.closest('.pac-container')) {
-                    e.preventDefault();
-                }
-            }}
-            onPointerDownOutside={(e) => {
-                const el = e.target as HTMLElement;
-                if (el.closest('.pac-container')) {
-                    e.preventDefault();
-                }
-            }}
-            onFocusOutside={(e) => {
-                const el = e.target as HTMLElement;
-                if (el.closest('.pac-container')) {
-                    e.preventDefault();
-                }
-            }}
-        >
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Adicionar Novo Serviço</DialogTitle>
             <DialogDescription>
-              Busque e selecione o endereço para o novo serviço avulso.
+              Preencha os detalhes do serviço. O endereço será validado.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="new-service-address">Endereço</Label>
-              <AutocompleteInput
-                id="new-service-address"
-                placeholder="Pesquise o endereço..."
-                onChange={(place) => setNewService(place)}
-              />
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
+            <div className="space-y-2">
+                <Label htmlFor="route-selection">Adicionar à Rota</Label>
+                <Select value={selectedRouteForNewService} onValueChange={(value: 'A' | 'B' | 'unassigned') => setSelectedRouteForNewService(value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma rota..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Não alocado (adicionar depois)</SelectItem>
+                    {routeA && <SelectItem value="A">{routeNames.A}</SelectItem>}
+                    {routeB && <SelectItem value="B">{routeNames.B}</SelectItem>}
+                  </SelectContent>
+                </Select>
+            </div>
+            <Separator />
+            <div className="space-y-2">
+                <Label htmlFor="customerName">Nome do Cliente</Label>
+                <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input id="phone" value={manualService.phone} onChange={handleManualServiceChange} placeholder="(00) 90000-0000" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cep">CEP</Label>
+                    <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
+                </div>
+            </div>
+             <div className="space-y-2">
+                <Label htmlFor="locationLink">Link Localização (Google Maps)</Label>
+                <Input id="locationLink" value={manualService.locationLink} onChange={handleManualServiceChange} placeholder="Cole o link do Google Maps aqui" />
+            </div>
+            <Separator className="my-4" />
+            <div className="space-y-2">
+                <Label htmlFor="rua">Rua</Label>
+                <Input id="rua" value={manualService.rua} onChange={handleManualServiceChange} placeholder="Avenida, Rua, etc." />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-1 space-y-2">
+                    <Label htmlFor="numero">Número</Label>
+                    <Input id="numero" value={manualService.numero} onChange={handleManualServiceChange} placeholder="123" />
+                </div>
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="complemento">Complemento</Label>
+                    <Input id="complemento" value={manualService.complemento} onChange={handleManualServiceChange} placeholder="Apto, Bloco, etc." />
+                </div>
+            </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="bairro">Bairro</Label>
+                    <Input id="bairro" value={manualService.bairro} onChange={handleManualServiceChange} placeholder="Setor, Bairro" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cidade">Cidade</Label>
+                    <Input id="cidade" value={manualService.cidade} onChange={handleManualServiceChange} placeholder="Goiânia" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="notes">Observações</Label>
+                <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
-            <Button onClick={handleAddService}>Adicionar Serviço</Button>
+            <Button onClick={handleAddService}>Salvar Serviço</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
