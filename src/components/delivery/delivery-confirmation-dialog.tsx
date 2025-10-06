@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Input } from '../ui/input';
 
 interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ interface DeliveryConfirmationDialogProps {
     status: 'completed' | 'failed';
     failureReason?: string;
     paymentMethod?: string;
+    creditCardInstallments?: number;
   }) => Promise<void>;
   customerName?: string;
   address?: string;
@@ -50,6 +52,7 @@ export function DeliveryConfirmationDialog({
   const [deliveryStatus, setDeliveryStatus] = React.useState<'completed' | 'failed'>('completed');
   const [failureReason, setFailureReason] = React.useState('');
   const [paymentMethod, setPaymentMethod] = React.useState('');
+  const [creditCardInstallments, setCreditCardInstallments] = React.useState<number | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -239,6 +242,7 @@ export function DeliveryConfirmationDialog({
         status: deliveryStatus,
         failureReason: deliveryStatus === 'failed' ? failureReason : undefined,
         paymentMethod: deliveryStatus === 'completed' ? paymentMethod : undefined,
+        creditCardInstallments: deliveryStatus === 'completed' && paymentMethod === 'cartao_credito' ? creditCardInstallments : undefined,
       });
 
       // Reset form
@@ -247,6 +251,7 @@ export function DeliveryConfirmationDialog({
       setDeliveryStatus('completed');
       setFailureReason('');
       setPaymentMethod('');
+      setCreditCardInstallments(undefined);
       onClose();
     } catch (err) {
       console.error('Error confirming delivery:', err);
@@ -431,6 +436,20 @@ export function DeliveryConfirmationDialog({
                     <RadioGroupItem value="cartao_credito" id="cartao_credito" />
                     <Label htmlFor="cartao_credito" className="cursor-pointer font-normal">Cartão de Crédito</Label>
                   </div>
+                   {paymentMethod === 'cartao_credito' && (
+                    <div className="pl-6 pt-2">
+                      <Label htmlFor="installments">Número de Parcelas</Label>
+                      <Input
+                        id="installments"
+                        type="number"
+                        placeholder="Ex: 1"
+                        value={creditCardInstallments || ''}
+                        onChange={(e) => setCreditCardInstallments(parseInt(e.target.value, 10))}
+                        min="1"
+                        className="mt-1"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="cartao_debito" id="cartao_debito" />
                     <Label htmlFor="cartao_debito" className="cursor-pointer font-normal">Cartão de Débito</Label>

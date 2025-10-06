@@ -249,6 +249,7 @@ export default function RouteDetailsPage() {
     status: 'completed' | 'failed';
     failureReason?: string;
     paymentMethod?: string;
+    creditCardInstallments?: number;
   }) => {
     if (!route || selectedStopIndex === null) return;
 
@@ -262,6 +263,7 @@ export default function RouteDetailsPage() {
         notes: data.notes,
         failureReason: data.failureReason,
         paymentMethod: data.paymentMethod,
+        creditCardInstallments: data.creditCardInstallments,
       };
 
       const routeRef = doc(db, 'routes', routeId);

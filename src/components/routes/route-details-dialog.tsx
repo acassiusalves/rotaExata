@@ -30,6 +30,7 @@ import {
   User,
   Wallet,
   Truck,
+  CreditCard,
 } from 'lucide-react';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { Timestamp } from 'firebase/firestore';
@@ -173,6 +174,12 @@ export function RouteDetailsDialog({
                                 <Wallet className="h-4 w-4 text-muted-foreground" />
                                 <span>Pagamento: {getPaymentMethodLabel(stop.paymentMethod)}</span>
                             </div>
+                            {stop.paymentMethod === 'cartao_credito' && stop.creditCardInstallments && (
+                                <div className="flex items-center gap-2">
+                                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                                    <span>Parcelas: {stop.creditCardInstallments}x</span>
+                                </div>
+                            )}
                           </div>
                            {stop.notes && (
                             <div>
