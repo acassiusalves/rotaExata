@@ -18,6 +18,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { db } from '@/lib/firebase/client';
 import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
@@ -102,12 +108,24 @@ export default function RouteDetailsPage() {
     return () => unsubscribe();
   }, [routeId]);
 
-  const handleNavigation = (stop: PlaceValue) => {
+  const handleNavigation = (stop: PlaceValue, app: 'google' | 'waze') => {
     if (!stop) return;
-    const query = stop.lat && stop.lng
-      ? `${stop.lat},${stop.lng}`
-      : encodeURIComponent(stop.address);
-    const url = `https://www.google.com/maps/search/?api=1&query=${query}`;
+
+    let url: string;
+
+    if (app === 'waze') {
+      if (stop.lat && stop.lng) {
+        url = `https://waze.com/ul?ll=${stop.lat},${stop.lng}&navigate=yes`;
+      } else {
+        url = `https://waze.com/ul?q=${encodeURIComponent(stop.address)}`;
+      }
+    } else {
+      const query = stop.lat && stop.lng
+        ? `${stop.lat},${stop.lng}`
+        : encodeURIComponent(stop.address);
+      url = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    }
+
     window.location.href = url;
   };
 
@@ -118,23 +136,36 @@ export default function RouteDetailsPage() {
     window.open(url, '_blank');
   };
   
-  const handleNavigateRoute = () => {
+  const handleNavigateRoute = (app: 'google' | 'waze') => {
     if (!route || !route.origin || route.stops.length === 0) return;
 
-    const origin = route.origin.lat && route.origin.lng
-        ? `${route.origin.lat},${route.origin.lng}`
-        : encodeURIComponent(route.origin.address);
+    let url: string;
 
-    const destination = route.stops[route.stops.length - 1];
-    const destinationStr = destination.lat && destination.lng
-        ? `${destination.lat},${destination.lng}`
-        : encodeURIComponent(destination.address);
+    if (app === 'waze') {
+      // Waze não suporta múltiplos waypoints, então vamos para o primeiro destino
+      const firstStop = route.stops[0];
+      if (firstStop.lat && firstStop.lng) {
+        url = `https://waze.com/ul?ll=${firstStop.lat},${firstStop.lng}&navigate=yes`;
+      } else {
+        url = `https://waze.com/ul?q=${encodeURIComponent(firstStop.address)}`;
+      }
+    } else {
+      const origin = route.origin.lat && route.origin.lng
+          ? `${route.origin.lat},${route.origin.lng}`
+          : encodeURIComponent(route.origin.address);
 
-    const waypoints = route.stops.slice(0, -1).map(stop =>
-        stop.lat && stop.lng ? `${stop.lat},${stop.lng}` : encodeURIComponent(stop.address)
-    ).join('|');
+      const destination = route.stops[route.stops.length - 1];
+      const destinationStr = destination.lat && destination.lng
+          ? `${destination.lat},${destination.lng}`
+          : encodeURIComponent(destination.address);
 
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destinationStr}&waypoints=${waypoints}&travelmode=driving`;
+      const waypoints = route.stops.slice(0, -1).map(stop =>
+          stop.lat && stop.lng ? `${stop.lat},${stop.lng}` : encodeURIComponent(stop.address)
+      ).join('|');
+
+      url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destinationStr}&waypoints=${waypoints}&travelmode=driving`;
+    }
+
     window.location.href = url;
   };
 
@@ -375,10 +406,24 @@ export default function RouteDetailsPage() {
             </CardContent>
         </Card>
         
-        <Button size="lg" variant="outline" className="w-full" onClick={handleNavigateRoute}>
-            <Navigation className="mr-2 h-4 w-4" />
-            Iniciar Rota Completa no Mapa
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="lg" variant="outline" className="w-full">
+              <Navigation className="mr-2 h-4 w-4" />
+              Iniciar Rota Completa no Mapa
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" className="w-56">
+            <DropdownMenuItem onClick={() => handleNavigateRoute('google')}>
+              <MapPin className="mr-2 h-4 w-4" />
+              Abrir no Google Maps
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleNavigateRoute('waze')}>
+              <Navigation className="mr-2 h-4 w-4" />
+              Abrir no Waze
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="space-y-4">
             {route.stops.map((stop, index) => (
@@ -410,10 +455,24 @@ export default function RouteDetailsPage() {
                                 <p className="text-xs text-muted-foreground italic">{stop.notes}</p>
                             )}
                             <div className="flex gap-2 pt-2">
-                                 <Button size="sm" variant="outline" onClick={() => handleNavigation(stop)}>
-                                    <Navigation className="mr-2 h-4 w-4" />
-                                    Navegar
-                                 </Button>
+                                 <DropdownMenu>
+                                   <DropdownMenuTrigger asChild>
+                                     <Button size="sm" variant="outline">
+                                       <Navigation className="mr-2 h-4 w-4" />
+                                       Navegar
+                                     </Button>
+                                   </DropdownMenuTrigger>
+                                   <DropdownMenuContent align="start">
+                                     <DropdownMenuItem onClick={() => handleNavigation(stop, 'google')}>
+                                       <MapPin className="mr-2 h-4 w-4" />
+                                       Google Maps
+                                     </DropdownMenuItem>
+                                     <DropdownMenuItem onClick={() => handleNavigation(stop, 'waze')}>
+                                       <Navigation className="mr-2 h-4 w-4" />
+                                       Waze
+                                     </DropdownMenuItem>
+                                   </DropdownMenuContent>
+                                 </DropdownMenu>
                                  {stop.phone && (
                                      <Button size="icon" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)}>
                                         <WhatsAppIcon className="h-4 w-4" />

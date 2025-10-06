@@ -51,12 +51,19 @@ export function Header() {
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
   ];
 
+  const driverNavItems = [
+    { href: '/my-routes', icon: Route, label: 'Rotas Ativas' },
+    { href: '/my-routes/history', icon: History, label: 'Histórico' },
+  ];
+
   const isActive = (href: string) => {
-    // Special case for root
-    if (href === '/dashboard') return pathname === '/dashboard';
+    // Special case for root for driver
+    if (href === '/my-routes' && pathname === '/my-routes') return true;
+    if (href === '/dashboard' && pathname === '/dashboard') return true;
+
     // For other routes, check if the pathname starts with the href
-    // This handles nested routes like /routes/new correctly
-    return pathname.startsWith(href) && href !== '/';
+    // This handles nested routes like /routes/new or /my-routes/history correctly
+    return href !== '/' && pathname.startsWith(href);
   };
   
   const getInitials = (name: string | null | undefined) => {
@@ -149,7 +156,7 @@ export function Header() {
               <BotMessageSquare className="h-6 w-6 text-primary" />
               <span className="sr-only">RotaExata</span>
             </Link>
-             {!isDriver && (
+             {!isDriver ? (
               <>
                 {navItems.map((item) => (
                   <Link
@@ -188,19 +195,23 @@ export function Header() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
+            ) : (
+                <>
+                {driverNavItems.map((item) => (
+                    <Link
+                        key={item.href}
+                        href={item.href}
+                        className={cn(
+                        'flex items-center gap-4 hover:text-foreground',
+                        isActive(item.href) ? 'text-foreground' : 'text-muted-foreground'
+                        )}
+                    >
+                        <item.icon className="h-5 w-5" />
+                        {item.label}
+                    </Link>
+                ))}
+                </>
             )}
-             {isDriver && (
-                <Link
-                  href="/my-routes"
-                  className={cn(
-                    'flex items-center gap-2 hover:text-foreground',
-                    isActive('/my-routes') ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                >
-                  <Smartphone className="h-5 w-5" />
-                  Minhas Rotas
-                </Link>
-             )}
           </nav>
         </SheetContent>
       </Sheet>
@@ -226,7 +237,12 @@ export function Header() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>{user?.displayName || user?.email || 'Minha Conta'}</DropdownMenuLabel>
+            <DropdownMenuLabel>
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium leading-none">{user?.displayName || 'Motorista'}</p>
+                <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+              </div>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {!isDriver && (
                 <DropdownMenuGroup>
@@ -242,17 +258,9 @@ export function Header() {
                         <span>API</span>
                     </Link>
                     </DropdownMenuItem>
+                     <DropdownMenuSeparator />
                 </DropdownMenuGroup>
             )}
-             {isDriver && (
-                <DropdownMenuItem asChild>
-                  <Link href="/my-routes">
-                    <Route className="mr-2 h-4 w-4" />
-                    <span>Minhas Rotas</span>
-                  </Link>
-                </DropdownMenuItem>
-             )}
-            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => signOut()}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Sair</span>

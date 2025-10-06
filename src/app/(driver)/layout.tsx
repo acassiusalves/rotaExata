@@ -4,11 +4,7 @@ import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { useAuth } from '@/hooks/use-auth';
-import { Loader2, History, Route } from 'lucide-react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 
 export default function DriverLayout({
   children,
@@ -17,7 +13,6 @@ export default function DriverLayout({
 }) {
   const { loading, mustChangePassword } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && mustChangePassword) {
@@ -38,32 +33,7 @@ export default function DriverLayout({
       <Header />
       <main className="flex-1 bg-muted/40">
         <div className="mx-auto w-full max-w-md">
-           <div className="border-b bg-background">
-            <div className="flex h-16 items-center px-4">
-              <nav className="flex items-center space-x-4 lg:space-x-6">
-                <Button
-                  variant={pathname === '/my-routes' ? 'secondary' : 'ghost'}
-                  asChild
-                  className="gap-2"
-                >
-                  <Link href="/my-routes">
-                    <Route className="h-4 w-4" />
-                    Rotas Ativas
-                  </Link>
-                </Button>
-                <Button
-                  variant={pathname === '/my-routes/history' ? 'secondary' : 'ghost'}
-                  asChild
-                  className="gap-2"
-                >
-                  <Link href="/my-routes/history">
-                    <History className="h-4 w-4" />
-                    Histórico
-                  </Link>
-                </Button>
-              </nav>
-            </div>
-          </div>
+          {/* A barra de navegação com abas foi removida daqui */}
           {children}
         </div>
       </main>
