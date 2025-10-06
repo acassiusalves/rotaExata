@@ -38,8 +38,8 @@ export type DriverLocation = {
   lat: number;
   lng: number;
   accuracy: number;
-  heading?: number;
-  speed?: number;
+  heading?: number | null;
+  speed?: number | null;
   timestamp: Timestamp | Date;
 };
 

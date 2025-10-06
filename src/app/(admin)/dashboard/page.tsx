@@ -22,11 +22,11 @@ import {
   StatusChart,
 } from '@/components/dashboard/charts';
 import { ActivityFeed } from '@/components/dashboard/activity-feed';
-import Image from 'next/image';
+import { RouteMap } from '@/components/maps/RouteMap';
 import { placeholderImages } from '@/lib/placeholder-images';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
-import { Driver, RouteInfo } from '@/lib/types';
+import { Driver, RouteInfo, DriverLocation } from '@/lib/types';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -36,21 +36,26 @@ type RouteDocument = RouteInfo & {
 };
 
 export default function DashboardPage() {
-  const mapImage = placeholderImages.find((p) => p.id === 'map1');
-
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [drivers, setDrivers] = React.useState<Driver[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [driverLocations, setDriverLocations] = React.useState<DriverLocation[]>([]);
 
   React.useEffect(() => {
     // Firestore listener for routes
-    const routesQuery = query(collection(db, 'routes'));
+    const routesQuery = query(collection(db, 'routes'), where('status', 'in', ['in_progress', 'dispatched']));
     const unsubscribeRoutes = onSnapshot(routesQuery, (snapshot) => {
       const routesData: RouteDocument[] = [];
+      const locations: DriverLocation[] = [];
       snapshot.forEach((doc) => {
-        routesData.push({ id: doc.id, ...doc.data() } as RouteDocument);
+        const route = { id: doc.id, ...doc.data() } as RouteDocument;
+        routesData.push(route);
+        if (route.currentLocation && route.status === 'in_progress') {
+          locations.push(route.currentLocation as DriverLocation);
+        }
       });
       setRoutes(routesData);
+      setDriverLocations(locations);
       setIsLoading(false);
     });
 
@@ -160,21 +165,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="relative aspect-[16/9] w-full overflow-hidden rounded-lg">
-              {mapImage && (
-                <Image
-                  src={mapImage.imageUrl}
-                  alt="Mapa com a localização dos motoristas"
-                  fill
-                  className="object-cover"
-                  data-ai-hint={mapImage.imageHint}
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-              <div className="absolute bottom-4 left-4">
-                <p className="text-sm font-semibold text-white">
-                  Visualização em tempo real
-                </p>
-              </div>
+                <RouteMap driverLocations={driverLocations} />
             </div>
           </CardContent>
         </Card>

@@ -2,7 +2,7 @@
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-import type { PlaceValue, RouteInfo } from "@/lib/types";
+import type { PlaceValue, RouteInfo, DriverLocation } from "@/lib/types";
 
 export type RouteMapHandle = {
   openStopInfo: (stopId: string) => void;
@@ -45,10 +45,11 @@ type Props = {
   unassignedStops?: PlaceValue[];
   height?: number;
   driverLocation?: { lat: number; lng: number; heading?: number };
+  driverLocations?: DriverLocation[];
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360, driverLocation }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -57,6 +58,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   const polylinesRef = React.useRef<google.maps.Polyline[]>([]);
   const activeInfoWindowRef = React.useRef<google.maps.InfoWindow | null>(null);
   const driverMarkerRef = React.useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const driverMarkersRef = React.useRef<Map<string, google.maps.marker.AdvancedMarkerElement>>(new Map());
   const entriesRef = React.useRef<Map<string, { marker: any; info: google.maps.InfoWindow }>>(
     new Map()
   );
@@ -196,7 +198,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
   }, [origin, stops, routes, unassignedStops]);
 
-  // Update driver location marker
+  // Update driver location marker (single)
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map || !driverLocation) {
@@ -235,6 +237,60 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       }
     }
   }, [driverLocation]);
+
+    // Update multiple driver locations
+  React.useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !driverLocations) {
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    const currentMarkerIds = new Set<string>();
+
+    driverLocations.forEach((loc, index) => {
+        const markerId = `driver-${index}`;
+        currentMarkerIds.add(markerId);
+        
+        let marker = driverMarkersRef.current.get(markerId);
+
+        if (!marker) {
+            const truckIcon = document.createElement('div');
+            truckIcon.innerHTML = `
+                <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#2563eb" stroke="white" stroke-width="3"/>
+                <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
+                </svg>
+            `;
+            marker = new google.maps.marker.AdvancedMarkerElement({
+                map,
+                content: truckIcon,
+                title: `Motorista ${index + 1}`,
+            });
+            driverMarkersRef.current.set(markerId, marker);
+        }
+
+        marker.position = { lat: loc.lat, lng: loc.lng };
+        if (loc.heading && marker.content instanceof HTMLElement) {
+            marker.content.style.transform = `rotate(${loc.heading}deg)`;
+        }
+        
+        bounds.extend(marker.position);
+    });
+
+    // Remove old markers
+    driverMarkersRef.current.forEach((marker, id) => {
+        if (!currentMarkerIds.has(id)) {
+            marker.map = null;
+            driverMarkersRef.current.delete(id);
+        }
+    });
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, 100);
+    }
+
+  }, [driverLocations]);
 
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 
