@@ -13,14 +13,13 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 
-type RouteDocument = RouteInfo & {
+export type RouteDocument = RouteInfo & {
   id: string;
   name: string;
   status: 'dispatched' | 'in_progress' | 'completed';
   driverInfo: {
     name: string;
-    vehicle: string;
-    plate: string;
+    vehicle: { type: string, plate: string };
   } | null;
   plannedDate: Timestamp;
   origin: PlaceValue;
@@ -140,7 +139,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                         </Avatar>
                         <div>
                             <h1 className="text-base font-bold leading-none">{route.driverInfo?.name}</h1>
-                            <p className="text-xs font-mono uppercase text-gray-300">{route.driverInfo?.plate}</p>
+                            <p className="text-xs font-mono uppercase text-gray-300">{route.driverInfo?.vehicle.plate}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -168,9 +167,9 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                 </header>
                 <div className="absolute left-4 top-20 z-10 flex flex-col gap-2">
                     <Badge variant="secondary" className="shadow-lg">
-                        {route.status === 'in_progress' ? 'Em andamento' : 'Rota enviada ao operador'}
+                        {route.status === 'in_progress' ? 'Em andamento' : route.status === 'completed' ? 'Concluída' : 'Rota enviada'}
                     </Badge>
-                    {driverLocation && (
+                    {driverLocation && route.status === 'in_progress' && (
                         <Badge variant="default" className="shadow-lg flex items-center gap-2">
                             <Navigation className="h-3 w-3" />
                             Rastreando em tempo real
@@ -193,4 +192,3 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     </Dialog>
   );
 }
-

@@ -19,14 +19,14 @@ import {
 } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { History, Loader2, MapPin, Milestone, User } from 'lucide-react';
+import { History, Loader2, MapPin, Milestone, User, FileText } from 'lucide-react';
 import { db } from '@/lib/firebase/client';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import type { Driver, PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import Link from 'next/link';
-import { RouteMapDialog } from '@/components/routes/route-map-dialog';
+import { RouteDetailsDialog } from '@/components/routes/route-details-dialog';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -50,7 +50,7 @@ export default function HistoryPage() {
   const [isLoadingDrivers, setIsLoadingDrivers] = React.useState(true);
   const [isLoadingRoutes, setIsLoadingRoutes] = React.useState(false);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
-  const [isMapOpen, setIsMapOpen] = React.useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
 
 
   // Fetch drivers
@@ -114,9 +114,9 @@ export default function HistoryPage() {
     return () => unsubscribe();
   }, [selectedDriverId]);
 
-  const handleOpenMap = (route: RouteDocument) => {
+  const handleOpenDetails = (route: RouteDocument) => {
     setSelectedRoute(route);
-    setIsMapOpen(true);
+    setIsDetailsOpen(true);
   };
 
   return (
@@ -200,8 +200,9 @@ export default function HistoryPage() {
                           </div>
                       </CardContent>
                       <CardFooter>
-                          <Button className="w-full" variant="secondary" onClick={() => handleOpenMap(route)}>
-                            Ver detalhes no mapa
+                          <Button className="w-full" variant="secondary" onClick={() => handleOpenDetails(route)}>
+                            <FileText className="mr-2 h-4 w-4" />
+                            Ver Detalhes
                           </Button>
                       </CardFooter>
                   </Card>
@@ -210,9 +211,9 @@ export default function HistoryPage() {
         )}
       </div>
       {selectedRoute && (
-        <RouteMapDialog
-          isOpen={isMapOpen}
-          onClose={() => setIsMapOpen(false)}
+        <RouteDetailsDialog
+          isOpen={isDetailsOpen}
+          onClose={() => setIsDetailsOpen(false)}
           route={selectedRoute}
         />
       )}
