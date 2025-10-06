@@ -23,13 +23,24 @@ if (projectId && clientEmail && privateKey) {
     const apps = getApps();
     if (apps.length === 0) {
       console.log('Initializing new Firebase Admin app...');
+
+      // Replace escaped newlines with actual newlines
+      const formattedKey = privateKey.replace(/\\n/g, '\n');
+
+      console.log('Key format check:', {
+        startsCorrectly: formattedKey.startsWith('-----BEGIN PRIVATE KEY-----'),
+        endsCorrectly: formattedKey.endsWith('-----END PRIVATE KEY-----'),
+        hasNewlines: formattedKey.includes('\n')
+      });
+
       adminApp = initializeApp({
         credential: cert({
           projectId,
           clientEmail,
-          privateKey: privateKey.replace(/\\n/g, '\n'),
+          privateKey: formattedKey,
         }),
-        projectId: projectId
+        projectId: projectId,
+        databaseURL: `https://${projectId}.firebaseio.com`
       });
     } else {
       console.log('Using existing Firebase Admin app');
@@ -38,8 +49,12 @@ if (projectId && clientEmail && privateKey) {
 
     adminDb = getFirestore(adminApp);
     console.log('Firebase Admin initialized successfully');
-  } catch (error) {
-    console.error('Failed to initialize Firebase Admin:', error);
+  } catch (error: any) {
+    console.error('Failed to initialize Firebase Admin:', {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack
+    });
   }
 } else {
   console.warn('Firebase Admin credentials not found. Missing:', {
