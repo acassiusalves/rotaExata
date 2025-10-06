@@ -129,10 +129,20 @@ export default function RouteDetailsPage() {
     window.location.href = url;
   };
 
-  const handleWhatsApp = (phone: string | undefined) => {
+  const handleWhatsApp = (phone: string | undefined, customerName?: string) => {
     if (!phone) return;
+
+    // Pega o primeiro nome do cliente
+    const firstName = customerName ? customerName.split(' ')[0] : '';
+
+    // Monta a mensagem personalizada
+    const message = firstName
+      ? `Olá ${firstName}, tudo bem?\n\nSou entregador da Sol de Maria Calçados e estou com o seu pedido. Poderia me enviar sua localização fixa?`
+      : `Olá, tudo bem?\n\nSou entregador da Sol de Maria Calçados e estou com o seu pedido. Poderia me enviar sua localização fixa?`;
+
     const sanitizedPhone = phone.replace(/\D/g, ''); // Remove non-digit characters
-    const url = `https://wa.me/55${sanitizedPhone}`; // Adiciona o código do Brasil
+    const encodedMessage = encodeURIComponent(message);
+    const url = `https://wa.me/55${sanitizedPhone}?text=${encodedMessage}`;
     window.open(url, '_blank');
   };
   
@@ -468,7 +478,7 @@ export default function RouteDetailsPage() {
                                    </DropdownMenuContent>
                                  </DropdownMenu>
                                  {stop.phone && (
-                                     <Button size="icon" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone)}>
+                                     <Button size="icon" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone, stop.customerName)}>
                                         <WhatsAppIcon className="h-4 w-4" />
                                     </Button>
                                  )}
