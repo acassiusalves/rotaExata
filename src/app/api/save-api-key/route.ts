@@ -1,55 +1,121 @@
 import { NextResponse } from "next/server";
-import { getFirestore } from 'firebase-admin/firestore';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
 
-async function saveApiKeyToFirestore(key: string): Promise<void> {
-  // Re-initialize with fresh credentials to ensure proper auth
+/**
+ * Generates a JWT for Firebase Authentication using service account credentials
+ */
+async function generateFirebaseJWT(): Promise<string> {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-  console.log('Environment check:', {
-    hasProjectId: !!projectId,
-    hasClientEmail: !!clientEmail,
-    hasPrivateKey: !!privateKey,
-    privateKeyStart: privateKey?.substring(0, 30)
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error('Missing Firebase credentials');
+  }
+
+  // Create JWT header
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT'
+  };
+
+  // Create JWT payload
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: clientEmail,
+    sub: clientEmail,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/datastore'
+  };
+
+  // Encode header and payload
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signatureInput = `${encodedHeader}.${encodedPayload}`;
+
+  // Import the crypto module (Node.js built-in)
+  const crypto = await import('crypto');
+
+  // Format the private key
+  const formattedKey = privateKey.replace(/\\n/g, '\n');
+
+  // Sign the JWT
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(signatureInput);
+  sign.end();
+  const signature = sign.sign(formattedKey, 'base64url');
+
+  return `${signatureInput}.${signature}`;
+}
+
+/**
+ * Exchanges JWT for an access token
+ */
+async function getAccessToken(): Promise<string> {
+  const jwt = await generateFirebaseJWT();
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
   });
 
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error('Firebase Admin not initialized. Please configure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables.');
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get access token: ${error}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+/**
+ * Saves API key to Firestore using REST API
+ */
+async function saveApiKeyToFirestore(key: string): Promise<void> {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+
+  if (!projectId) {
+    throw new Error('Missing Firebase project ID');
   }
 
   try {
-    // Get or initialize app
-    let app;
-    const apps = getApps();
+    console.log('Getting access token...');
+    const accessToken = await getAccessToken();
+    console.log('Access token obtained successfully');
 
-    if (apps.length === 0) {
-      console.log('Initializing Firebase Admin in API route...');
-      app = initializeApp({
-        credential: cert({
-          projectId,
-          clientEmail,
-          privateKey: privateKey.replace(/\\n/g, '\n'),
-        })
-      });
-    } else {
-      app = apps[0];
-    }
-
-    const db = getFirestore(app);
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/settings/googleMaps`;
 
     console.log('Attempting to save API key to Firestore...');
-    await db.collection('settings').doc('googleMaps').set({
-      apiKey: key,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+    const response = await fetch(firestoreUrl, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        fields: {
+          apiKey: { stringValue: key },
+          updatedAt: { stringValue: new Date().toISOString() }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Firestore API error: ${error}`);
+    }
+
     console.log('API key saved successfully to Firestore');
   } catch (error: any) {
     console.error('Failed to save API key to Firestore:', {
       message: error?.message,
-      code: error?.code,
-      details: error?.details,
       stack: error?.stack
     });
     throw new Error(`Could not save API key to database: ${error?.message || 'Unknown error'}`);
