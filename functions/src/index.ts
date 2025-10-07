@@ -212,6 +212,48 @@ export const updateRouteDriver = onCall(
   }
 );
 
+/* ========== duplicateRoute (callable) ========== */
+export const duplicateRoute = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      const routeDoc = await db.collection("routes").doc(routeId).get();
+
+      if (!routeDoc.exists) {
+        throw new HttpsError("not-found", "Rota não encontrada");
+      }
+
+      const routeData = routeDoc.data();
+      if (!routeData) {
+        throw new HttpsError("internal", "Dados da rota não encontrados");
+      }
+
+      // Criar uma cópia da rota com um novo nome
+      const newRouteData = {
+        ...routeData,
+        name: `${routeData.name} (Cópia)`,
+        createdAt: FieldValue.serverTimestamp(),
+      };
+
+      // Criar um novo documento
+      await db.collection("routes").add(newRouteData);
+
+      return { ok: true, message: `Rota duplicada com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao duplicar a rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
 
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")

@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -55,6 +55,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 
 
 // Extend RouteInfo to include fields from Firestore doc
@@ -284,6 +290,17 @@ export default function RoutesPage() {
       setIsDuplicating(false);
     }
   };
+  
+  const groupedRoutes = React.useMemo(() => {
+    return routes.reduce((acc, route) => {
+      const dateKey = format(route.plannedDate.toDate(), 'yyyy-MM-dd');
+      if (!acc[dateKey]) {
+        acc[dateKey] = [];
+      }
+      acc[dateKey].push(route);
+      return acc;
+    }, {} as Record<string, RouteDocument[]>);
+  }, [routes]);
 
 
   if (isLoading) {
@@ -313,78 +330,114 @@ export default function RoutesPage() {
 
   return (
     <>
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {routes.map((route) => (
-          <Card key={route.id} className="flex flex-col">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div>
-                    <CardTitle>{route.name}</CardTitle>
-                    <CardDescription>
-                        {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                    </CardDescription>
-                </div>
-                 <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 w-8 p-0">
-                        <span className="sr-only">Abrir menu</span>
-                        <MoreVertical className="h-4 w-4" />
-                    </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
-                            <Copy className="mr-2 h-4 w-4" />
-                            <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          <span>Editar Nome</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
-                            <UserCog className="mr-2 h-4 w-4" />
-                            <span>Trocar Motorista</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleOpenDeleteDialog(route)}
-                        >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        <span>Excluir Rota</span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </CardHeader>
-            <CardContent className="flex-1 space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-3">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">{route.driverInfo?.name || 'Motorista não informado'}</span>
-                  </div>
-                </div>
-              <div className="flex items-center gap-3 text-sm">
-                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span>{route.stops.length} paradas</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm">
-                  <Milestone className="h-4 w-4 text-muted-foreground" />
-                  <span>{formatDistance(route.distanceMeters)} km</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span>{formatDuration(route.duration)}</span>
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button asChild className="w-full" variant="outline">
-                  <Link href={`/routes/monitoring`}>
-                    <Truck className="mr-2 h-4 w-4" />
-                    Acompanhar Rota
-                  </Link>
-              </Button>
-            </CardFooter>
-          </Card>
-        ))}
+      <div className="space-y-4">
+        <Accordion type="single" collapsible className="w-full space-y-4">
+          {Object.entries(groupedRoutes).map(([date, dailyRoutes]) => {
+            const totalDistance = dailyRoutes.reduce((sum, route) => sum + (route.distanceMeters || 0), 0);
+
+            return (
+              <AccordionItem value={date} key={date} className="border-none">
+                <Card className="shadow-sm">
+                  <AccordionTrigger className="p-4 hover:no-underline [&[data-state=open]>svg]:text-primary">
+                    <div className="flex w-full items-center justify-between">
+                      <div className="text-left">
+                        <p className="font-semibold text-lg">{format(new Date(date), "dd 'de' MMMM, yyyy", { locale: ptBR })}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {dailyRoutes.length} rota{dailyRoutes.length > 1 ? 's' : ''} planejada{dailyRoutes.length > 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-6 text-right">
+                        <div>
+                          <p className="text-muted-foreground text-xs">Rotas</p>
+                          <p className="font-bold text-lg">{dailyRoutes.length}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Distância (km)</p>
+                          <p className="font-bold text-lg">{formatDistance(totalDistance)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="p-4 pt-0">
+                      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 pt-4 border-t">
+                        {dailyRoutes.map((route) => (
+                           <Card key={route.id} className="flex flex-col">
+                              <CardHeader>
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                      <CardTitle>{route.name}</CardTitle>
+                                      <CardDescription>
+                                          {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                      </CardDescription>
+                                  </div>
+                                  <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" className="h-8 w-8 p-0">
+                                          <span className="sr-only">Abrir menu</span>
+                                          <MoreVertical className="h-4 w-4" />
+                                      </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                          <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
+                                              <Copy className="mr-2 h-4 w-4" />
+                                              <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
+                                            <Pencil className="mr-2 h-4 w-4" />
+                                            <span>Editar Nome</span>
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
+                                              <UserCog className="mr-2 h-4 w-4" />
+                                              <span>Trocar Motorista</span>
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                              className="text-destructive"
+                                              onClick={() => handleOpenDeleteDialog(route)}
+                                          >
+                                          <Trash2 className="mr-2 h-4 w-4" />
+                                          <span>Excluir Rota</span>
+                                          </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="flex-1 space-y-4">
+                                  <div className="flex items-center justify-between text-sm">
+                                    <div className="flex items-center gap-3">
+                                      <User className="h-4 w-4 text-muted-foreground" />
+                                      <span className="font-medium">{route.driverInfo?.name || 'Motorista não informado'}</span>
+                                    </div>
+                                  </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                                    <span>{route.stops.length} paradas</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                    <Milestone className="h-4 w-4 text-muted-foreground" />
+                                    <span>{formatDistance(route.distanceMeters)} km</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                    <Clock className="h-4 w-4 text-muted-foreground" />
+                                    <span>{formatDuration(route.duration)}</span>
+                                </div>
+                              </CardContent>
+                              <CardFooter>
+                                <Button asChild className="w-full" variant="outline">
+                                    <Link href={`/routes/monitoring`}>
+                                      <Truck className="mr-2 h-4 w-4" />
+                                      Acompanhar Rota
+                                    </Link>
+                                </Button>
+                              </CardFooter>
+                            </Card>
+                          ))}
+                      </div>
+                  </AccordionContent>
+                </Card>
+              </AccordionItem>
+            )
+          })}
+        </Accordion>
       </div>
 
       {/* Change Driver Dialog */}
@@ -516,5 +569,3 @@ export default function RoutesPage() {
     </>
   );
 }
-
-    
