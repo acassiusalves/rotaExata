@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -14,6 +14,12 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -30,12 +36,24 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { db } from '@/lib/firebase/client';
-import { collection, onSnapshot, query, orderBy, Timestamp, doc, updateDoc, where } from 'firebase/firestore';
+import { db, functions } from '@/lib/firebase/client';
+import { collection, onSnapshot, query, orderBy, Timestamp, doc, updateDoc, where, deleteDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import type { RouteInfo, Driver } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+
 
 // Extend RouteInfo to include fields from Firestore doc
 type RouteDocument = RouteInfo & {
@@ -65,9 +83,11 @@ export default function RoutesPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [isChangeDriverDialogOpen, setIsChangeDriverDialogOpen] = React.useState(false);
-  const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
+  const [routeToModify, setRouteToModify] = React.useState<RouteDocument | null>(null);
   const [newDriverId, setNewDriverId] = React.useState<string>('');
   const [isUpdating, setIsUpdating] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -117,13 +137,19 @@ export default function RoutesPage() {
   }, []);
 
   const handleOpenChangeDriver = (route: RouteDocument) => {
-    setSelectedRoute(route);
+    setRouteToModify(route);
     setNewDriverId(route.driverId || '');
     setIsChangeDriverDialogOpen(true);
   };
 
+  const handleOpenDeleteDialog = (route: RouteDocument) => {
+    setRouteToModify(route);
+    setIsDeleteDialogOpen(true);
+  };
+
+
   const handleChangeDriver = async () => {
-    if (!selectedRoute || !newDriverId) {
+    if (!routeToModify || !newDriverId) {
       toast({
         variant: 'destructive',
         title: 'Erro',
@@ -137,18 +163,18 @@ export default function RoutesPage() {
     try {
       const driver = availableDrivers.find(d => d.id === newDriverId);
 
-      await updateDoc(doc(db, 'routes', selectedRoute.id), {
+      await updateDoc(doc(db, 'routes', routeToModify.id), {
         driverId: newDriverId,
         driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
       });
 
       toast({
         title: 'Motorista Alterado!',
-        description: `A rota "${selectedRoute.name}" foi atribuída a ${driver?.name}.`,
+        description: `A rota "${routeToModify.name}" foi atribuída a ${driver?.name}.`,
       });
 
       setIsChangeDriverDialogOpen(false);
-      setSelectedRoute(null);
+      setRouteToModify(null);
       setNewDriverId('');
     } catch (error) {
       console.error('Error updating driver:', error);
@@ -161,6 +187,34 @@ export default function RoutesPage() {
       setIsUpdating(false);
     }
   };
+  
+  const handleDeleteRoute = async () => {
+    if (!routeToModify) return;
+    setIsDeleting(true);
+
+    try {
+        const deleteRouteFn = httpsCallable(functions, 'deleteRoute');
+        await deleteRouteFn({ routeId: routeToModify.id });
+        
+        toast({
+            title: 'Rota Removida!',
+            description: `A rota "${routeToModify.name}" foi removida com sucesso.`,
+        });
+        
+        setIsDeleteDialogOpen(false);
+        setRouteToModify(null);
+    } catch (error: any) {
+        console.error('Error deleting route:', error);
+        toast({
+            variant: 'destructive',
+            title: 'Erro ao Remover Rota',
+            description: error.message || 'Não foi possível remover a rota.',
+        });
+    } finally {
+        setIsDeleting(false);
+    }
+  };
+
 
   if (isLoading) {
       return (
@@ -193,15 +247,35 @@ export default function RoutesPage() {
         {routes.map((route) => (
           <Card key={route.id} className="flex flex-col">
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>{route.name}</span>
-                <Badge variant={route.status === 'dispatched' ? 'default' : 'secondary'}>
-                  {route.status === 'dispatched' ? 'Despachada' : 'Em Andamento'}
-                </Badge>
-              </CardTitle>
-              <CardDescription>
-                {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-              </CardDescription>
+              <div className="flex items-start justify-between">
+                <div>
+                    <CardTitle>{route.name}</CardTitle>
+                    <CardDescription>
+                        {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                    </CardDescription>
+                </div>
+                 <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="h-8 w-8 p-0">
+                        <span className="sr-only">Abrir menu</span>
+                        <MoreVertical className="h-4 w-4" />
+                    </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
+                            <UserCog className="mr-2 h-4 w-4" />
+                            <span>Trocar Motorista</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleOpenDeleteDialog(route)}
+                        >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        <span>Excluir Rota</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </CardHeader>
             <CardContent className="flex-1 space-y-4">
                 <div className="flex items-center justify-between text-sm">
@@ -209,15 +283,6 @@ export default function RoutesPage() {
                     <User className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">{route.driverInfo?.name || 'Motorista não informado'}</span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleOpenChangeDriver(route)}
-                    className="h-8 px-2"
-                    title="Trocar motorista"
-                  >
-                    <UserCog className="h-4 w-4" />
-                  </Button>
                 </div>
               <div className="flex items-center gap-3 text-sm">
                   <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -233,9 +298,11 @@ export default function RoutesPage() {
               </div>
             </CardContent>
             <CardFooter>
-              <Button className="w-full" variant="outline">
-                  <Truck className="mr-2 h-4 w-4" />
-                  Acompanhar Rota
+              <Button asChild className="w-full" variant="outline">
+                  <Link href={`/routes/monitoring`}>
+                    <Truck className="mr-2 h-4 w-4" />
+                    Acompanhar Rota
+                  </Link>
               </Button>
             </CardFooter>
           </Card>
@@ -248,7 +315,7 @@ export default function RoutesPage() {
           <DialogHeader>
             <DialogTitle>Trocar Motorista</DialogTitle>
             <DialogDescription>
-              Selecione um novo motorista para a rota "{selectedRoute?.name}".
+              Selecione um novo motorista para a rota "{routeToModify?.name}".
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -256,7 +323,7 @@ export default function RoutesPage() {
               <label className="text-sm font-medium">Motorista Atual</label>
               <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted">
                 <User className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{selectedRoute?.driverInfo?.name || 'Não informado'}</span>
+                <span className="text-sm font-medium">{routeToModify?.driverInfo?.name || 'Não informado'}</span>
               </div>
             </div>
             <div className="space-y-2">
@@ -301,6 +368,35 @@ export default function RoutesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Delete Route Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+            <AlertDialogDescription>
+                Esta ação não pode ser desfeita. Isso irá remover permanentemente a rota <span className="font-semibold">{routeToModify?.name}</span> do sistema.
+            </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction asChild>
+                <Button
+                variant="destructive"
+                onClick={handleDeleteRoute}
+                disabled={isDeleting}
+                >
+                {isDeleting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                )}
+                {isDeleting ? 'Removendo...' : 'Sim, remover rota'}
+                </Button>
+            </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+        </AlertDialog>
     </>
   );
 }
