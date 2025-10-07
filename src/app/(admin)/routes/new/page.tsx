@@ -843,18 +843,54 @@ export default function NewRoutePage() {
                         )}
                         </Label>
                         <div className="flex items-center gap-2">
-                        <AutocompleteInput
-                            id={`stop-${index}`}
-                            placeholder="Endereço da parada..."
-                            value={stop}
-                            onChange={(place) => handleStopChange(index, place)}
-                        />
-                        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => openEditDialog(stop, index)}>
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                          <AutocompleteInput
+                              id={`stop-${index}`}
+                              placeholder="Endereço da parada..."
+                              value={stop}
+                              onChange={(place) => handleStopChange(index, place)}
+                          />
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                                <Info className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80">
+                                <div className="grid gap-4">
+                                  <div className="space-y-2">
+                                      <h4 className="font-medium leading-none">Detalhes da Parada</h4>
+                                      <p className="text-sm text-muted-foreground">
+                                        {stop.address}
+                                      </p>
+                                  </div>
+                                  <div className="grid gap-2 text-sm">
+                                      <div className="grid grid-cols-[100px_1fr] items-center gap-2">
+                                        <span className="text-muted-foreground">Cliente</span>
+                                        <span>{stop.customerName || "-"}</span>
+                                      </div>
+                                      <div className="grid grid-cols-[100px_1fr] items-center gap-2">
+                                        <span className="text-muted-foreground">Pedido</span>
+                                        <span>{stop.orderNumber || "-"}</span>
+                                      </div>
+                                      <div className="grid grid-cols-[100px_1fr] items-center gap-2">
+                                        <span className="text-muted-foreground">Telefone</span>
+                                        <span>{stop.phone || "-"}</span>
+                                      </div>
+                                       <div className="grid grid-cols-[100px_1fr] items-center gap-2">
+                                        <span className="text-muted-foreground">Janela</span>
+                                        <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '-'}</span>
+                                      </div>
+                                  </div>
+                                  <Button size="sm" onClick={() => openEditDialog(stop, index)}>
+                                    <Pencil className="mr-2 h-4 w-4" />
+                                    Editar
+                                  </Button>
+                                </div>
+                            </PopoverContent>
+                          </Popover>
+                          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
                         </div>
                     </div>
                     ))}
