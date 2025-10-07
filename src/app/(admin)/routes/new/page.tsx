@@ -125,9 +125,12 @@ async function readTextSmart(file: File): Promise<string> {
 export default function NewRoutePage() {
   const router = useRouter();
   const [savedOrigins, setSavedOrigins] = React.useState(initialSavedOrigins);
-  const [origin, setOrigin] = React.useState<PlaceValue | null>(
-    savedOrigins[0].value
-  );
+  const [origin, setOrigin] = React.useState<PlaceValue | null>(() => {
+    if (initialSavedOrigins.length > 0) {
+      return initialSavedOrigins[0].value;
+    }
+    return null;
+  });
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
   const [routeTime, setRouteTime] = React.useState('18:10');
@@ -201,12 +204,13 @@ export default function NewRoutePage() {
   };
 
   const handleDeleteOrigin = (originId: string) => {
-    setSavedOrigins(prev => prev.filter(o => o.id !== originId));
+    const updatedOrigins = savedOrigins.filter(o => o.id !== originId);
+    setSavedOrigins(updatedOrigins);
 
     // If the deleted origin was the selected one, reset to the first available or null
-    if (origin?.id === `saved-${originId}`.split('-')[1]) {
-        const newOrigin = savedOrigins.length > 1 ? savedOrigins.find(o => o.id !== originId)?.value : null;
-        setOrigin(newOrigin || null);
+    if (origin?.id === savedOrigins.find(o => o.id === originId)?.value.id) {
+        const newOrigin = updatedOrigins.length > 0 ? updatedOrigins[0].value : null;
+        setOrigin(newOrigin);
     }
     
     toast({
