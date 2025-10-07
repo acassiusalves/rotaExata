@@ -880,6 +880,10 @@ export default function NewRoutePage() {
                                         <span className="text-muted-foreground">Janela</span>
                                         <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '-'}</span>
                                       </div>
+                                       <div className="grid grid-cols-[100px_1fr] items-start gap-2">
+                                        <span className="text-muted-foreground">Observações</span>
+                                        <span className="italic">{stop.notes || "-"}</span>
+                                      </div>
                                   </div>
                                   <Button size="sm" onClick={() => openEditDialog(stop, index)}>
                                     <Pencil className="mr-2 h-4 w-4" />
@@ -1187,3 +1191,5 @@ export default function NewRoutePage() {
     </>
   );
 }
+
+    
