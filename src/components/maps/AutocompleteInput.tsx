@@ -1,3 +1,4 @@
+
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
@@ -45,6 +46,11 @@ export function AutocompleteInput({
       });
       acRef.current.addListener("place_changed", () => {
         const p = acRef.current!.getPlace();
+        if (!p || !p.geometry) {
+            // User entered the name of a Place that was not suggested and
+            // pressed the Enter key, or the Place Details request failed.
+            return;
+        }
         const loc = p.geometry?.location;
         if (!loc || !p.place_id) return;
         onChange({
