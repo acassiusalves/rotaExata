@@ -142,6 +142,7 @@ export default function NewRoutePage() {
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
   const [manualService, setManualService] = React.useState(initialManualServiceState);
   const [newOriginName, setNewOriginName] = React.useState('');
+  const [newOriginLink, setNewOriginLink] = React.useState('');
   const [tempOrigin, setTempOrigin] = React.useState<PlaceValue | null>(null);
 
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = React.useState(false);
@@ -195,6 +196,7 @@ export default function NewRoutePage() {
 
     setIsNewOriginDialogOpen(false);
     setNewOriginName('');
+    setNewOriginLink('');
     setTempOrigin(null);
 
     toast({
@@ -278,24 +280,14 @@ export default function NewRoutePage() {
   );
 
   const reverseGeocode = React.useCallback(
-    (lat: number, lng: number): Promise<Partial<typeof initialManualServiceState> | null> => {
+    (lat: number, lng: number): Promise<any | null> => {
       return new Promise((resolve, reject) => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
-            const place = results[0];
-            const address: Partial<typeof initialManualServiceState> = {};
-            
-            const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
-            
-            address.rua = get('route');
-            address.numero = get('street_number');
-            address.bairro = get('sublocality_level_1') || get('political');
-            address.cidade = get('administrative_area_level_2');
-            address.cep = get('postal_code');
-
-            resolve(address);
+            resolve(results[0]);
           } else {
+            console.warn(`Reverse geocoding failed: ${status}`);
             resolve(null);
           }
         });
@@ -310,11 +302,15 @@ export default function NewRoutePage() {
     setManualService(prev => ({...prev, [id]: value}));
 
     if (id === 'locationLink') {
-      handleLocationLinkPaste(value);
+      handleLocationLinkPaste(value, (addressDetails) => {
+        if (addressDetails) {
+            setManualService(prev => ({ ...prev, ...addressDetails }));
+        }
+      });
     }
   }
 
-  const handleLocationLinkPaste = async (url: string) => {
+  const handleLocationLinkPaste = async (url: string, callback: (details: any) => void) => {
       const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
       if (!match) return;
 
@@ -323,17 +319,50 @@ export default function NewRoutePage() {
       
       toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
 
-      const addressDetails = await reverseGeocode(lat, lng);
-      if (addressDetails) {
-        setManualService(prev => ({
-          ...prev,
-          ...addressDetails,
-        }));
-        toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
+      const place = await reverseGeocode(lat, lng);
+      if (place) {
+          const address: Partial<typeof initialManualServiceState> = {};
+          const get = (type: string) => place.address_components.find((c: any) => c.types.includes(type))?.long_name;
+          
+          address.rua = get('route');
+          address.numero = get('street_number');
+          address.bairro = get('sublocality_level_1') || get('political');
+          address.cidade = get('administrative_area_level_2');
+          address.cep = get('postal_code');
+          
+          callback(address);
+          
+          toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
       } else {
          toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
       }
   }
+
+  const handleOriginLinkChange = async (url: string) => {
+    setNewOriginLink(url);
+    const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (!match) return;
+
+    const lat = parseFloat(match[1]);
+    const lng = parseFloat(match[2]);
+    
+    toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
+
+    const place = await reverseGeocode(lat, lng);
+    if (place) {
+      setTempOrigin({
+        id: `geocoded-${place.place_id}-${Date.now()}`,
+        address: place.formatted_address,
+        placeId: place.place_id,
+        lat: lat,
+        lng: lng,
+      });
+       toast({ title: "Endereço preenchido!", description: "O campo de endereço foi preenchido automaticamente." });
+    } else {
+       toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+    }
+  };
+
 
   const handleSaveManualService = async () => {
     const { rua, numero, bairro, cidade, cep } = manualService;
@@ -934,6 +963,7 @@ export default function NewRoutePage() {
         setIsNewOriginDialogOpen(open);
         if (!open) {
           setNewOriginName('');
+          setNewOriginLink('');
           setTempOrigin(null);
         }
       }}>
@@ -953,6 +983,15 @@ export default function NewRoutePage() {
                 onChange={(e) => setNewOriginName(e.target.value)}
                 placeholder="Ex: Matriz, Depósito Central"
               />
+            </div>
+            <div className="grid gap-2">
+                <Label htmlFor="origin-link">Link da Localização (Google Maps)</Label>
+                <Input
+                    id="origin-link"
+                    value={newOriginLink}
+                    onChange={(e) => handleOriginLinkChange(e.target.value)}
+                    placeholder="Cole o link do Google Maps aqui"
+                />
             </div>
             <div className="grid gap-2">
               <AutocompleteInput
