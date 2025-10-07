@@ -60,7 +60,8 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from "@/components/ui/accordion"
+} from "@/components/ui/accordion";
+import { useRouter } from 'next/navigation';
 
 
 // Extend RouteInfo to include fields from Firestore doc
@@ -74,6 +75,7 @@ type RouteDocument = RouteInfo & {
     vehicle: { type: string; plate: string };
   } | null;
   plannedDate: Timestamp;
+  origin: any; // Can be complex object
 };
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(2);
@@ -87,6 +89,7 @@ const formatDuration = (durationString: string = '0s') => {
 
 
 export default function RoutesPage() {
+  const router = useRouter();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
@@ -290,6 +293,18 @@ export default function RoutesPage() {
       setIsDuplicating(false);
     }
   };
+
+  const handleEditRoute = (route: RouteDocument) => {
+    const routeDate = route.plannedDate.toDate();
+    const routeData = {
+      origin: route.origin,
+      stops: route.stops,
+      routeDate: routeDate.toISOString(),
+      routeTime: format(routeDate, 'HH:mm'),
+    };
+    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+    router.push('/routes/organize');
+  };
   
   const groupedRoutes = React.useMemo(() => {
     return routes.reduce((acc, route) => {
@@ -422,11 +437,9 @@ export default function RoutesPage() {
                                 </div>
                               </CardContent>
                               <CardFooter>
-                                <Button asChild className="w-full" variant="outline">
-                                    <Link href={`/routes/monitoring`}>
-                                      <Truck className="mr-2 h-4 w-4" />
-                                      Acompanhar Rota
-                                    </Link>
+                                <Button className="w-full" variant="outline" onClick={() => handleEditRoute(route)}>
+                                    <Truck className="mr-2 h-4 w-4" />
+                                    Acompanhar Rota
                                 </Button>
                               </CardFooter>
                             </Card>
