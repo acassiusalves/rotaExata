@@ -14,6 +14,7 @@ import {
   Plus,
   ArrowRight,
   Info,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -92,6 +93,9 @@ const initialManualServiceState = {
   bairro: '',
   cidade: '',
   notes: '',
+  orderNumber: '',
+  timeWindowStart: '',
+  timeWindowEnd: '',
 };
 
 
@@ -140,7 +144,10 @@ export default function NewRoutePage() {
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
+  
+  const [stopToEdit, setStopToEdit] = React.useState<{ stop: PlaceValue; index: number } | null>(null);
   const [manualService, setManualService] = React.useState(initialManualServiceState);
+
   const [newOriginName, setNewOriginName] = React.useState('');
   const [newOriginLink, setNewOriginLink] = React.useState('');
   const [tempOrigin, setTempOrigin] = React.useState<PlaceValue | null>(null);
@@ -253,11 +260,19 @@ export default function NewRoutePage() {
     (address: string): Promise<PlaceValue | null> => {
       return new Promise((resolve, reject) => {
         try {
+          if (!window.google || !window.google.maps) {
+            console.error("Google Maps API not loaded");
+            return reject("Google Maps API not loaded");
+          }
           const geocoder = new google.maps.Geocoder();
           geocoder.geocode({ address, region: 'BR' }, (results, status) => {
             if (status === 'OK' && results && results[0]) {
               const place = results[0];
-              const location = place.geometry.location;
+              const location = place.geometry?.location;
+              if (!location) {
+                console.warn(`Geocoding result for "${address}" missing geometry.`);
+                return resolve(null);
+              }
               resolve({
                 id: `geocoded-${place.place_id}-${Date.now()}`,
                 address: place.formatted_address,
@@ -282,6 +297,10 @@ export default function NewRoutePage() {
   const reverseGeocode = React.useCallback(
     (lat: number, lng: number): Promise<any | null> => {
       return new Promise((resolve, reject) => {
+        if (!window.google || !window.google.maps) {
+            console.error("Google Maps API not loaded");
+            return reject("Google Maps API not loaded");
+        }
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
@@ -364,7 +383,7 @@ export default function NewRoutePage() {
   };
 
 
-  const handleSaveManualService = async () => {
+  const handleSaveManualService = async (isEditing = false) => {
     const { rua, numero, bairro, cidade, cep } = manualService;
     if (!rua || !numero || !bairro || !cidade) {
         toast({
@@ -382,19 +401,29 @@ export default function NewRoutePage() {
     if (geocoded) {
         const newStop: PlaceValue = {
             ...geocoded,
-            id: `manual-${Date.now()}`,
+            id: isEditing && stopToEdit ? stopToEdit.stop.id : `manual-${Date.now()}`,
             address: geocoded.address,
             customerName: manualService.customerName,
             phone: manualService.phone,
             notes: manualService.notes,
+            orderNumber: manualService.orderNumber,
+            timeWindowStart: manualService.timeWindowStart,
+            timeWindowEnd: manualService.timeWindowEnd,
         };
-        setStops(prevStops => [...prevStops, newStop]);
+
+        if (isEditing && stopToEdit) {
+            const updatedStops = [...stops];
+            updatedStops[stopToEdit.index] = newStop;
+            setStops(updatedStops);
+            toast({ title: 'Serviço Atualizado!', description: 'Os detalhes da parada foram atualizados.' });
+        } else {
+            setStops(prevStops => [...prevStops, newStop]);
+            toast({ title: 'Serviço Adicionado!', description: 'O novo serviço foi adicionado à lista de paradas.' });
+        }
+
         setManualService(initialManualServiceState);
         setIsAddServiceDialogOpen(false);
-        toast({
-            title: 'Serviço Adicionado!',
-            description: 'O novo serviço foi adicionado à lista de paradas.',
-        });
+        setStopToEdit(null);
     } else {
         toast({
             variant: 'destructive',
@@ -403,6 +432,44 @@ export default function NewRoutePage() {
         });
     }
   };
+
+  const openEditDialog = (stop: PlaceValue, index: number) => {
+    setStopToEdit({ stop, index });
+    setManualService({
+      customerName: stop.customerName || '',
+      phone: stop.phone || '',
+      locationLink: '', // não temos como reverter, então fica em branco
+      cep: '', // Será preenchido por reverse geocode
+      rua: '', // Será preenchido por reverse geocode
+      numero: '', // Será preenchido por reverse geocode
+      complemento: stop.complemento || '',
+      bairro: '', // Será preenchido por reverse geocode
+      cidade: '', // Será preenchido por reverse geocode
+      notes: stop.notes || '',
+      orderNumber: stop.orderNumber || '',
+      timeWindowStart: stop.timeWindowStart || '',
+      timeWindowEnd: stop.timeWindowEnd || '',
+    });
+    // Apenas abrir o dialog. O preenchimento completo vem do reverse geocode
+    setIsAddServiceDialogOpen(true);
+
+    if (stop.lat && stop.lng) {
+      reverseGeocode(stop.lat, stop.lng).then(place => {
+        if(place) {
+          const get = (type: string) => place.address_components.find((c: any) => c.types.includes(type))?.long_name;
+          setManualService(prev => ({
+            ...prev,
+            rua: get('route') || prev.rua,
+            numero: get('street_number') || prev.numero,
+            bairro: get('sublocality_level_1') || get('political') || prev.bairro,
+            cidade: get('administrative_area_level_2') || prev.cidade,
+            cep: get('postal_code') || prev.cep,
+          }))
+        }
+      })
+    }
+  };
+
 
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -782,40 +849,9 @@ export default function NewRoutePage() {
                             value={stop}
                             onChange={(place) => handleStopChange(index, place)}
                         />
-                        <Popover>
-                            <PopoverTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
-                                    <Info className="h-4 w-4" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className='w-80'>
-                                <div className="grid gap-4">
-                                    <h4 className="font-medium leading-none">Detalhes da Parada</h4>
-                                    <div className="grid gap-2 text-sm">
-                                        <div className="grid grid-cols-2 items-center gap-4">
-                                            <span className='text-muted-foreground'>Cliente</span>
-                                            <span>{stop.customerName || '--'}</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 items-center gap-4">
-                                            <span className='text-muted-foreground'>Pedido Nº</span>
-                                            <span>{stop.orderNumber || '--'}</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 items-center gap-4">
-                                            <span className='text-muted-foreground'>Telefone</span>
-                                            <span>{stop.phone || '--'}</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 items-center gap-4">
-                                            <span className='text-muted-foreground'>Janela</span>
-                                            <span>{stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
-                                        </div>
-                                        <div className="grid grid-cols-1 items-center gap-2">
-                                            <span className='text-muted-foreground'>Observações</span>
-                                            <p className='leading-snug'>{stop.notes || '--'}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </PopoverContent>
-                        </Popover>
+                        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => openEditDialog(stop, index)}>
+                            <Pencil className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => handleRemoveStop(index)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -830,7 +866,11 @@ export default function NewRoutePage() {
             {/* Footer */}
             <div className="flex-shrink-0 border-t bg-background p-3 space-y-2">
                 <div className="space-y-1.5">
-                    <Button variant="ghost" size="sm" className="w-full justify-start gap-2 h-8 text-sm" onClick={() => setIsAddServiceDialogOpen(true)}>
+                    <Button variant="ghost" size="sm" className="w-full justify-start gap-2 h-8 text-sm" onClick={() => {
+                      setStopToEdit(null);
+                      setManualService(initialManualServiceState);
+                      setIsAddServiceDialogOpen(true);
+                    }}>
                         <PlusCircle className="h-4 w-4" />
                         Adicionar novo serviço
                     </Button>
@@ -1019,20 +1059,33 @@ export default function NewRoutePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Manual Add Service Dialog */}
-       <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
+      {/* Manual Add/Edit Service Dialog */}
+       <Dialog open={isAddServiceDialogOpen} onOpenChange={(open) => {
+         if (!open) {
+           setStopToEdit(null);
+           setManualService(initialManualServiceState);
+         }
+         setIsAddServiceDialogOpen(open);
+       }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Adicionar Novo Serviço Manualmente</DialogTitle>
+            <DialogTitle>{stopToEdit ? 'Editar Serviço' : 'Adicionar Novo Serviço Manualmente'}</DialogTitle>
             <DialogDescription>
               Preencha os detalhes do serviço. O endereço será validado.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
-            <div className="space-y-2">
-                <Label htmlFor="customerName">Nome do Cliente</Label>
-                <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                  <Label htmlFor="customerName">Nome do Cliente</Label>
+                  <Input id="customerName" value={manualService.customerName} onChange={handleManualServiceChange} placeholder="Nome do Cliente" />
+              </div>
+              <div className="space-y-2">
+                  <Label htmlFor="orderNumber">Nº Pedido</Label>
+                  <Input id="orderNumber" value={manualService.orderNumber} onChange={handleManualServiceChange} placeholder="Ex: 12345" />
+              </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="phone">Telefone</Label>
@@ -1043,7 +1096,7 @@ export default function NewRoutePage() {
                     <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
                 </div>
             </div>
-             <div className="space-y-2">
+            <div className="space-y-2">
                 <Label htmlFor="locationLink">Link Localização (Google Maps)</Label>
                 <Input id="locationLink" value={manualService.locationLink} onChange={handleManualServiceChange} placeholder="Cole o link do Google Maps aqui" />
             </div>
@@ -1072,6 +1125,16 @@ export default function NewRoutePage() {
                     <Input id="cidade" value={manualService.cidade} onChange={handleManualServiceChange} placeholder="Goiânia" />
                 </div>
             </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="timeWindowStart">Início da Janela</Label>
+                    <Input id="timeWindowStart" type="time" value={manualService.timeWindowStart} onChange={handleManualServiceChange} />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="timeWindowEnd">Fim da Janela</Label>
+                    <Input id="timeWindowEnd" type="time" value={manualService.timeWindowEnd} onChange={handleManualServiceChange} />
+                </div>
+            </div>
             <div className="space-y-2">
                 <Label htmlFor="notes">Observações</Label>
                 <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
@@ -1081,14 +1144,10 @@ export default function NewRoutePage() {
             <DialogClose asChild>
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
-            <Button onClick={handleSaveManualService}>Salvar Serviço</Button>
+            <Button onClick={() => handleSaveManualService(!!stopToEdit)}>{stopToEdit ? 'Salvar Alterações' : 'Salvar Serviço'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   );
 }
-
-    
-
-    
