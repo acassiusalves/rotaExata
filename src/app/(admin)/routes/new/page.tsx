@@ -32,6 +32,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import type { PlaceValue } from '@/lib/types';
@@ -46,7 +56,7 @@ import { ImportAssistantDialog } from '@/components/routes/import-assistant-dial
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
 
-const savedOrigins = [
+const initialSavedOrigins = [
   {
     id: 'origin-1',
     name: 'Sol de Maria',
@@ -114,6 +124,7 @@ async function readTextSmart(file: File): Promise<string> {
 
 export default function NewRoutePage() {
   const router = useRouter();
+  const [savedOrigins, setSavedOrigins] = React.useState(initialSavedOrigins);
   const [origin, setOrigin] = React.useState<PlaceValue | null>(
     savedOrigins[0].value
   );
@@ -127,6 +138,11 @@ export default function NewRoutePage() {
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
   const [manualService, setManualService] = React.useState(initialManualServiceState);
+  const [newOriginName, setNewOriginName] = React.useState('');
+  const [tempOrigin, setTempOrigin] = React.useState<PlaceValue | null>(null);
+
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = React.useState(false);
+  const [originToDelete, setOriginToDelete] = React.useState<string | null>(null);
   
   // States for Import Assistant
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
@@ -146,6 +162,72 @@ export default function NewRoutePage() {
     setOrigin(placeValue);
     setIsOriginDialogOpen(false);
   };
+
+  const handleSaveNewOrigin = () => {
+    if (!tempOrigin) {
+      toast({
+        variant: 'destructive',
+        title: 'Endereço não selecionado',
+        description: 'Por favor, selecione um endereço antes de salvar.',
+      });
+      return;
+    }
+    if (!newOriginName.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Nome não informado',
+        description: 'Por favor, informe um nome para a origem.',
+      });
+      return;
+    }
+
+    const newOrigin = {
+      id: `origin-${Date.now()}`,
+      name: newOriginName,
+      value: tempOrigin,
+    };
+
+    setSavedOrigins(prev => [newOrigin, ...prev]);
+    setOrigin(tempOrigin);
+
+    setIsNewOriginDialogOpen(false);
+    setNewOriginName('');
+    setTempOrigin(null);
+
+    toast({
+      title: 'Origem salva!',
+      description: `A origem "${newOriginName}" foi definida com sucesso.`,
+    });
+  };
+
+  const handleDeleteOrigin = (originId: string) => {
+    setSavedOrigins(prev => prev.filter(o => o.id !== originId));
+
+    // If the deleted origin was the selected one, reset to the first available or null
+    if (origin?.id === `saved-${originId}`.split('-')[1]) {
+        const newOrigin = savedOrigins.length > 1 ? savedOrigins.find(o => o.id !== originId)?.value : null;
+        setOrigin(newOrigin || null);
+    }
+    
+    toast({
+      title: 'Origem Removida',
+      description: 'O endereço de origem foi removido da sua lista.',
+    });
+  };
+
+  const openDeleteConfirmation = (originId: string) => {
+    setOriginToDelete(originId);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (originToDelete) {
+      handleDeleteOrigin(originToDelete);
+      setOriginToDelete(null);
+    }
+    setIsDeleteConfirmOpen(false);
+  };
+
 
   const handleRemoveStop = (index: number) => {
     const newStops = stops.filter((_, i) => i !== index);
@@ -433,12 +515,12 @@ export default function NewRoutePage() {
                     }
                 }
             }
-            
+
             const addressString = fieldOrder
                 .map(field => addressParts[field])
                 .filter(Boolean)
                 .join(', ') + ', Brasil';
-            
+
             return {
                 addressString,
                 customerName: getField(row, 'Nome do Cliente', ['Nome do Cliente','Cliente']),
@@ -447,6 +529,7 @@ export default function NewRoutePage() {
                 orderNumber:  getField(row, 'Número Pedido', ['Número Pedido','Pedido']),
                 timeWindowStart: getField(row, 'Início do intervalo permitido', ['Início do intervalo permitido']),
                 timeWindowEnd:   getField(row, 'Fim do intervalo permitido', ['Fim do intervalo permitido']),
+                complemento:  getField(row, 'Complemento', ['Complemento']),
             };
         });
 
@@ -461,6 +544,7 @@ export default function NewRoutePage() {
                     orderNumber: item.orderNumber,
                     timeWindowStart: item.timeWindowStart,
                     timeWindowEnd: item.timeWindowEnd,
+                    complemento: item.complemento,
                 };
                 // se "nome" vier só com dígitos (tipo 10), descarta
                 if (stopData.customerName && /^\d+$/.test(stopData.customerName)) {
@@ -778,35 +862,44 @@ export default function NewRoutePage() {
               {savedOrigins.map((saved) => {
                 const isSelected = origin?.placeId === saved.value.placeId;
                 return (
-                  <button
-                    key={saved.id}
-                    className="flex w-full items-center gap-4 rounded-md p-3 text-left transition-colors hover:bg-muted"
-                    onClick={() => handleSelectOrigin(saved.value)}
-                  >
-                    <div
-                      className={cn(
-                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border',
-                        isSelected
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-background'
-                      )}
+                  <div key={saved.id} className="group flex w-full items-center gap-4 rounded-md p-3 text-left transition-colors hover:bg-muted">
+                    <button
+                        className="flex-1 flex items-center gap-4"
+                        onClick={() => handleSelectOrigin(saved.value)}
                     >
-                      <Home className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p
+                        <div
                         className={cn(
-                          'font-medium',
-                          isSelected && 'text-primary'
+                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border',
+                            isSelected
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background'
                         )}
-                      >
-                        {saved.value.address}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {saved.name}
-                      </p>
-                    </div>
-                  </button>
+                        >
+                        <Home className="h-5 w-5" />
+                        </div>
+                        <div>
+                        <p
+                            className={cn(
+                            'font-medium',
+                            isSelected && 'text-primary'
+                            )}
+                        >
+                            {saved.value.address}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            {saved.name}
+                        </p>
+                        </div>
+                    </button>
+                    <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => openDeleteConfirmation(saved.id)}
+                    >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 );
               })}
             </div>
@@ -814,8 +907,32 @@ export default function NewRoutePage() {
         </DialogContent>
       </Dialog>
 
+      {/* Delete Origin Confirmation Dialog */}
+       <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação removerá permanentemente o endereço de origem salvo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* New Origin Dialog */}
-      <Dialog open={isNewOriginDialogOpen} onOpenChange={setIsNewOriginDialogOpen}>
+      <Dialog open={isNewOriginDialogOpen} onOpenChange={(open) => {
+        setIsNewOriginDialogOpen(open);
+        if (!open) {
+          setNewOriginName('');
+          setTempOrigin(null);
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Adicionar Nova Origem</DialogTitle>
@@ -828,6 +945,8 @@ export default function NewRoutePage() {
               <Label htmlFor="origin-name">Nome do Local</Label>
               <Input
                 id="origin-name"
+                value={newOriginName}
+                onChange={(e) => setNewOriginName(e.target.value)}
                 placeholder="Ex: Matriz, Depósito Central"
               />
             </div>
@@ -836,10 +955,11 @@ export default function NewRoutePage() {
                 id="origin-address"
                 label="Endereço Completo"
                 placeholder="Pesquise o endereço..."
+                value={tempOrigin}
                 onChange={(place) => {
                   if (place) {
                      const safeId = place.id || place.placeId || `origin-${Date.now()}`;
-                     setOrigin({...place, id: String(safeId)});
+                     setTempOrigin({...place, id: String(safeId)});
                   }
                 }}
               />
@@ -849,7 +969,7 @@ export default function NewRoutePage() {
             <DialogClose asChild>
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
-            <Button onClick={() => setIsNewOriginDialogOpen(false)}>
+            <Button onClick={handleSaveNewOrigin}>
               Salvar Origem
             </Button>
           </DialogFooter>

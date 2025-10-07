@@ -132,6 +132,29 @@ export const deleteUser = onCall(
 );
 
 
+/* ========== deleteRoute (callable) ========== */
+export const deleteRoute = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("routes").doc(routeId).delete();
+      return { ok: true, message: `Rota ${routeId} removida com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao remover a rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
+
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")
   .auth.user()

@@ -16,36 +16,44 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
     o["default"] = v;
 });
 var __importStar = (this && this.__importStar) || (function () {
-    var mod = {
-        __esModule: true,
-        "default": this
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
     };
-    for(var k in this) if (k !== "default" && Object.prototype.hasOwnProperty.call(this, k)) __createBinding(mod, this, k);
-    __setModuleDefault(mod, this);
-    return mod;
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.deleteRoute = exports.deleteUser = exports.inviteUser = exports.onUserStatusChanged = void 0;
+exports.syncAuthUsers = exports.authUserMirror = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
-const functions = __importStar(require("firebase-functions"));
 (0, app_1.initializeApp)();
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
-exports.onUserStatusChanged = functions.region("southamerica-east1").database
-    .ref('/status/{uid}')
-    .onUpdate(async (change, context) => {
-    const eventStatus = change.after.val();
-    const firestore = (0, firestore_1.getFirestore)();
-    const userDocRef = firestore.doc(`users/${context.params.uid}`);
-    return userDocRef.update({
-        status: eventStatus.state,
-        lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-});
+// COMMENTED OUT: Requires Realtime Database to be configured
+// export const onUserStatusChanged = functions.region("southamerica-east1").database
+//   .ref('/status/{uid}')
+//   .onUpdate(async (change, context) => {
+//     const eventStatus = change.after.val();
+//     const firestore = getFirestore();
+//     const userDocRef = firestore.doc(`users/${context.params.uid}`);
+//     return userDocRef.update({
+//       status: eventStatus.state,
+//       lastSeenAt: FieldValue.serverTimestamp(),
+//     });
+//   });
 /* ========== inviteUser (callable) ========== */
 exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
@@ -105,28 +113,30 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
     }
     try {
         const auth = (0, auth_1.getAuth)();
-        await auth.deleteUser(uid);
-        console.log(`Usuário ${uid} removido da Autenticação.`);
-    }
-    catch (error) {
-        if (error.code === 'auth/user-not-found') {
-            console.warn(`Usuário ${uid} não encontrado na Autenticação, prosseguindo com a remoção do Firestore.`);
-        }
-        else {
-            // Para qualquer outro erro de autenticação, lançamos o erro
-            const msg = error.message || "Falha ao remover o usuário da Autenticação.";
-            throw new https_1.HttpsError("internal", `Auth Error: ${msg}`);
-        }
-    }
-    try {
         const db = (0, firestore_1.getFirestore)();
+        // Delete from Firebase Authentication
+        await auth.deleteUser(uid);
+        // Delete from Firestore
         await db.collection("users").doc(uid).delete();
-        console.log(`Usuário ${uid} removido do Firestore.`);
         return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
     }
-    catch (error) {
-        const msg = error.message || "Falha ao remover o usuário do Firestore.";
-        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    catch (err) {
+        const error = err;
+        const msg = error.message || "Falha ao remover usuário";
+        // If user not in auth, it's not a critical failure,
+        // still try to delete from firestore as the main goal.
+        if (error.code === 'auth/user-not-found') {
+            try {
+                const db = (0, firestore_1.getFirestore)();
+                await db.collection("users").doc(uid).delete();
+                return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
+            }
+            catch (dbErr) {
+                const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
+                throw new https_1.HttpsError("internal", dbMsg);
+            }
+        }
+        throw new https_1.HttpsError("internal", msg);
     }
 });
 /* ========== deleteRoute (callable) ========== */
@@ -167,8 +177,8 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
             tx.set(ref, updateData, { merge: true });
         }
         else {
-            // Define 'admin' role for specific email, otherwise default to 'socio'
-            const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
+            // Define 'admin' role for specific email, otherwise default to 'vendedor'
+            const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
             tx.set(ref, {
                 email,
                 role: role,
@@ -193,7 +203,7 @@ exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, as
     const db = (0, firestore_1.getFirestore)();
     try {
         const userRecord = await auth.getUserByEmail(email);
-        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
         await db.collection("users").doc(userRecord.uid).set({
             email: userRecord.email,
             role: role,

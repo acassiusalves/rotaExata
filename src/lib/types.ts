@@ -32,6 +32,7 @@ export type PlaceValue = {
   timeWindowStart?: string;
   timeWindowEnd?: string;
   addressString?: string;
+  complemento?: string;
   // Campos de rastreamento
   deliveryStatus?: DeliveryStatus;
   arrivedAt?: Timestamp | Date;

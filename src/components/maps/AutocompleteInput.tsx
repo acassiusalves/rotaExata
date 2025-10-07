@@ -21,7 +21,10 @@ export function AutocompleteInput({
 
   React.useEffect(() => {
     if (inputRef.current && value && value.address) {
-      inputRef.current.value = value.address;
+      const displayAddress = value.complemento
+        ? `${value.address} - ${value.complemento}`
+        : value.address;
+      inputRef.current.value = displayAddress;
     }
   }, [value]);
 
