@@ -15,45 +15,35 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.syncAuthUsers = exports.authUserMirror = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = exports.onUserStatusChanged = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
+const functions = __importStar(require("firebase-functions"));
 (0, app_1.initializeApp)();
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
-// COMMENTED OUT: Requires Realtime Database to be configured
-// export const onUserStatusChanged = functions.region("southamerica-east1").database
-//   .ref('/status/{uid}')
-//   .onUpdate(async (change, context) => {
-//     const eventStatus = change.after.val();
-//     const firestore = getFirestore();
-//     const userDocRef = firestore.doc(`users/${context.params.uid}`);
-//     return userDocRef.update({
-//       status: eventStatus.state,
-//       lastSeenAt: FieldValue.serverTimestamp(),
-//     });
-//   });
+exports.onUserStatusChanged = functions.region("southamerica-east1").database
+    .ref('/status/{uid}')
+    .onUpdate(async (change, context) => {
+    const eventStatus = change.after.val();
+    const firestore = (0, firestore_1.getFirestore)();
+    const userDocRef = firestore.doc(`users/${context.params.uid}`);
+    return userDocRef.update({
+        status: eventStatus.state,
+        lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
+    });
+});
 /* ========== inviteUser (callable) ========== */
 exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
@@ -156,6 +146,88 @@ exports.deleteRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, asyn
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
 });
+/* ========== updateRouteName (callable) ========== */
+exports.updateRouteName = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const name = String(d.name || "").trim();
+    if (!routeId) {
+        throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    if (!name) {
+        throw new https_1.HttpsError("invalid-argument", "Nome da rota é obrigatório");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        await db.collection("routes").doc(routeId).update({ name });
+        return { ok: true, message: `Nome da rota atualizado com sucesso.` };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao atualizar o nome da rota.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
+/* ========== updateRouteDriver (callable) ========== */
+exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const driverId = String(d.driverId || "").trim();
+    const driverInfo = d.driverInfo || null;
+    if (!routeId) {
+        throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    if (!driverId) {
+        throw new https_1.HttpsError("invalid-argument", "ID do motorista é obrigatório");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        await db.collection("routes").doc(routeId).update({
+            driverId,
+            driverInfo
+        });
+        return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao atualizar o motorista da rota.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
+/* ========== duplicateRoute (callable) ========== */
+exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    if (!routeId) {
+        throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        const originalRouteRef = db.collection("routes").doc(routeId);
+        const originalRouteSnap = await originalRouteRef.get();
+        if (!originalRouteSnap.exists) {
+            throw new https_1.HttpsError("not-found", "Rota original não encontrada.");
+        }
+        const originalData = originalRouteSnap.data();
+        const duplicatedData = {
+            ...originalData,
+            name: `Cópia de ${originalData.name}`,
+            status: 'dispatched',
+            plannedDate: firestore_1.FieldValue.serverTimestamp(),
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            driverId: null,
+            driverInfo: null,
+            startedAt: null,
+            completedAt: null,
+            currentLocation: null,
+            currentStopIndex: null,
+        };
+        const newRouteRef = await db.collection("routes").add(duplicatedData);
+        return { ok: true, newRouteId: newRouteRef.id, message: `Rota duplicada com sucesso.` };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao duplicar a rota.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 exports.authUserMirror = functionsV1.region("southamerica-east1")
     .auth.user()
@@ -177,8 +249,8 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
             tx.set(ref, updateData, { merge: true });
         }
         else {
-            // Define 'admin' role for specific email, otherwise default to 'vendedor'
-            const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+            // Define 'admin' role for specific email, otherwise default to 'socio'
+            const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
             tx.set(ref, {
                 email,
                 role: role,
@@ -203,7 +275,7 @@ exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, as
     const db = (0, firestore_1.getFirestore)();
     try {
         const userRecord = await auth.getUserByEmail(email);
-        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'socio';
         await db.collection("users").doc(userRecord.uid).set({
             email: userRecord.email,
             role: role,

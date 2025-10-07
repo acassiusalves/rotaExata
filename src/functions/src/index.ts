@@ -97,32 +97,40 @@ export const deleteUser = onCall(
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
-
+    
     try {
       const auth = getAuth();
-      await auth.deleteUser(uid);
-      console.log(`Usuário ${uid} removido da Autenticação.`);
-    } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
-        console.warn(`Usuário ${uid} não encontrado na Autenticação, prosseguindo com a remoção do Firestore.`);
-      } else {
-        // Para qualquer outro erro de autenticação, lançamos o erro
-        const msg = error.message || "Falha ao remover o usuário da Autenticação.";
-        throw new HttpsError("internal", `Auth Error: ${msg}`);
-      }
-    }
-
-    try {
       const db = getFirestore();
+
+      // Delete from Firebase Authentication
+      await auth.deleteUser(uid);
+
+      // Delete from Firestore
       await db.collection("users").doc(uid).delete();
-      console.log(`Usuário ${uid} removido do Firestore.`);
+
       return { ok: true, message: `Usuário ${uid} removido com sucesso.` };
-    } catch (error: any) {
-      const msg = error.message || "Falha ao remover o usuário do Firestore.";
-      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+
+    } catch (err) {
+      const error = err as any;
+      const msg = error.message || "Falha ao remover usuário";
+
+      // If user not in auth, it's not a critical failure,
+      // still try to delete from firestore as the main goal.
+      if (error.code === 'auth/user-not-found') {
+          try {
+            const db = getFirestore();
+            await db.collection("users").doc(uid).delete();
+            return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
+          } catch (dbErr) {
+             const dbMsg = dbErr instanceof Error ? dbErr.message : "Falha ao remover do Firestore";
+             throw new HttpsError("internal", dbMsg);
+          }
+      }
+      throw new HttpsError("internal", msg);
     }
   }
 );
+
 
 /* ========== deleteRoute (callable) ========== */
 export const deleteRoute = onCall(
@@ -141,6 +149,110 @@ export const deleteRoute = onCall(
       return { ok: true, message: `Rota ${routeId} removida com sucesso.` };
     } catch (error: any) {
       const msg = error.message || "Falha ao remover a rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
+/* ========== updateRouteName (callable) ========== */
+export const updateRouteName = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const name = String(d.name || "").trim();
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    if (!name) {
+      throw new HttpsError("invalid-argument", "Nome da rota é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("routes").doc(routeId).update({ name });
+      return { ok: true, message: `Nome da rota atualizado com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao atualizar o nome da rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
+/* ========== updateRouteDriver (callable) ========== */
+export const updateRouteDriver = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const driverId = String(d.driverId || "").trim();
+    const driverInfo = d.driverInfo || null;
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    if (!driverId) {
+      throw new HttpsError("invalid-argument", "ID do motorista é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("routes").doc(routeId).update({
+        driverId,
+        driverInfo
+      });
+      return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao atualizar o motorista da rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
+/* ========== duplicateRoute (callable) ========== */
+export const duplicateRoute = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      const originalRouteRef = db.collection("routes").doc(routeId);
+      const originalRouteSnap = await originalRouteRef.get();
+
+      if (!originalRouteSnap.exists) {
+        throw new HttpsError("not-found", "Rota original não encontrada.");
+      }
+
+      const originalData = originalRouteSnap.data()!;
+      
+      const duplicatedData = {
+        ...originalData,
+        name: `Cópia de ${originalData.name}`,
+        status: 'dispatched',
+        plannedDate: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        driverId: null,
+        driverInfo: null,
+        startedAt: null,
+        completedAt: null,
+        currentLocation: null,
+        currentStopIndex: null,
+      };
+
+      const newRouteRef = await db.collection("routes").add(duplicatedData);
+      
+      return { ok: true, newRouteId: newRouteRef.id, message: `Rota duplicada com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao duplicar a rota.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
   }

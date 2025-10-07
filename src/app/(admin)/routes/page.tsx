@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -39,7 +39,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { db, functions } from '@/lib/firebase/client';
-import { collection, onSnapshot, query, orderBy, Timestamp, doc, updateDoc, where, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, Timestamp, doc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import type { RouteInfo, Driver } from '@/lib/types';
 import { format } from 'date-fns';
@@ -91,6 +91,7 @@ export default function RoutesPage() {
   const [newRouteName, setNewRouteName] = React.useState<string>('');
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [isDuplicating, setIsDuplicating] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const { toast } = useToast();
 
@@ -172,8 +173,10 @@ export default function RoutesPage() {
 
     try {
       const driver = availableDrivers.find(d => d.id === newDriverId);
+      const updateRouteDriverFn = httpsCallable(functions, 'updateRouteDriver');
 
-      await updateDoc(doc(db, 'routes', routeToModify.id), {
+      await updateRouteDriverFn({
+        routeId: routeToModify.id,
         driverId: newDriverId,
         driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
       });
@@ -186,12 +189,12 @@ export default function RoutesPage() {
       setIsChangeDriverDialogOpen(false);
       setRouteToModify(null);
       setNewDriverId('');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating driver:', error);
       toast({
         variant: 'destructive',
         title: 'Erro ao Alterar Motorista',
-        description: 'Não foi possível atualizar o motorista da rota.',
+        description: error.message || 'Não foi possível atualizar o motorista da rota.',
       });
     } finally {
       setIsUpdating(false);
@@ -238,9 +241,8 @@ export default function RoutesPage() {
     setIsUpdating(true);
 
     try {
-      await updateDoc(doc(db, 'routes', routeToModify.id), {
-        name: newRouteName.trim(),
-      });
+      const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
+      await updateRouteNameFn({ routeId: routeToModify.id, name: newRouteName.trim() });
 
       toast({
         title: 'Nome da Rota Atualizado!',
@@ -250,15 +252,36 @@ export default function RoutesPage() {
       setIsEditNameDialogOpen(false);
       setRouteToModify(null);
       setNewRouteName('');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating route name:', error);
       toast({
         variant: 'destructive',
         title: 'Erro ao Atualizar Nome',
-        description: 'Não foi possível alterar o nome da rota.',
+        description: error.message || 'Não foi possível alterar o nome da rota.',
       });
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleDuplicateRoute = async (route: RouteDocument) => {
+    setIsDuplicating(true);
+    try {
+      const duplicateRouteFn = httpsCallable(functions, 'duplicateRoute');
+      await duplicateRouteFn({ routeId: route.id });
+      toast({
+        title: 'Rota Duplicada!',
+        description: `Uma cópia da rota "${route.name}" foi criada com sucesso.`,
+      });
+    } catch (error: any) {
+      console.error('Error duplicating route:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Duplicar',
+        description: error.message || 'Não foi possível duplicar a rota.',
+      });
+    } finally {
+      setIsDuplicating(false);
     }
   };
 
@@ -309,6 +332,10 @@ export default function RoutesPage() {
                     </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
+                            <Copy className="mr-2 h-4 w-4" />
+                            <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
                           <Pencil className="mr-2 h-4 w-4" />
                           <span>Editar Nome</span>

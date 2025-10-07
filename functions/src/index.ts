@@ -154,6 +154,64 @@ export const deleteRoute = onCall(
   }
 );
 
+/* ========== updateRouteName (callable) ========== */
+export const updateRouteName = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const name = String(d.name || "").trim();
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    if (!name) {
+      throw new HttpsError("invalid-argument", "Nome da rota é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("routes").doc(routeId).update({ name });
+      return { ok: true, message: `Nome da rota atualizado com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao atualizar o nome da rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
+/* ========== updateRouteDriver (callable) ========== */
+export const updateRouteDriver = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const driverId = String(d.driverId || "").trim();
+    const driverInfo = d.driverInfo || null;
+
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+
+    if (!driverId) {
+      throw new HttpsError("invalid-argument", "ID do motorista é obrigatório");
+    }
+
+    try {
+      const db = getFirestore();
+      await db.collection("routes").doc(routeId).update({
+        driverId,
+        driverInfo
+      });
+      return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao atualizar o motorista da rota.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
 
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")
