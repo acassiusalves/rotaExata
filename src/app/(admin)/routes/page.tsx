@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2 } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -35,6 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { db, functions } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, orderBy, Timestamp, doc, updateDoc, where, deleteDoc } from 'firebase/firestore';
@@ -83,8 +85,10 @@ export default function RoutesPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [isChangeDriverDialogOpen, setIsChangeDriverDialogOpen] = React.useState(false);
+  const [isEditNameDialogOpen, setIsEditNameDialogOpen] = React.useState(false);
   const [routeToModify, setRouteToModify] = React.useState<RouteDocument | null>(null);
   const [newDriverId, setNewDriverId] = React.useState<string>('');
+  const [newRouteName, setNewRouteName] = React.useState<string>('');
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
@@ -145,6 +149,12 @@ export default function RoutesPage() {
   const handleOpenDeleteDialog = (route: RouteDocument) => {
     setRouteToModify(route);
     setIsDeleteDialogOpen(true);
+  };
+  
+  const handleOpenEditNameDialog = (route: RouteDocument) => {
+    setRouteToModify(route);
+    setNewRouteName(route.name);
+    setIsEditNameDialogOpen(true);
   };
 
 
@@ -215,6 +225,43 @@ export default function RoutesPage() {
     }
   };
 
+  const handleUpdateRouteName = async () => {
+    if (!routeToModify || !newRouteName.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Nome inválido',
+        description: 'Por favor, insira um nome para a rota.',
+      });
+      return;
+    }
+
+    setIsUpdating(true);
+
+    try {
+      await updateDoc(doc(db, 'routes', routeToModify.id), {
+        name: newRouteName.trim(),
+      });
+
+      toast({
+        title: 'Nome da Rota Atualizado!',
+        description: `O nome da rota foi alterado para "${newRouteName.trim()}".`,
+      });
+
+      setIsEditNameDialogOpen(false);
+      setRouteToModify(null);
+      setNewRouteName('');
+    } catch (error) {
+      console.error('Error updating route name:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Atualizar Nome',
+        description: 'Não foi possível alterar o nome da rota.',
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
 
   if (isLoading) {
       return (
@@ -262,6 +309,10 @@ export default function RoutesPage() {
                     </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          <span>Editar Nome</span>
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
                             <UserCog className="mr-2 h-4 w-4" />
                             <span>Trocar Motorista</span>
@@ -397,6 +448,46 @@ export default function RoutesPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
         </AlertDialog>
+
+        {/* Edit Name Dialog */}
+      <Dialog open={isEditNameDialogOpen} onOpenChange={setIsEditNameDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Nome da Rota</DialogTitle>
+            <DialogDescription>
+              Insira um novo nome para a rota "{routeToModify?.name}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="routeName">Novo nome</Label>
+              <Input
+                id="routeName"
+                value={newRouteName}
+                onChange={(e) => setNewRouteName(e.target.value)}
+                placeholder="Ex: Entregas da Manhã"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditNameDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleUpdateRouteName} disabled={isUpdating || !newRouteName.trim()}>
+              {isUpdating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                'Salvar Nome'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
+
+    

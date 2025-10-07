@@ -1,7 +1,7 @@
 
 "use client";
 
-import { Home } from 'lucide-react';
+import { Home, Trash2, Info, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { PlaceValue } from '@/lib/types';
 import {
@@ -10,22 +10,35 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 interface SortableStopProps {
   stop: PlaceValue;
   index: number;
+  originalIndex?: number; // Original position number to display
   routeKey: string;
   color?: string;
   onStopClick?: (stop: PlaceValue, index: number) => void;
+  onRemoveFromRoute?: (stop: PlaceValue, index: number) => void;
+  onDeleteStop?: (stop: PlaceValue, index: number) => void;
+  onShowInfo?: (stop: PlaceValue, index: number) => void;
   dragDelay?: number; // ms (mesmo do PointerSensor)
 }
 
 function SortableStop({
   stop,
   index,
+  originalIndex,
   routeKey,
   color,
   onStopClick,
+  onRemoveFromRoute,
+  onDeleteStop,
+  onShowInfo,
   dragDelay = 200,
 }: SortableStopProps) {
   const {
@@ -45,36 +58,106 @@ function SortableStop({
   };
 
   const pressStart = React.useRef<number>(0);
+  const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
 
   const isManual = stop.isManuallyAdded;
-  const buttonBgColor = isManual ? 'bg-green-100' : 'bg-gray-100';
-  const buttonTextColor = isManual ? 'text-green-700' : 'text-gray-700';
-  const buttonBorderColor = isManual ? 'border-green-300' : 'border-gray-300';
+
+  // Check if this specific stop was moved by the user
+  const wasMoved = (stop as any)._wasMoved === true;
+
+  // Apply different styles based on status
+  let buttonBgColor, buttonTextColor, buttonBorderColor;
+
+  if (wasMoved) {
+    // Yellow/amber highlight for moved stops
+    buttonBgColor = 'bg-amber-100';
+    buttonTextColor = 'text-amber-900';
+    buttonBorderColor = 'border-amber-400 border-2';
+  } else if (isManual) {
+    buttonBgColor = 'bg-green-100';
+    buttonTextColor = 'text-green-700';
+    buttonBorderColor = 'border-green-300';
+  } else {
+    buttonBgColor = 'bg-gray-100';
+    buttonTextColor = 'text-gray-700';
+    buttonBorderColor = 'border-gray-300';
+  }
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} className="flex items-center">
+    <div ref={setNodeRef} style={style} {...attributes} className="flex items-center relative">
       <div className="h-1 w-3" style={{ backgroundColor: color }} />
-      <button
-        type="button"
-        // dnd listeners (com activationConstraint no DndContext)
-        {...sortableListeners}
-        onPointerDown={(e) => {
-          pressStart.current = performance.now();
-          sortableListeners?.onPointerDown?.(e as any);
-        }}
-        onClick={(e) => {
-          const dt = performance.now() - pressStart.current;
-          if (dt < dragDelay + 50) {
-            // clique curto -> abre InfoWindow no mapa
-            onStopClick?.(stop, index);
-          }
-        }}
-        className={`flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs font-semibold active:cursor-grabbing`}
-        style={{ touchAction: "none" }}
-        title={`Parada ${index + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}`}
-      >
-        {index + 1}
-      </button>
+      <Popover open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+        <PopoverTrigger asChild onClick={(e) => e.preventDefault()}>
+          <button
+            ref={buttonRef}
+            type="button"
+            // dnd listeners (com activationConstraint no DndContext)
+            {...sortableListeners}
+            onPointerDown={(e) => {
+              pressStart.current = performance.now();
+              sortableListeners?.onPointerDown?.(e as any);
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const dt = performance.now() - pressStart.current;
+              if (dt < dragDelay + 50) {
+                // clique curto -> abre InfoWindow no mapa
+                onStopClick?.(stop, index);
+              }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenuOpen(true);
+            }}
+            className={`flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs ${wasMoved ? 'font-extrabold' : 'font-semibold'} active:cursor-grabbing`}
+            style={{ touchAction: "none" }}
+            title={`Parada ${(originalIndex ?? index) + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}${wasMoved ? " (Posição alterada)" : ""}`}
+          >
+            {(originalIndex ?? index) + 1}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          side="bottom"
+          className="w-56 p-1"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <div className="flex flex-col">
+            <button
+              onClick={() => {
+                onRemoveFromRoute?.(stop, index);
+                setContextMenuOpen(false);
+              }}
+              className="flex items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Remover da Rota
+            </button>
+            <button
+              onClick={() => {
+                onDeleteStop?.(stop, index);
+                setContextMenuOpen(false);
+              }}
+              className="flex items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Excluir o Ponto
+            </button>
+            <button
+              onClick={() => {
+                onShowInfo?.(stop, index);
+                setContextMenuOpen(false);
+              }}
+              className="flex items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer"
+            >
+              <Info className="mr-2 h-4 w-4" />
+              Informações do Serviço
+            </button>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -82,17 +165,25 @@ function SortableStop({
 
 interface RouteTimelineProps {
   stops: PlaceValue[];
+  originalStops?: PlaceValue[]; // Original order to show original numbers
   color?: string;
   routeKey: string;
   onStopClick?: (stop: PlaceValue, index: number) => void;
+  onRemoveFromRoute?: (stop: PlaceValue, index: number) => void;
+  onDeleteStop?: (stop: PlaceValue, index: number) => void;
+  onShowInfo?: (stop: PlaceValue, index: number) => void;
   dragDelay?: number;
 }
 
 export function RouteTimeline({
   stops,
+  originalStops,
   color = '#888888',
   routeKey,
   onStopClick,
+  onRemoveFromRoute,
+  onDeleteStop,
+  onShowInfo,
   dragDelay = 200,
 }: RouteTimelineProps) {
   if (stops.length === 0) {
@@ -112,17 +203,33 @@ export function RouteTimeline({
         </div>
 
         {/* Stops */}
-        {stops.map((stop, index) => (
-          <SortableStop
-            key={stopIds[index]}
-            stop={stop}
-            index={index}
-            routeKey={routeKey}
-            color={color}
-            onStopClick={onStopClick}
-            dragDelay={dragDelay}
-          />
-        ))}
+        {stops.map((stop, index) => {
+          // Use _originalIndex if available (stored in stop), otherwise find in originalStops
+          let originalIndex: number | undefined = (stop as any)._originalIndex;
+
+          if (originalIndex === undefined && originalStops) {
+            const foundIndex = originalStops.findIndex(
+              s => String(s.id ?? s.placeId) === String(stop.id ?? stop.placeId)
+            );
+            originalIndex = foundIndex >= 0 ? foundIndex : undefined;
+          }
+
+          return (
+            <SortableStop
+              key={stopIds[index]}
+              stop={stop}
+              index={index}
+              originalIndex={originalIndex}
+              routeKey={routeKey}
+              color={color}
+              onStopClick={onStopClick}
+              onRemoveFromRoute={onRemoveFromRoute}
+              onDeleteStop={onDeleteStop}
+              onShowInfo={onShowInfo}
+              dragDelay={dragDelay}
+            />
+          );
+        })}
       </div>
     </SortableContext>
   );

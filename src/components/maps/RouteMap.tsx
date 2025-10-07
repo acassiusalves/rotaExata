@@ -9,9 +9,16 @@ export type RouteMapHandle = {
 };
 
 // Função para gerar o conteúdo HTML do InfoWindow
-const createInfoWindowContent = (stop: PlaceValue, index?: number): string => {
+const createInfoWindowContent = (
+  stop: PlaceValue,
+  index?: number,
+  onRemove?: () => void,
+  onEdit?: () => void
+): string => {
   const address = stop.address || stop.addressString || '--';
   const title = index !== undefined ? `Parada ${index + 1}` : 'Serviço Avulso';
+  const stopId = String(stop.id ?? stop.placeId ?? index);
+
   return `
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
       <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">${title}</h4>
@@ -34,6 +41,27 @@ const createInfoWindowContent = (stop: PlaceValue, index?: number): string => {
         <span style="color: #666; align-self: start;">Obs:</span>
         <p style="margin: 0; word-break: break-word; font-style: italic;">${stop.notes || '--'}</p>
       </div>
+
+      <div style="display: flex; justify-content: space-between; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+        <button
+          data-action="remove"
+          data-stop-id="${stopId}"
+          style="padding: 0; background: none; border: none; color: #ef4444; cursor: pointer; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;"
+          onmouseover="this.style.textDecoration='underline'"
+          onmouseout="this.style.textDecoration='none'"
+        >
+          Remover da Rota
+        </button>
+        <button
+          data-action="edit"
+          data-stop-id="${stopId}"
+          style="padding: 0; background: none; border: none; color: #3b82f6; cursor: pointer; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;"
+          onmouseover="this.style.textDecoration='underline'"
+          onmouseout="this.style.textDecoration='none'"
+        >
+          Editar
+        </button>
+      </div>
     </div>
   `;
 };
@@ -46,10 +74,12 @@ type Props = {
   height?: number;
   driverLocation?: { lat: number; lng: number; heading?: number };
   driverLocations?: DriverLocation[];
+  onRemoveStop?: (stopId: string) => void;
+  onEditStop?: (stopId: string) => void;
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -136,7 +166,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     const addStop = (stop: PlaceValue, index?: number, color?: string, isUnassigned = false) => {
       if (!stop.lat || !stop.lng) return;
       const sid = String(stop.id ?? stop.placeId ?? index);
-      
+
       const pinElement = isUnassigned
         ? new google.maps.marker.PinElement({ background: '#000000', borderColor: '#FFFFFF', glyph: '' })
         : new google.maps.marker.PinElement({
@@ -153,6 +183,30 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         title: `Parada ${index !== undefined ? index + 1 : 'Avulsa'}: ${stop.customerName ?? ""}`,
       });
       const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
+
+      // Add event listeners for InfoWindow buttons
+      google.maps.event.addListener(info, 'domready', () => {
+        const removeBtn = document.querySelector(`[data-action="remove"][data-stop-id="${sid}"]`);
+        const editBtn = document.querySelector(`[data-action="edit"][data-stop-id="${sid}"]`);
+
+        if (removeBtn) {
+          removeBtn.addEventListener('click', () => {
+            info.close();
+            if (onRemoveStop) {
+              onRemoveStop(sid);
+            }
+          });
+        }
+
+        if (editBtn) {
+          editBtn.addEventListener('click', () => {
+            info.close();
+            if (onEditStop) {
+              onEditStop(sid);
+            }
+          });
+        }
+      });
 
       marker.addListener("click", () => {
         activeInfoWindowRef.current?.close();
@@ -196,7 +250,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         map.fitBounds(bounds, 100); // 100px padding
     }
 
-  }, [origin, stops, routes, unassignedStops]);
+  }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop]);
 
   // Update driver location marker (single)
   React.useEffect(() => {

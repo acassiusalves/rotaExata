@@ -85,6 +85,7 @@ import {
   DragStartEvent,
   DragOverlay,
   defaultDropAnimationSideEffects,
+  useDraggable,
 } from '@dnd-kit/core';
 import type { DropAnimation } from '@dnd-kit/core';
 import {
@@ -245,6 +246,42 @@ const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
   return clusters.filter(c => c.length > 0);
 };
 
+const UnassignedStopItem: React.FC<{
+  stop: PlaceValue;
+  index: number;
+  onOpenInfo: (stopId: string) => void;
+}> = ({ stop, index, onOpenInfo }) => {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `unassigned-${stop.id ?? stop.placeId ?? index}`,
+    data: { routeKey: 'unassigned', index, stop },
+  });
+
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className="text-left text-sm p-2 rounded-md hover:bg-muted border border-dashed border-gray-300 cursor-grab active:cursor-grabbing"
+      onClick={(e) => {
+        if (!isDragging) {
+          onOpenInfo(String(stop.id));
+        }
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <div className="h-2 w-2 rounded-full bg-black" />
+        <span className="flex-1 truncate">{stop.customerName || stop.address}</span>
+      </div>
+    </div>
+  );
+};
+
 const EditableRouteName: React.FC<{
   name: string;
   onChange: (newName: string) => void;
@@ -319,6 +356,12 @@ export default function OrganizeRoutePage() {
   const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
 
+  // State for pending edits (reordering within same route)
+  const [pendingEdits, setPendingEdits] = React.useState<{
+    A: PlaceValue[] | null;
+    B: PlaceValue[] | null;
+  }>({ A: null, B: null });
+
 
   // State for Add Service Dialog
   const [isAddServiceDialogOpen, setIsAddServiceDialogOpen] = React.useState(false);
@@ -335,6 +378,10 @@ export default function OrganizeRoutePage() {
     cidade: '',
     notes: '',
   });
+
+  // State for Stop Info Dialog
+  const [isStopInfoDialogOpen, setIsStopInfoDialogOpen] = React.useState(false);
+  const [selectedStopInfo, setSelectedStopInfo] = React.useState<PlaceValue | null>(null);
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
@@ -668,32 +715,94 @@ export default function OrganizeRoutePage() {
       return;
     }
 
-    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B';
+    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B' | 'unassigned';
     const overRouteKey = over.data.current?.routeKey as 'A' | 'B';
 
-    if (!activeRouteKey || !overRouteKey) {
+    // Case: Moving from unassigned to a route
+    if (activeRouteKey === 'unassigned' && (overRouteKey === 'A' || overRouteKey === 'B')) {
+      if (!routeData) return;
+
+      const targetRoute = overRouteKey === 'A' ? routeA : routeB;
+      const setter = overRouteKey === 'A' ? setRouteA : setRouteB;
+      const stopToMove = active.data.current?.stop as PlaceValue;
+
+      if (!stopToMove) return;
+
+      // Remove from unassigned by matching the stop ID
+      const stopId = String(stopToMove.id ?? stopToMove.placeId);
+      setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
+
+      // Add to target route
+      const newTargetStops = targetRoute ? [...targetRoute.stops, stopToMove] : [stopToMove];
+
+      setter(prev => prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null);
+
+      // Recalculate route
+      const newRouteInfo = await computeRoute(routeData.origin, newTargetStops);
+      if (newRouteInfo) {
+        setter(prev => prev ? {
+          ...prev,
+          ...newRouteInfo,
+          stops: newTargetStops,
+          color: targetRoute?.color || (overRouteKey === 'A' ? '#F44336' : '#FF9800'),
+          visible: targetRoute?.visible ?? true
+        } : {
+          ...newRouteInfo,
+          stops: newTargetStops,
+          color: overRouteKey === 'A' ? '#F44336' : '#FF9800',
+          visible: true
+        });
+      }
+
+      toast({
+        title: 'Serviço adicionado!',
+        description: `O serviço foi adicionado à ${routeNames[overRouteKey]}.`,
+      });
+
+      return;
+    }
+
+    if (!activeRouteKey || !overRouteKey || activeRouteKey === 'unassigned') {
         return;
     }
 
-    // Case 1: Moving within the same route
+    // Case 1: Moving within the same route - save as pending edit
     if (activeRouteKey === overRouteKey) {
       const currentRoute = activeRouteKey === 'A' ? routeA : routeB;
-      const setter = activeRouteKey === 'A' ? setRouteA : setRouteB;
       if (!currentRoute || !routeData) return;
 
       const oldIndex = active.data.current?.index as number;
       const newIndex = over.data.current?.index as number;
 
-      const newStops = arrayMove(currentRoute.stops, oldIndex, newIndex);
+      // Check if there's already a pending edit, if so use that, otherwise use current route
+      const currentPending = pendingEdits[activeRouteKey];
+      const stopsToReorder = currentPending || currentRoute.stops.map((stop, idx) => ({
+        ...stop,
+        _originalIndex: idx // Store original index
+      }));
 
-      // Update state optimistically
-      setter((prev) => (prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null));
+      const newStops = arrayMove(stopsToReorder, oldIndex, newIndex);
 
-      // Recalculate route
-      const newRouteInfo = await computeRoute(routeData.origin, newStops);
-      if (newRouteInfo) {
-        setter((prev) => (prev ? { ...prev, ...newRouteInfo, stops: newStops } : null));
-      }
+      // Mark the moved stop with _wasMoved flag
+      const stopId = String(newStops[newIndex].id ?? newStops[newIndex].placeId);
+      const updatedStops = newStops.map(stop => {
+        const currentStopId = String(stop.id ?? stop.placeId);
+        if (currentStopId === stopId) {
+          return { ...stop, _wasMoved: true };
+        }
+        return stop;
+      });
+
+      // Save as pending edit (don't recalculate route yet)
+      setPendingEdits(prev => ({
+        ...prev,
+        [activeRouteKey]: updatedStops
+      }));
+
+      toast({
+        title: 'Edição pendente',
+        description: 'Clique em "Editar" para aplicar as alterações.',
+      });
     }
     // Case 2: Moving between different routes
     else {
@@ -871,6 +980,171 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const handleRemoveStop = async (stopId: string) => {
+    if (!routeData) return;
+
+    // Find which route contains this stop
+    let targetRoute: RouteInfo | null = null;
+    let routeKey: 'A' | 'B' | null = null;
+    let setter: React.Dispatch<React.SetStateAction<RouteInfo | null>> | null = null;
+
+    if (routeA?.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
+      targetRoute = routeA;
+      routeKey = 'A';
+      setter = setRouteA;
+    } else if (routeB?.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
+      targetRoute = routeB;
+      routeKey = 'B';
+      setter = setRouteB;
+    } else if (unassignedStops.some(s => String(s.id ?? s.placeId) === stopId)) {
+      // Remove from unassigned stops
+      setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
+      toast({ title: 'Parada removida!', description: 'A parada foi removida dos serviços não alocados.' });
+      return;
+    }
+
+    if (!targetRoute || !setter || !routeKey) return;
+
+    // Remove the stop from the route
+    const newStops = targetRoute.stops.filter(s => String(s.id ?? s.placeId) !== stopId);
+
+    if (newStops.length === 0) {
+      // If no stops left, clear the route
+      setter({
+        ...targetRoute,
+        stops: [],
+        encodedPolyline: '',
+        distanceMeters: 0,
+        duration: '0s'
+      });
+      toast({ title: 'Parada removida!', description: `A última parada da ${routeNames[routeKey]} foi removida.` });
+    } else {
+      // Recalculate route with remaining stops
+      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      const newRouteInfo = await computeRoute(routeData.origin, newStops);
+      if (newRouteInfo) {
+        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+      }
+      toast({ title: 'Parada removida!', description: `A parada foi removida da ${routeNames[routeKey]}.` });
+    }
+  };
+
+  const handleEditStop = (stopId: string) => {
+    // For now, just show a toast. You can implement edit functionality later
+    toast({
+      title: 'Editar parada',
+      description: `Funcionalidade de edição será implementada em breve. ID: ${stopId}`,
+    });
+  };
+
+  const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
+    if (!routeData) return;
+
+    const targetRoute = routeKey === 'A' ? routeA : routeB;
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+
+    if (!targetRoute) return;
+
+    // Remove the stop from the route and add to unassigned
+    const newStops = targetRoute.stops.filter((_, i) => i !== index);
+    setUnassignedStops(prev => [...prev, stop]);
+
+    if (newStops.length === 0) {
+      // If no stops left, clear the route
+      setter({
+        ...targetRoute,
+        stops: [],
+        encodedPolyline: '',
+        distanceMeters: 0,
+        duration: '0s'
+      });
+      toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
+    } else {
+      // Recalculate route with remaining stops
+      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      const newRouteInfo = await computeRoute(routeData.origin, newStops);
+      if (newRouteInfo) {
+        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+      }
+      toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
+    }
+  };
+
+  const handleDeleteStopFromTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
+    if (!routeData) return;
+
+    const targetRoute = routeKey === 'A' ? routeA : routeB;
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+
+    if (!targetRoute) return;
+
+    // Delete the stop completely from the route
+    const newStops = targetRoute.stops.filter((_, i) => i !== index);
+
+    if (newStops.length === 0) {
+      // If no stops left, clear the route
+      setter({
+        ...targetRoute,
+        stops: [],
+        encodedPolyline: '',
+        distanceMeters: 0,
+        duration: '0s'
+      });
+      toast({ title: 'Ponto excluído!', description: `O ponto foi excluído permanentemente.` });
+    } else {
+      // Recalculate route with remaining stops
+      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      const newRouteInfo = await computeRoute(routeData.origin, newStops);
+      if (newRouteInfo) {
+        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+      }
+      toast({ title: 'Ponto excluído!', description: `O ponto foi excluído permanentemente.` });
+    }
+  };
+
+  const handleShowStopInfo = (stop: PlaceValue, index: number) => {
+    setSelectedStopInfo(stop);
+    setIsStopInfoDialogOpen(true);
+  };
+
+  const handleApplyPendingEdits = async (routeKey: 'A' | 'B') => {
+    if (!routeData) return;
+
+    const pendingStops = pendingEdits[routeKey];
+    if (!pendingStops) return;
+
+    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+    const currentRoute = routeKey === 'A' ? routeA : routeB;
+
+    if (!currentRoute) return;
+
+    // Clean stops - remove _originalIndex property
+    const cleanedStops = pendingStops.map(({ _originalIndex, ...stop }: any) => stop);
+
+    // Update state with pending stops
+    setter((prev) => (prev ? { ...prev, stops: cleanedStops, encodedPolyline: '' } : null));
+
+    // Recalculate route
+    const newRouteInfo = await computeRoute(routeData.origin, cleanedStops);
+    if (newRouteInfo) {
+      setter((prev) => (prev ? {
+        ...prev,
+        ...newRouteInfo,
+        stops: cleanedStops,
+        color: currentRoute.color,
+        visible: currentRoute.visible
+      } : null));
+    }
+
+    // Clear pending edits
+    setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
+
+    toast({
+      title: 'Edições aplicadas!',
+      description: `A ${routeNames[routeKey]} foi atualizada com sucesso.`,
+    });
+  };
+
   React.useEffect(() => {
     // If all routes have been dispatched, redirect
     if (!isLoading && !routeA && !routeB) {
@@ -920,7 +1194,15 @@ export default function OrganizeRoutePage() {
     <>
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
       <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}vh` }}>
-        <RouteMap ref={mapApiRef} height={-1} routes={combinedRoutes} origin={origin} unassignedStops={unassignedStops} />
+        <RouteMap
+          ref={mapApiRef}
+          height={-1}
+          routes={combinedRoutes}
+          origin={origin}
+          unassignedStops={unassignedStops}
+          onRemoveStop={handleRemoveStop}
+          onEditStop={handleEditStop}
+        />
       </div>
 
       {/* Resize Handle */}
@@ -937,6 +1219,7 @@ export default function OrganizeRoutePage() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto bg-background">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <Tabs defaultValue="organize" className="w-full">
           <CardHeader className="p-4 pb-0">
             <div className="flex items-start justify-between">
@@ -957,7 +1240,7 @@ export default function OrganizeRoutePage() {
                                 </span>
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-80">
+                        <PopoverContent className="w-80" onOpenAutoFocus={(e) => e.preventDefault()}>
                             <div className="grid gap-4">
                                 <div className="space-y-2">
                                 <h4 className="font-medium leading-none">Serviços não alocados</h4>
@@ -965,15 +1248,14 @@ export default function OrganizeRoutePage() {
                                     Arraste estes serviços para uma das rotas abaixo.
                                 </p>
                                 </div>
-                                <div className="grid gap-2">
+                                <div className="grid gap-2" style={{ pointerEvents: 'auto' }}>
                                 {unassignedStops.map((stop, index) => (
-                                    <button
-                                        key={stop.id || index}
-                                        onClick={() => mapApiRef.current?.openStopInfo(String(stop.id))}
-                                        className="text-left text-sm p-2 rounded-md hover:bg-muted"
-                                    >
-                                        {stop.address}
-                                    </button>
+                                    <UnassignedStopItem
+                                        key={`unassigned-${stop.id ?? stop.placeId ?? index}-${index}`}
+                                        stop={stop}
+                                        index={index}
+                                        onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
+                                    />
                                 ))}
                                 </div>
                             </div>
@@ -1022,7 +1304,6 @@ export default function OrganizeRoutePage() {
                     </div>
                   ) : (
                     routesForTable.length > 0 ? (
-                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                             <Table>
                             <TableHeader>
                                 <TableRow>
@@ -1059,58 +1340,61 @@ export default function OrganizeRoutePage() {
                                     <TableCell>
                                         <RouteTimeline
                                         routeKey={routeItem.key}
-                                        stops={routeItem.data.stops}
+                                        stops={pendingEdits[routeItem.key] || routeItem.data.stops}
+                                        originalStops={pendingEdits[routeItem.key] ? routeItem.data.stops : undefined}
                                         color={routeItem.data.color}
                                         dragDelay={DRAG_DELAY}
                                         onStopClick={(stop) => {
                                             const id = String(stop.id ?? stop.placeId ?? "");
                                             if (id) mapApiRef.current?.openStopInfo(id);
                                         }}
+                                        onRemoveFromRoute={(stop, index) => handleRemoveFromRouteTimeline(stop, index, routeItem.key)}
+                                        onDeleteStop={(stop, index) => handleDeleteStopFromTimeline(stop, index, routeItem.key)}
+                                        onShowInfo={handleShowStopInfo}
                                         />
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            onClick={() => handleOptimizeSingleRoute(routeItem.key)}
-                                            disabled={isOptimizing[routeItem.key]}
-                                        >
-                                            {isOptimizing[routeItem.key] ? (
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <Wand2 className="mr-2 h-4 w-4" />
-                                            )}
-                                            Otimizar
-                                        </Button>
+                                        {pendingEdits[routeItem.key] ? (
+                                            <div className="flex gap-2 justify-end">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setPendingEdits(prev => ({ ...prev, [routeItem.key]: null }));
+                                                        toast({ title: 'Edições canceladas' });
+                                                    }}
+                                                >
+                                                    Cancelar
+                                                </Button>
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    onClick={() => handleApplyPendingEdits(routeItem.key)}
+                                                >
+                                                    <Check className="mr-2 h-4 w-4" />
+                                                    Editar ({pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length})
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleOptimizeSingleRoute(routeItem.key)}
+                                                disabled={isOptimizing[routeItem.key]}
+                                            >
+                                                {isOptimizing[routeItem.key] ? (
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Wand2 className="mr-2 h-4 w-4" />
+                                                )}
+                                                Otimizar
+                                            </Button>
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             ))}
                             </TableBody>
                         </Table>
-                        <DragOverlay
-                          dropAnimation={{
-                            sideEffects: defaultDropAnimationSideEffects({
-                              styles: {
-                                active: {
-                                  opacity: '0.5',
-                                },
-                              },
-                            }),
-                          }}
-                        >
-                          {activeId && activeStop && activeIndex !== null ? (
-                            <div
-                              className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
-                                activeStop.isManuallyAdded
-                                  ? 'border-green-300 bg-green-100 text-green-700'
-                                  : 'border-gray-300 bg-gray-100 text-gray-700'
-                              }`}
-                            >
-                              {activeIndex + 1}
-                            </div>
-                          ) : null}
-                        </DragOverlay>
-                        </DndContext>
                      ) : (
                         <div className="flex h-48 items-center justify-center text-muted-foreground">
                             Nenhuma rota pendente para organizar.
@@ -1118,6 +1402,29 @@ export default function OrganizeRoutePage() {
                      )
                   )}
                 </div>
+                <DragOverlay
+                  dropAnimation={{
+                    sideEffects: defaultDropAnimationSideEffects({
+                      styles: {
+                        active: {
+                          opacity: '0.5',
+                        },
+                      },
+                    }),
+                  }}
+                >
+                  {activeId && activeStop && activeIndex !== null ? (
+                    <div
+                      className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
+                        activeStop.isManuallyAdded
+                          ? 'border-green-300 bg-green-100 text-green-700'
+                          : 'border-gray-300 bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {activeIndex + 1}
+                    </div>
+                  ) : null}
+                </DragOverlay>
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
@@ -1220,6 +1527,7 @@ export default function OrganizeRoutePage() {
             </TabsContent>
           </CardContent>
         </Tabs>
+        </DndContext>
       </div>
     </div>
     <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
@@ -1298,6 +1606,61 @@ export default function OrganizeRoutePage() {
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
             <Button onClick={handleAddService}>Salvar Serviço</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stop Info Dialog */}
+      <Dialog open={isStopInfoDialogOpen} onOpenChange={setIsStopInfoDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Informações do Serviço</DialogTitle>
+            <DialogDescription>
+              Detalhes completos da parada
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-3 items-center gap-4">
+              <span className="font-medium text-muted-foreground">Cliente:</span>
+              <span className="col-span-2">{selectedStopInfo?.customerName || '--'}</span>
+            </div>
+            <div className="grid grid-cols-3 items-center gap-4">
+              <span className="font-medium text-muted-foreground">Pedido Nº:</span>
+              <span className="col-span-2">{selectedStopInfo?.orderNumber || '--'}</span>
+            </div>
+            <div className="grid grid-cols-3 items-center gap-4">
+              <span className="font-medium text-muted-foreground">Telefone:</span>
+              <span className="col-span-2">{selectedStopInfo?.phone || '--'}</span>
+            </div>
+            <div className="grid grid-cols-3 items-center gap-4">
+              <span className="font-medium text-muted-foreground">Janela:</span>
+              <span className="col-span-2">
+                {selectedStopInfo?.timeWindowStart && selectedStopInfo?.timeWindowEnd
+                  ? `${selectedStopInfo.timeWindowStart} - ${selectedStopInfo.timeWindowEnd}`
+                  : '--'}
+              </span>
+            </div>
+            <Separator />
+            <div className="grid grid-cols-3 items-start gap-4">
+              <span className="font-medium text-muted-foreground">Endereço:</span>
+              <p className="col-span-2 text-sm">{selectedStopInfo?.address || '--'}</p>
+            </div>
+            {selectedStopInfo?.complemento && (
+              <div className="grid grid-cols-3 items-start gap-4">
+                <span className="font-medium text-muted-foreground">Complemento:</span>
+                <p className="col-span-2 text-sm">{selectedStopInfo.complemento}</p>
+              </div>
+            )}
+            <Separator />
+            <div className="grid grid-cols-3 items-start gap-4">
+              <span className="font-medium text-muted-foreground">Observações:</span>
+              <p className="col-span-2 text-sm italic">{selectedStopInfo?.notes || '--'}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Fechar</Button>
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
