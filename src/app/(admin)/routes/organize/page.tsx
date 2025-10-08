@@ -109,6 +109,13 @@ interface RouteData {
   stops: PlaceValue[];
   routeDate: string;
   routeTime: string;
+  isExistingRoute?: boolean;
+  existingRouteData?: {
+    distanceMeters: number;
+    duration: string;
+    encodedPolyline: string;
+    color: string;
+  };
 }
 
 const computeRoute = async (
@@ -480,32 +487,47 @@ export default function OrganizeRoutePage() {
       setRouteData(parsedData);
 
       const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
-      
-      const clusters = kMeansCluster(allStops, 2);
-      const stopsA = clusters[0] || [];
-      const stopsB = clusters[1] || [];
 
-
-      const calculateRoutes = async () => {
+      // Se for uma rota existente, não dividir - apenas mostrar como está
+      if (parsedData.isExistingRoute && parsedData.existingRouteData) {
         setIsLoading(true);
-        const [computedRouteA, computedRouteB] = await Promise.all([
-          stopsA.length > 0
-            ? computeRoute(parsedData.origin, stopsA)
-            : Promise.resolve(null),
-          stopsB.length > 0
-            ? computeRoute(parsedData.origin, stopsB)
-            : Promise.resolve(null),
-        ]);
-        if (computedRouteA) {
-          setRouteA({ ...computedRouteA, color: '#F44336', visible: true });
-        }
-        if (computedRouteB) {
-          setRouteB({ ...computedRouteB, color: '#FF9800', visible: true });
-        }
+        setRouteA({
+          stops: allStops,
+          distanceMeters: parsedData.existingRouteData.distanceMeters,
+          duration: parsedData.existingRouteData.duration,
+          encodedPolyline: parsedData.existingRouteData.encodedPolyline,
+          color: parsedData.existingRouteData.color,
+          visible: true,
+        });
+        setRouteB(null); // Não tem segunda rota
         setIsLoading(false);
-      };
+      } else {
+        // Rota nova - aplicar K-means para dividir
+        const clusters = kMeansCluster(allStops, 2);
+        const stopsA = clusters[0] || [];
+        const stopsB = clusters[1] || [];
 
-      calculateRoutes();
+        const calculateRoutes = async () => {
+          setIsLoading(true);
+          const [computedRouteA, computedRouteB] = await Promise.all([
+            stopsA.length > 0
+              ? computeRoute(parsedData.origin, stopsA)
+              : Promise.resolve(null),
+            stopsB.length > 0
+              ? computeRoute(parsedData.origin, stopsB)
+              : Promise.resolve(null),
+          ]);
+          if (computedRouteA) {
+            setRouteA({ ...computedRouteA, color: '#F44336', visible: true });
+          }
+          if (computedRouteB) {
+            setRouteB({ ...computedRouteB, color: '#FF9800', visible: true });
+          }
+          setIsLoading(false);
+        };
+
+        calculateRoutes();
+      }
     } else {
       router.push('/routes/new');
     }

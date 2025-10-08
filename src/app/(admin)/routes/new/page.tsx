@@ -128,10 +128,26 @@ async function readTextSmart(file: File): Promise<string> {
 
 export default function NewRoutePage() {
   const router = useRouter();
-  const [savedOrigins, setSavedOrigins] = React.useState(initialSavedOrigins);
+
+  // Carregar origens salvas do localStorage ou usar as iniciais
+  const [savedOrigins, setSavedOrigins] = React.useState<typeof initialSavedOrigins>(() => {
+    if (typeof window === 'undefined') return initialSavedOrigins;
+
+    const stored = localStorage.getItem('savedOrigins');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {
+        console.error('Erro ao carregar origens salvas:', e);
+        return initialSavedOrigins;
+      }
+    }
+    return initialSavedOrigins;
+  });
+
   const [origin, setOrigin] = React.useState<PlaceValue | null>(() => {
-    if (initialSavedOrigins.length > 0) {
-      return initialSavedOrigins[0].value;
+    if (savedOrigins.length > 0) {
+      return savedOrigins[0].value;
     }
     return null;
   });
@@ -168,6 +184,13 @@ export default function NewRoutePage() {
     // This runs only on the client, after hydration, preventing hydration mismatch
     setRouteDate(new Date());
   }, []);
+
+  // Salvar origens no localStorage sempre que mudar
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('savedOrigins', JSON.stringify(savedOrigins));
+    }
+  }, [savedOrigins]);
 
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
@@ -607,18 +630,41 @@ export default function NewRoutePage() {
         const stopsToProcess = data.map((row, index) => {
             const addressParts: Record<string, string> = {};
 
+            // Helper para encontrar o valor no row, mesmo com variações de encoding
+            const getRowValue = (targetHeader: string) => {
+                // Primeiro tenta busca direta
+                if (row[targetHeader] != null) return row[targetHeader];
+
+                // Depois tenta busca normalizada
+                const normalized = normalizeString(targetHeader);
+                for (const key in row) {
+                    if (normalizeString(key) === normalized) {
+                        return row[key];
+                    }
+                }
+                return null;
+            };
+
             for (const header in mapping) {
                 const systemField = mapping[header];
-                if (systemField !== 'Ignorar' && row[header]) {
-                    if (fieldOrder.includes(systemField)) {
-                        addressParts[systemField] = row[header];
+                if (systemField !== 'Ignorar') {
+                    const value = getRowValue(header);
+
+                    if (value != null && String(value).trim() !== '') {
+                        if (fieldOrder.includes(systemField)) {
+                            // Apenas adiciona se o campo ainda não foi preenchido
+                            // Isso evita que múltiplas colunas sobrescrevam o mesmo campo
+                            if (!addressParts[systemField]) {
+                                addressParts[systemField] = String(value).trim();
+                            }
+                        }
                     }
                 }
             }
 
             const addressString = fieldOrder
                 .map(field => addressParts[field])
-                .filter(Boolean)
+                .filter(val => val != null && val !== '')
                 .join(', ') + ', Brasil';
 
             return {

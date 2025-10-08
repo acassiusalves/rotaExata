@@ -124,8 +124,20 @@ export function ImportAssistantDialog({
   React.useEffect(() => {
     if (!isOpen) return;
     const initialMapping: Record<string, string> = {};
-    headers.forEach((header) => { 
-      initialMapping[header] = autoMap(header);
+    const usedFields = new Set<string>(); // Rastrear campos já mapeados
+
+    headers.forEach((header) => {
+      const mappedField = autoMap(header);
+
+      // Se o campo já foi mapeado por outra coluna, marca como "Ignorar"
+      if (mappedField !== 'Ignorar' && usedFields.has(mappedField)) {
+        initialMapping[header] = 'Ignorar';
+      } else {
+        initialMapping[header] = mappedField;
+        if (mappedField !== 'Ignorar') {
+          usedFields.add(mappedField);
+        }
+      }
     });
     setMapping(initialMapping);
   }, [headers, isOpen]);

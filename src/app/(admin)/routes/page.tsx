@@ -87,6 +87,18 @@ const formatDuration = (durationString: string = '0s') => {
   return `${minutes}m`;
 };
 
+const getRoutePeriod = (date: Date): { label: string; color: string } => {
+  const hour = date.getHours();
+
+  if (hour >= 8 && hour < 12) {
+    return { label: 'Matutino', color: 'bg-blue-500' };
+  } else if (hour >= 12 && hour < 19) {
+    return { label: 'Vespertino', color: 'bg-orange-500' };
+  } else {
+    return { label: 'Noturno', color: 'bg-purple-500' };
+  }
+};
+
 
 export default function RoutesPage() {
   const router = useRouter();
@@ -301,6 +313,13 @@ export default function RoutesPage() {
       stops: route.stops,
       routeDate: routeDate.toISOString(),
       routeTime: format(routeDate, 'HH:mm'),
+      isExistingRoute: true, // Flag para indicar que é uma rota já organizada
+      existingRouteData: {
+        distanceMeters: route.distanceMeters,
+        duration: route.duration,
+        encodedPolyline: route.encodedPolyline,
+        color: route.color,
+      }
     };
     sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
     router.push('/routes/organize');
@@ -379,8 +398,13 @@ export default function RoutesPage() {
                            <Card key={route.id} className="flex flex-col">
                               <CardHeader>
                                 <div className="flex items-start justify-between">
-                                  <div>
-                                      <CardTitle>{route.name}</CardTitle>
+                                  <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <CardTitle>{route.name}</CardTitle>
+                                        <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
+                                          {getRoutePeriod(route.plannedDate.toDate()).label}
+                                        </Badge>
+                                      </div>
                                       <CardDescription>
                                           {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                                       </CardDescription>
