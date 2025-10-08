@@ -1641,17 +1641,17 @@ export default function OrganizeRoutePage() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto bg-background">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <Tabs defaultValue="organize" className="w-full">
-          <CardHeader className="p-4 pb-0">
-            <div className="flex items-start justify-between">
+          <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-6">
+            <div className="flex items-start justify-between mb-4">
               <div className='flex items-center gap-4'>
                  <div>
-                    <CardTitle>Organizar e Atribuir Rota</CardTitle>
-                    <CardDescription>
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Organizar e Atribuir Rota</h2>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                       Otimize a sequência, atribua um motorista e salve a rota.
-                    </CardDescription>
+                    </p>
                  </div>
                  {unassignedStops.length > 0 && (
                     <Popover>
@@ -1689,7 +1689,7 @@ export default function OrganizeRoutePage() {
               <div className='flex items-center gap-2'>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon">
+                        <Button variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
                             <Plus className="h-4 w-4" />
                         </Button>
                     </DropdownMenuTrigger>
@@ -1700,27 +1700,29 @@ export default function OrganizeRoutePage() {
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
-                <TabsList>
-                  <TabsTrigger value="organize">
-                    <Wand2 className="mr-2 h-4 w-4" />
-                    Organizar
-                  </TabsTrigger>
-                  <TabsTrigger value="assign">
-                    <User className="mr-2 h-4 w-4" />
-                    Atribuir
-                  </TabsTrigger>
-                  <TabsTrigger value="review">
-                    <Check className="mr-2 h-4 w-4" />
-                    Revisar
-                  </TabsTrigger>
-                </TabsList>
+                <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+                  <TabsList className="bg-transparent h-auto p-0 gap-1">
+                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      Organizar
+                    </TabsTrigger>
+                    <TabsTrigger value="assign" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
+                      <User className="mr-2 h-4 w-4" />
+                      Atribuir
+                    </TabsTrigger>
+                    <TabsTrigger value="review" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
+                      <Check className="mr-2 h-4 w-4" />
+                      Revisar
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
               </div>
             </div>
-          </CardHeader>
+          </div>
 
-          <CardContent className="p-4">
+          <div className="p-8 pb-32">
             <TabsContent value="organize" className="m-0">
-              <div className="col-span-3">
+              <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm overflow-hidden">
                    {isLoading ? (
                     <div className="flex h-48 items-center justify-center">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1729,37 +1731,40 @@ export default function OrganizeRoutePage() {
                     routesForTable.length > 0 ? (
                             <Table>
                             <TableHeader>
-                                <TableRow>
+                                <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
                                     <TableHead className='w-12'></TableHead>
-                                    <TableHead>Rota</TableHead>
-                                    <TableHead>Paradas</TableHead>
-                                    <TableHead>Distância</TableHead>
-                                    <TableHead>Tempo</TableHead>
-                                    <TableHead>Frete R$</TableHead>
-                                    <TableHead className='w-[35%]'>Linha do Tempo</TableHead>
-                                    <TableHead className='w-32 text-right'>Ações</TableHead>
+                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
+                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
+                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
+                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
+                                    <TableHead className='w-[35%] text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                                    <TableHead className='w-32 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                             {routesForTable.map(routeItem => (
-                                <TableRow key={routeItem.key}>
+                                <TableRow key={routeItem.key} className="border-b border-slate-200 dark:border-slate-800">
                                     <TableCell className="align-middle">
                                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
                                             {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                         </Button>
                                     </TableCell>
-                                    <TableCell>
-                                        <EditableRouteName
-                                        name={routeItem.name}
-                                        onChange={(newName) =>
-                                            setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
-                                        }
-                                        />
+                                    <TableCell className="font-medium text-slate-900 dark:text-slate-100">
+                                        <div className="flex items-center gap-2">
+                                          <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                                          <EditableRouteName
+                                            name={routeItem.name}
+                                            onChange={(newName) =>
+                                                setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
+                                            }
+                                          />
+                                        </div>
                                     </TableCell>
-                                    <TableCell>{routeItem.data.stops.length}</TableCell>
-                                    <TableCell>{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
-                                    <TableCell>{formatDuration(routeItem.data.duration)}</TableCell>
-                                    <TableCell>{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
+                                    <TableCell className="text-slate-700 dark:text-slate-300">{routeItem.data.stops.length}</TableCell>
+                                    <TableCell className="text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
+                                    <TableCell className="text-slate-700 dark:text-slate-300">{formatDuration(routeItem.data.duration)}</TableCell>
+                                    <TableCell className="text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell>
                                         <RouteTimeline
                                         routeKey={routeItem.key}
@@ -1804,6 +1809,7 @@ export default function OrganizeRoutePage() {
                                                 size="sm"
                                                 onClick={() => handleOptimizeSingleRoute(routeItem.key)}
                                                 disabled={isOptimizing[routeItem.key]}
+                                                className="bg-primary/10 text-primary hover:bg-primary/20 font-medium"
                                             >
                                                 {isOptimizing[routeItem.key] ? (
                                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1817,70 +1823,6 @@ export default function OrganizeRoutePage() {
                                 </TableRow>
                             ))}
 
-                            {/* Additional Routes as Table Rows */}
-                            {additionalRoutes.length > 0 && (
-                              <>
-                                <TableRow>
-                                  <TableCell colSpan={8} className="bg-muted/50 py-2">
-                                    <div className="flex items-center gap-2">
-                                      <h3 className="text-sm font-semibold">Outras Rotas do Período</h3>
-                                      <Badge variant="secondary" className="text-xs">{additionalRoutes.length}</Badge>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                                {additionalRoutes.map((route, idx) => (
-                                  <TableRow key={`additional-${idx}`} className="bg-muted/20">
-                                    <TableCell className="align-middle">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8"
-                                        onClick={() => toggleAdditionalRoute(idx)}
-                                      >
-                                        {routeVisibility[`additional-${idx}`] ? (
-                                          <Eye className="h-4 w-4" />
-                                        ) : (
-                                          <EyeOff className="h-4 w-4" />
-                                        )}
-                                      </Button>
-                                    </TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        <Pencil className="h-3 w-3 text-muted-foreground" />
-                                        <span>Rota {idx + 2}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell>{route.stops.length}</TableCell>
-                                    <TableCell>{formatDistance(route.distanceMeters)} km</TableCell>
-                                    <TableCell>{formatDuration(route.duration)}</TableCell>
-                                    <TableCell>{calculateFreightCost(route.distanceMeters)}</TableCell>
-                                    <TableCell>
-                                      <RouteTimeline
-                                        routeKey={`additional-${idx}` as any}
-                                        stops={route.stops}
-                                        color={route.color}
-                                        dragDelay={DRAG_DELAY}
-                                        onStopClick={(stop) => {
-                                          const id = String(stop.id ?? stop.placeId ?? "");
-                                          if (id) mapApiRef.current?.openStopInfo(id);
-                                        }}
-                                      />
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled
-                                        className="gap-2"
-                                      >
-                                        <Wand2 className="h-4 w-4" />
-                                        Otimizar
-                                      </Button>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </>
-                            )}
                             </TableBody>
                         </Table>
                      ) : (
@@ -1890,29 +1832,87 @@ export default function OrganizeRoutePage() {
                      )
                   )}
                 </div>
-                <DragOverlay
-                  dropAnimation={{
-                    sideEffects: defaultDropAnimationSideEffects({
-                      styles: {
-                        active: {
-                          opacity: '0.5',
-                        },
-                      },
-                    }),
-                  }}
-                >
-                  {activeId && activeStop && activeIndex !== null ? (
-                    <div
-                      className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
-                        activeStop.isManuallyAdded
-                          ? 'border-green-300 bg-green-100 text-green-700'
-                          : 'border-gray-300 bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {activeIndex + 1}
+
+                {/* Additional Routes Section */}
+                {additionalRoutes.length > 0 && (
+                  <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm overflow-hidden mt-6">
+                    <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Outras Rotas do Período</h2>
+                        <Badge variant="secondary" className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold px-2 py-1">
+                          {additionalRoutes.length}
+                        </Badge>
+                      </div>
                     </div>
-                  ) : null}
-                </DragOverlay>
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
+                          <TableHead className='w-12'></TableHead>
+                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
+                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
+                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
+                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
+                          <TableHead className='w-[35%] text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                          <TableHead className='w-32 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {additionalRoutes.map((route, idx) => (
+                          <TableRow key={`additional-${idx}`} className="border-b border-slate-200 dark:border-slate-800">
+                            <TableCell className="align-middle">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => toggleAdditionalRoute(idx)}
+                              >
+                                {routeVisibility[`additional-${idx}`] ? (
+                                  <Eye className="h-4 w-4" />
+                                ) : (
+                                  <EyeOff className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TableCell>
+                            <TableCell className="font-medium text-slate-900 dark:text-slate-100">
+                              <div className="flex items-center gap-2">
+                                <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                                <span>Rota {idx + 2}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-slate-700 dark:text-slate-300">{route.stops.length}</TableCell>
+                            <TableCell className="text-slate-700 dark:text-slate-300">{formatDistance(route.distanceMeters)} km</TableCell>
+                            <TableCell className="text-slate-700 dark:text-slate-300">{formatDuration(route.duration)}</TableCell>
+                            <TableCell className="text-slate-700 dark:text-slate-300">{calculateFreightCost(route.distanceMeters)}</TableCell>
+                            <TableCell>
+                              <RouteTimeline
+                                routeKey={`additional-${idx}` as any}
+                                stops={route.stops}
+                                color={route.color}
+                                dragDelay={DRAG_DELAY}
+                                onStopClick={(stop) => {
+                                  const id = String(stop.id ?? stop.placeId ?? "");
+                                  if (id) mapApiRef.current?.openStopInfo(id);
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled
+                                className="border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                              >
+                                <Wand2 className="mr-2 h-4 w-4" />
+                                Otimizar
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
@@ -2024,7 +2024,30 @@ export default function OrganizeRoutePage() {
                     )}
                 </div>
             </TabsContent>
-          </CardContent>
+          </div>
+          <DragOverlay
+            dropAnimation={{
+              sideEffects: defaultDropAnimationSideEffects({
+                styles: {
+                  active: {
+                    opacity: '0.5',
+                  },
+                },
+              }),
+            }}
+          >
+            {activeId && activeStop && activeIndex !== null ? (
+              <div
+                className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
+                  activeStop.isManuallyAdded
+                    ? 'border-green-300 bg-green-100 text-green-700'
+                    : 'border-gray-300 bg-gray-100 text-gray-700'
+                }`}
+              >
+                {activeIndex + 1}
+              </div>
+            ) : null}
+          </DragOverlay>
         </Tabs>
         </DndContext>
       </div>
