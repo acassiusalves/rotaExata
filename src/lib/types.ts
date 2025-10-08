@@ -33,6 +33,10 @@ export type PlaceValue = {
   timeWindowEnd?: string;
   addressString?: string;
   complemento?: string;
+  // Campos de validação de endereço
+  originalAddressParts?: Record<string, string>;
+  validationIssues?: string[];
+  hasValidationIssues?: boolean;
   // Campos de rastreamento
   deliveryStatus?: DeliveryStatus;
   arrivedAt?: Timestamp | Date;

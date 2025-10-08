@@ -314,6 +314,7 @@ export default function RoutesPage() {
       routeDate: routeDate.toISOString(),
       routeTime: format(routeDate, 'HH:mm'),
       isExistingRoute: true, // Flag para indicar que é uma rota já organizada
+      currentRouteId: route.id, // ID da rota atual para filtrar das adicionais
       existingRouteData: {
         distanceMeters: route.distanceMeters,
         duration: route.duration,

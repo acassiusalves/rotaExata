@@ -17,6 +17,7 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   List,
   Wand2,
@@ -100,7 +101,8 @@ import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from "firebase/firestore"; 
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc } from "firebase/firestore";
+import { startOfDay, endOfDay } from 'date-fns'; 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
@@ -110,6 +112,7 @@ interface RouteData {
   routeDate: string;
   routeTime: string;
   isExistingRoute?: boolean;
+  currentRouteId?: string; // ID da rota atual para filtrar
   existingRouteData?: {
     distanceMeters: number;
     duration: string;
@@ -363,6 +366,10 @@ export default function OrganizeRoutePage() {
   const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
 
+  // State for additional routes from same period
+  const [additionalRoutes, setAdditionalRoutes] = React.useState<RouteInfo[]>([]);
+  const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
+
   // State for pending edits (reordering within same route)
   const [pendingEdits, setPendingEdits] = React.useState<{
     A: PlaceValue[] | null;
@@ -389,6 +396,25 @@ export default function OrganizeRoutePage() {
   // State for Stop Info Dialog
   const [isStopInfoDialogOpen, setIsStopInfoDialogOpen] = React.useState(false);
   const [selectedStopInfo, setSelectedStopInfo] = React.useState<PlaceValue | null>(null);
+
+  // State for Edit Stop Dialog
+  const [isEditStopDialogOpen, setIsEditStopDialogOpen] = React.useState(false);
+  const [stopToEdit, setStopToEdit] = React.useState<{ stop: PlaceValue; routeKey: 'A' | 'B' | 'unassigned'; index: number } | null>(null);
+  const [editService, setEditService] = React.useState({
+    customerName: '',
+    phone: '',
+    orderNumber: '',
+    timeWindowStart: '',
+    timeWindowEnd: '',
+    locationLink: '',
+    cep: '',
+    rua: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    cidade: '',
+    notes: '',
+  });
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
@@ -479,6 +505,91 @@ export default function OrganizeRoutePage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Load additional routes from same period
+  React.useEffect(() => {
+    if (!routeData?.routeDate) return;
+
+    const loadAdditionalRoutes = async () => {
+      try {
+        const routeDate = new Date(routeData.routeDate);
+        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
+        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
+
+        const q = query(
+          collection(db, 'routes'),
+          where('plannedDate', '>=', dayStart),
+          where('plannedDate', '<=', dayEnd)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const routes: RouteInfo[] = [];
+        const visibility: Record<string, boolean> = {};
+
+        // Array of distinct colors for routes
+        const routeColors = [
+          '#2196F3', // Blue
+          '#4CAF50', // Green
+          '#FF9800', // Orange
+          '#9C27B0', // Purple
+          '#00BCD4', // Cyan
+          '#FFEB3B', // Yellow
+          '#E91E63', // Pink
+          '#795548', // Brown
+          '#607D8B', // Blue Grey
+          '#FF5722', // Deep Orange
+        ];
+
+        // Get colors already used by main routes (A and B)
+        const usedColors = new Set<string>();
+        if (routeA?.color) usedColors.add(routeA.color.toLowerCase());
+        if (routeB?.color) usedColors.add(routeB.color.toLowerCase());
+
+        let colorIndex = 0;
+        querySnapshot.forEach((doc) => {
+          // Skip the current route (the one being viewed)
+          if (routeData.currentRouteId && doc.id === routeData.currentRouteId) {
+            console.log('🚫 Pulando rota atual:', doc.id);
+            return;
+          }
+
+          const routeDoc = doc.data();
+
+          // Find a color that's not already used by main routes
+          let assignedColor = routeDoc.color;
+          if (!assignedColor || usedColors.has(assignedColor.toLowerCase())) {
+            // Find next available color that's not used
+            while (usedColors.has(routeColors[colorIndex % routeColors.length].toLowerCase())) {
+              colorIndex++;
+            }
+            assignedColor = routeColors[colorIndex % routeColors.length];
+            usedColors.add(assignedColor.toLowerCase());
+            colorIndex++;
+          }
+
+          const routeInfo: RouteInfo = {
+            stops: routeDoc.stops || [],
+            encodedPolyline: routeDoc.encodedPolyline || '',
+            distanceMeters: routeDoc.distanceMeters || 0,
+            duration: routeDoc.duration || '0s',
+            color: assignedColor,
+            visible: false, // All hidden by default
+          };
+
+          routes.push(routeInfo);
+          visibility[doc.id] = false; // Hidden by default
+        });
+
+        console.log('📍 Rotas adicionais carregadas:', routes.length);
+        setAdditionalRoutes(routes);
+        setRouteVisibility(visibility);
+      } catch (error) {
+        console.error('Error loading additional routes:', error);
+      }
+    };
+
+    loadAdditionalRoutes();
+  }, [routeData?.routeDate]);
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
@@ -599,6 +710,36 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const handleEditServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { id, value } = e.target;
+    setEditService(prev => ({...prev, [id]: value}));
+
+    if (id === 'locationLink') {
+      handleEditLocationLinkPaste(value);
+    }
+  };
+
+  const handleEditLocationLinkPaste = async (url: string) => {
+    const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (!match) return;
+
+    const lat = parseFloat(match[1]);
+    const lng = parseFloat(match[2]);
+
+    toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
+
+    const addressDetails = await reverseGeocode(lat, lng);
+    if (addressDetails) {
+      setEditService(prev => ({
+        ...prev,
+        ...addressDetails,
+      }));
+      toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
+    } else {
+      toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+    }
+  };
+
   const handleLocationLinkPaste = async (url: string) => {
     const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
     if (!match) return;
@@ -617,6 +758,93 @@ export default function OrganizeRoutePage() {
       toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente." });
     } else {
       toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+    }
+  };
+
+  const handleSaveEditedService = async () => {
+    if (!stopToEdit || !routeData) return;
+
+    const { rua, numero, bairro, cidade, cep } = editService;
+    if (!rua || !numero || !bairro || !cidade) {
+      toast({
+        variant: 'destructive',
+        title: 'Campos Obrigatórios',
+        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+      });
+      return;
+    }
+
+    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+    const geocoded = await geocodeAddress(addressString);
+
+    if (geocoded) {
+      const updatedStop: PlaceValue = {
+        ...geocoded,
+        id: stopToEdit.stop.id,
+        address: geocoded.address,
+        customerName: editService.customerName,
+        phone: editService.phone,
+        orderNumber: editService.orderNumber,
+        timeWindowStart: editService.timeWindowStart,
+        timeWindowEnd: editService.timeWindowEnd,
+        complemento: editService.complemento,
+        notes: editService.notes,
+      };
+
+      // Update the stop in the appropriate route or unassigned list
+      if (stopToEdit.routeKey === 'unassigned') {
+        const updatedStops = [...unassignedStops];
+        updatedStops[stopToEdit.index] = updatedStop;
+        setUnassignedStops(updatedStops);
+        toast({ title: 'Serviço Atualizado!', description: 'As informações do serviço foram atualizadas.' });
+      } else {
+        const targetRoute = stopToEdit.routeKey === 'A' ? routeA : routeB;
+        const setter = stopToEdit.routeKey === 'A' ? setRouteA : setRouteB;
+
+        if (!targetRoute) return;
+
+        const updatedStops = [...targetRoute.stops];
+        updatedStops[stopToEdit.index] = updatedStop;
+
+        // Recalculate route
+        setter(prev => prev ? { ...prev, stops: updatedStops, encodedPolyline: '' } : null);
+        const newRouteInfo = await computeRoute(routeData.origin, updatedStops);
+        if (newRouteInfo) {
+          setter(prev => prev ? {
+            ...prev,
+            ...newRouteInfo,
+            stops: updatedStops,
+            color: targetRoute.color,
+            visible: targetRoute.visible
+          } : null);
+        }
+
+        toast({ title: 'Serviço Atualizado!', description: 'A rota foi recalculada com as novas informações.' });
+      }
+
+      setIsEditStopDialogOpen(false);
+      setStopToEdit(null);
+      setEditService({
+        customerName: '',
+        phone: '',
+        orderNumber: '',
+        timeWindowStart: '',
+        timeWindowEnd: '',
+        locationLink: '',
+        cep: '',
+        rua: '',
+        numero: '',
+        complemento: '',
+        bairro: '',
+        cidade: '',
+        notes: '',
+      });
+    } else {
+      toast({
+        variant: 'destructive',
+        title: 'Falha na Geocodificação',
+        description: 'Não foi possível encontrar o endereço. Verifique os dados e tente novamente.',
+      });
     }
   };
 
@@ -820,75 +1048,57 @@ export default function OrganizeRoutePage() {
         ...prev,
         [activeRouteKey]: updatedStops
       }));
-
-      toast({
-        title: 'Edição pendente',
-        description: 'Clique em "Editar" para aplicar as alterações.',
-      });
     }
-    // Case 2: Moving between different routes
+    // Case 2: Moving between different routes - save as pending edit
     else {
       const sourceRoute = activeRouteKey === 'A' ? routeA : routeB;
       const targetRoute = overRouteKey === 'A' ? routeA : routeB;
-      const sourceSetter = activeRouteKey === 'A' ? setRouteA : setRouteB;
-      const targetSetter = overRouteKey === 'A' ? setRouteA : setRouteB;
 
       if (!sourceRoute || !targetRoute || !routeData) return;
 
       const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
 
-      // Remove from source
+      // Get stop to move and preserve its original index and color
       const stopToMove = sourceRoute.stops[activeIndex];
-      const newSourceStops = sourceRoute.stops.filter((_, i) => i !== activeIndex);
 
-      // Add to target at the position of the over item
-      const newTargetStops = [...targetRoute.stops];
-      newTargetStops.splice(overIndex, 0, stopToMove);
+      // Get the original index if it exists, otherwise use current index
+      const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? activeIndex;
 
-      // Update both routes optimistically
-      sourceSetter((prev) => (prev ? { ...prev, stops: newSourceStops, encodedPolyline: '' } : null));
-      targetSetter((prev) => (prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null));
+      // Check if there's already a pending edit for source route
+      const currentSourcePending = pendingEdits[activeRouteKey];
+      const sourceStopsToEdit = currentSourcePending || sourceRoute.stops.map((stop, idx) => ({
+        ...stop,
+        _originalIndex: (stop as any)._originalIndex ?? idx
+      }));
 
-      // Recalculate both routes
-      const [newSourceRouteInfo, newTargetRouteInfo] = await Promise.all([
-        newSourceStops.length > 0 ? computeRoute(routeData.origin, newSourceStops) : Promise.resolve(null),
-        computeRoute(routeData.origin, newTargetStops),
-      ]);
+      // Check if there's already a pending edit for target route
+      const currentTargetPending = pendingEdits[overRouteKey];
+      const targetStopsToEdit = currentTargetPending || targetRoute.stops.map((stop, idx) => ({
+        ...stop,
+        _originalIndex: (stop as any)._originalIndex ?? idx
+      }));
 
-      if (newSourceRouteInfo) {
-        sourceSetter((prev) => (prev ? {
-          ...prev,
-          ...newSourceRouteInfo,
-          stops: newSourceStops,
-          color: sourceRoute.color,
-          visible: sourceRoute.visible
-        } : null));
-      } else if (newSourceStops.length === 0) {
-        // Keep the route but with empty stops
-        sourceSetter((prev) => (prev ? {
-          ...prev,
-          stops: [],
-          encodedPolyline: '',
-          distanceMeters: 0,
-          duration: '0s'
-        } : null));
-      }
+      // Remove from source
+      const newSourceStops = sourceStopsToEdit.filter((_, i) => i !== activeIndex);
 
-      if (newTargetRouteInfo) {
-        targetSetter((prev) => (prev ? {
-          ...prev,
-          ...newTargetRouteInfo,
-          stops: newTargetStops,
-          color: targetRoute.color,
-          visible: targetRoute.visible
-        } : null));
-      }
+      // Add to target at the position of the over item with marker for cross-route movement
+      const newTargetStops = [...targetStopsToEdit];
+      const movedStop = {
+        ...stopToMove,
+        _originalIndex: originalIndexOfMovedStop, // Preserve the original index from source route
+        _wasMoved: true,
+        _movedFromRoute: activeRouteKey, // Track which route it came from
+        _originalRouteColor: sourceRoute.color, // Preserve original route color
+      };
+      newTargetStops.splice(overIndex, 0, movedStop);
 
-      toast({
-        title: 'Serviço Movido!',
-        description: `O serviço foi movido de ${routeNames[activeRouteKey]} para ${routeNames[overRouteKey]}.`,
-      });
+      // Save as pending edits for both routes
+      setPendingEdits(prev => ({
+        ...prev,
+        [activeRouteKey]: newSourceStops,
+        [overRouteKey]: newTargetStops
+      }));
     }
   };
 
@@ -1002,6 +1212,59 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const handleUpdateExistingRoute = async (routeKey: 'A' | 'B') => {
+    if (!routeData) return;
+
+    const routeToUpdate = routeKey === 'A' ? routeA : routeB;
+    const routeName = routeNames[routeKey];
+
+    if (!routeToUpdate) {
+        toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para atualização.' });
+        return;
+    }
+
+    // Verificar se é uma rota existente
+    if (!routeData.isExistingRoute || !routeData.existingRouteData) {
+        toast({ variant: 'destructive', title: 'Erro', description: 'Esta rota ainda não foi despachada.' });
+        return;
+    }
+
+    // Obter o ID da rota do Firebase
+    const currentRouteId = routeData.currentRouteId;
+    if (!currentRouteId) {
+        toast({ variant: 'destructive', title: 'Erro', description: 'ID da rota não encontrado.' });
+        return;
+    }
+
+    setIsSaving(prev => ({ ...prev, [routeKey]: true }));
+
+    try {
+        const routeRef = doc(db, 'routes', currentRouteId);
+
+        await updateDoc(routeRef, {
+            stops: routeToUpdate.stops,
+            distanceMeters: routeToUpdate.distanceMeters,
+            duration: routeToUpdate.duration,
+            encodedPolyline: routeToUpdate.encodedPolyline,
+        });
+
+        toast({
+            title: 'Rota Atualizada!',
+            description: `A ${routeName} foi atualizada com sucesso. As alterações serão refletidas no app do motorista.`,
+        });
+
+    } catch (error) {
+        console.error("Error updating route:", error);
+        toast({
+            variant: 'destructive',
+            title: 'Falha ao Atualizar Rota',
+            description: 'Ocorreu um erro ao tentar atualizar a rota.',
+        });
+    } finally {
+        setIsSaving(prev => ({ ...prev, [routeKey]: false }));
+    }
+  };
+
   const handleRemoveStop = async (stopId: string) => {
     if (!routeData) return;
 
@@ -1051,12 +1314,83 @@ export default function OrganizeRoutePage() {
     }
   };
 
-  const handleEditStop = (stopId: string) => {
-    // For now, just show a toast. You can implement edit functionality later
-    toast({
-      title: 'Editar parada',
-      description: `Funcionalidade de edição será implementada em breve. ID: ${stopId}`,
+  const handleEditStop = async (stopId: string) => {
+    // Find which route contains this stop
+    let targetStop: PlaceValue | null = null;
+    let routeKey: 'A' | 'B' | 'unassigned' = 'unassigned';
+    let index = -1;
+
+    if (routeA) {
+      const foundIndex = routeA.stops.findIndex(s => String(s.id ?? s.placeId) === stopId);
+      if (foundIndex !== -1) {
+        targetStop = routeA.stops[foundIndex];
+        routeKey = 'A';
+        index = foundIndex;
+      }
+    }
+
+    if (!targetStop && routeB) {
+      const foundIndex = routeB.stops.findIndex(s => String(s.id ?? s.placeId) === stopId);
+      if (foundIndex !== -1) {
+        targetStop = routeB.stops[foundIndex];
+        routeKey = 'B';
+        index = foundIndex;
+      }
+    }
+
+    if (!targetStop) {
+      const foundIndex = unassignedStops.findIndex(s => String(s.id ?? s.placeId) === stopId);
+      if (foundIndex !== -1) {
+        targetStop = unassignedStops[foundIndex];
+        routeKey = 'unassigned';
+        index = foundIndex;
+      }
+    }
+
+    if (!targetStop) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Parada não encontrada.',
+      });
+      return;
+    }
+
+    // Populate edit form with current stop data
+    setStopToEdit({ stop: targetStop, routeKey, index });
+    setEditService({
+      customerName: targetStop.customerName || '',
+      phone: targetStop.phone || '',
+      orderNumber: targetStop.orderNumber || '',
+      timeWindowStart: targetStop.timeWindowStart || '',
+      timeWindowEnd: targetStop.timeWindowEnd || '',
+      locationLink: '',
+      cep: '',
+      rua: '',
+      numero: '',
+      complemento: targetStop.complemento || '',
+      bairro: '',
+      cidade: '',
+      notes: targetStop.notes || '',
     });
+
+    // Open edit dialog
+    setIsEditStopDialogOpen(true);
+
+    // Reverse geocode to get address components
+    if (targetStop.lat && targetStop.lng) {
+      const addressDetails = await reverseGeocode(targetStop.lat, targetStop.lng);
+      if (addressDetails) {
+        setEditService(prev => ({
+          ...prev,
+          rua: addressDetails.rua || prev.rua,
+          numero: addressDetails.numero || prev.numero,
+          bairro: addressDetails.bairro || prev.bairro,
+          cidade: addressDetails.cidade || prev.cidade,
+          cep: addressDetails.cep || prev.cep,
+        }));
+      }
+    }
   };
 
   const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
@@ -1137,11 +1471,13 @@ export default function OrganizeRoutePage() {
 
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
     const currentRoute = routeKey === 'A' ? routeA : routeB;
+    const otherRouteKey: 'A' | 'B' = routeKey === 'A' ? 'B' : 'A';
+    const otherPendingStops = pendingEdits[otherRouteKey];
 
     if (!currentRoute) return;
 
-    // Clean stops - remove _originalIndex property
-    const cleanedStops = pendingStops.map(({ _originalIndex, ...stop }: any) => stop);
+    // Clean stops - remove metadata properties
+    const cleanedStops = pendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
 
     // Update state with pending stops
     setter((prev) => (prev ? { ...prev, stops: cleanedStops, encodedPolyline: '' } : null));
@@ -1158,12 +1494,52 @@ export default function OrganizeRoutePage() {
       } : null));
     }
 
-    // Clear pending edits
-    setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
+    // Check if there's a pending edit in the other route (cross-route movement)
+    if (otherPendingStops) {
+      const otherSetter = otherRouteKey === 'A' ? setRouteA : setRouteB;
+      const otherRoute = otherRouteKey === 'A' ? routeA : routeB;
+
+      if (otherRoute) {
+        const cleanedOtherStops = otherPendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
+
+        otherSetter((prev) => (prev ? { ...prev, stops: cleanedOtherStops, encodedPolyline: '' } : null));
+
+        const otherRouteInfo = cleanedOtherStops.length > 0
+          ? await computeRoute(routeData.origin, cleanedOtherStops)
+          : null;
+
+        if (otherRouteInfo) {
+          otherSetter((prev) => (prev ? {
+            ...prev,
+            ...otherRouteInfo,
+            stops: cleanedOtherStops,
+            color: otherRoute.color,
+            visible: otherRoute.visible
+          } : null));
+        } else if (cleanedOtherStops.length === 0) {
+          otherSetter((prev) => (prev ? {
+            ...prev,
+            stops: [],
+            encodedPolyline: '',
+            distanceMeters: 0,
+            duration: '0s'
+          } : null));
+        }
+      }
+    }
+
+    // Clear pending edits for both routes
+    setPendingEdits(prev => ({
+      ...prev,
+      [routeKey]: null,
+      ...(otherPendingStops ? { [otherRouteKey]: null } : {})
+    }));
 
     toast({
       title: 'Edições aplicadas!',
-      description: `A ${routeNames[routeKey]} foi atualizada com sucesso.`,
+      description: otherPendingStops
+        ? `Ambas as rotas foram atualizadas com sucesso.`
+        : `A ${routeNames[routeKey]} foi atualizada com sucesso.`,
     });
   };
 
@@ -1204,7 +1580,32 @@ export default function OrganizeRoutePage() {
   }
 
   const { origin } = routeData;
-  const combinedRoutes = [routeA, routeB].filter((r): r is RouteInfo => !!r && !!r.visible);
+  // Combine main routes with additional routes based on visibility
+  const combinedRoutes = [
+    routeA,
+    routeB,
+    ...additionalRoutes
+      .map((route, idx) => ({
+        ...route,
+        visible: routeVisibility[`additional-${idx}`] === true
+      }))
+      .filter(route => route.visible)
+  ].filter((r): r is RouteInfo => !!r);
+
+  const toggleAdditionalRoute = (routeIdx: number) => {
+    setRouteVisibility(prev => {
+      const newVisibility = {
+        ...prev,
+        [`additional-${routeIdx}`]: !prev[`additional-${routeIdx}`]
+      };
+      console.log('🔄 Toggle rota', routeIdx, '- Nova visibilidade:', newVisibility);
+      return newVisibility;
+    });
+  };
+
+  console.log('🗺️ Combined routes:', combinedRoutes.length);
+  console.log('🗺️ Additional routes:', additionalRoutes.length);
+  console.log('🗺️ Route visibility:', routeVisibility);
 
   const routesForTable = [
       { key: 'A' as const, name: routeNames.A, data: routeA },
@@ -1415,6 +1816,71 @@ export default function OrganizeRoutePage() {
                                     </TableCell>
                                 </TableRow>
                             ))}
+
+                            {/* Additional Routes as Table Rows */}
+                            {additionalRoutes.length > 0 && (
+                              <>
+                                <TableRow>
+                                  <TableCell colSpan={8} className="bg-muted/50 py-2">
+                                    <div className="flex items-center gap-2">
+                                      <h3 className="text-sm font-semibold">Outras Rotas do Período</h3>
+                                      <Badge variant="secondary" className="text-xs">{additionalRoutes.length}</Badge>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                                {additionalRoutes.map((route, idx) => (
+                                  <TableRow key={`additional-${idx}`} className="bg-muted/20">
+                                    <TableCell className="align-middle">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        onClick={() => toggleAdditionalRoute(idx)}
+                                      >
+                                        {routeVisibility[`additional-${idx}`] ? (
+                                          <Eye className="h-4 w-4" />
+                                        ) : (
+                                          <EyeOff className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                                        <span>Rota {idx + 2}</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>{route.stops.length}</TableCell>
+                                    <TableCell>{formatDistance(route.distanceMeters)} km</TableCell>
+                                    <TableCell>{formatDuration(route.duration)}</TableCell>
+                                    <TableCell>{calculateFreightCost(route.distanceMeters)}</TableCell>
+                                    <TableCell>
+                                      <RouteTimeline
+                                        routeKey={`additional-${idx}` as any}
+                                        stops={route.stops}
+                                        color={route.color}
+                                        dragDelay={DRAG_DELAY}
+                                        onStopClick={(stop) => {
+                                          const id = String(stop.id ?? stop.placeId ?? "");
+                                          if (id) mapApiRef.current?.openStopInfo(id);
+                                        }}
+                                      />
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled
+                                        className="gap-2"
+                                      >
+                                        <Wand2 className="h-4 w-4" />
+                                        Otimizar
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </>
+                            )}
                             </TableBody>
                         </Table>
                      ) : (
@@ -1528,15 +1994,26 @@ export default function OrganizeRoutePage() {
                                         Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
                                     </div>
                                 </CardContent>
-                                <CardFooter>
-                                     <Button 
-                                        className="w-full" 
-                                        onClick={() => handleDispatchRoute(routeItem.key)} 
-                                        disabled={isSavingRoute || !driver}
-                                    >
-                                        {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
-                                        {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
-                                    </Button>
+                                <CardFooter className="flex gap-2">
+                                     {routeData?.isExistingRoute ? (
+                                        <Button
+                                            className="w-full"
+                                            onClick={() => handleUpdateExistingRoute(routeItem.key)}
+                                            disabled={isSavingRoute}
+                                        >
+                                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                                            {isSavingRoute ? 'Salvando...' : 'Salvar Alterações'}
+                                        </Button>
+                                     ) : (
+                                        <Button
+                                            className="w-full"
+                                            onClick={() => handleDispatchRoute(routeItem.key)}
+                                            disabled={isSavingRoute || !driver}
+                                        >
+                                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
+                                            {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
+                                        </Button>
+                                     )}
                                 </CardFooter>
                             </Card>
                         )
@@ -1636,53 +2113,155 @@ export default function OrganizeRoutePage() {
       <Dialog open={isStopInfoDialogOpen} onOpenChange={setIsStopInfoDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Informações do Serviço</DialogTitle>
+            <DialogTitle>Detalhes da Parada</DialogTitle>
             <DialogDescription>
-              Detalhes completos da parada
+              Informações completas do serviço
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-3 items-center gap-4">
-              <span className="font-medium text-muted-foreground">Cliente:</span>
-              <span className="col-span-2">{selectedStopInfo?.customerName || '--'}</span>
+            <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Cliente</span>
+              <span className="text-sm">{selectedStopInfo?.customerName || '-'}</span>
             </div>
-            <div className="grid grid-cols-3 items-center gap-4">
-              <span className="font-medium text-muted-foreground">Pedido Nº:</span>
-              <span className="col-span-2">{selectedStopInfo?.orderNumber || '--'}</span>
+            <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Pedido</span>
+              <span className="text-sm">{selectedStopInfo?.orderNumber || '-'}</span>
             </div>
-            <div className="grid grid-cols-3 items-center gap-4">
-              <span className="font-medium text-muted-foreground">Telefone:</span>
-              <span className="col-span-2">{selectedStopInfo?.phone || '--'}</span>
+            <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Telefone</span>
+              <span className="text-sm">{selectedStopInfo?.phone || '-'}</span>
             </div>
-            <div className="grid grid-cols-3 items-center gap-4">
-              <span className="font-medium text-muted-foreground">Janela:</span>
-              <span className="col-span-2">
+            <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Janela</span>
+              <span className="text-sm">
                 {selectedStopInfo?.timeWindowStart && selectedStopInfo?.timeWindowEnd
                   ? `${selectedStopInfo.timeWindowStart} - ${selectedStopInfo.timeWindowEnd}`
-                  : '--'}
+                  : '-'}
               </span>
             </div>
             <Separator />
-            <div className="grid grid-cols-3 items-start gap-4">
-              <span className="font-medium text-muted-foreground">Endereço:</span>
-              <p className="col-span-2 text-sm">{selectedStopInfo?.address || '--'}</p>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Endereço</span>
+              <p className="text-sm">{selectedStopInfo?.address || '-'}</p>
             </div>
-            {selectedStopInfo?.complemento && (
-              <div className="grid grid-cols-3 items-start gap-4">
-                <span className="font-medium text-muted-foreground">Complemento:</span>
-                <p className="col-span-2 text-sm">{selectedStopInfo.complemento}</p>
-              </div>
-            )}
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Complemento</span>
+              <p className="text-sm">{selectedStopInfo?.complemento || '-'}</p>
+            </div>
             <Separator />
-            <div className="grid grid-cols-3 items-start gap-4">
-              <span className="font-medium text-muted-foreground">Observações:</span>
-              <p className="col-span-2 text-sm italic">{selectedStopInfo?.notes || '--'}</p>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Observações</span>
+              <p className="text-sm italic">{selectedStopInfo?.notes || '-'}</p>
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Fechar</Button>
             </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Stop Dialog */}
+      <Dialog open={isEditStopDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setStopToEdit(null);
+          setEditService({
+            customerName: '',
+            phone: '',
+            orderNumber: '',
+            timeWindowStart: '',
+            timeWindowEnd: '',
+            locationLink: '',
+            cep: '',
+            rua: '',
+            numero: '',
+            complemento: '',
+            bairro: '',
+            cidade: '',
+            notes: '',
+          });
+        }
+        setIsEditStopDialogOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar Serviço</DialogTitle>
+            <DialogDescription>
+              Atualize os detalhes do serviço. O endereço será validado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                  <Label htmlFor="customerName">Nome do Cliente</Label>
+                  <Input id="customerName" value={editService.customerName} onChange={handleEditServiceChange} placeholder="Nome do Cliente" />
+              </div>
+              <div className="space-y-2">
+                  <Label htmlFor="orderNumber">Nº Pedido</Label>
+                  <Input id="orderNumber" value={editService.orderNumber} onChange={handleEditServiceChange} placeholder="Ex: 12345" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input id="phone" value={editService.phone} onChange={handleEditServiceChange} placeholder="(00) 90000-0000" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cep">CEP</Label>
+                    <Input id="cep" value={editService.cep} onChange={handleEditServiceChange} placeholder="00000-000" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="locationLink">Link Localização (Google Maps)</Label>
+                <Input id="locationLink" value={editService.locationLink} onChange={handleEditServiceChange} placeholder="Cole o link do Google Maps aqui" />
+            </div>
+            <Separator className="my-4" />
+            <div className="space-y-2">
+                <Label htmlFor="rua">Rua</Label>
+                <Input id="rua" value={editService.rua} onChange={handleEditServiceChange} placeholder="Avenida, Rua, etc." />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-1 space-y-2">
+                    <Label htmlFor="numero">Número</Label>
+                    <Input id="numero" value={editService.numero} onChange={handleEditServiceChange} placeholder="123" />
+                </div>
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="complemento">Complemento</Label>
+                    <Input id="complemento" value={editService.complemento} onChange={handleEditServiceChange} placeholder="Apto, Bloco, etc." />
+                </div>
+            </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="bairro">Bairro</Label>
+                    <Input id="bairro" value={editService.bairro} onChange={handleEditServiceChange} placeholder="Setor, Bairro" />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="cidade">Cidade</Label>
+                    <Input id="cidade" value={editService.cidade} onChange={handleEditServiceChange} placeholder="Goiânia" />
+                </div>
+            </div>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label htmlFor="timeWindowStart">Início da Janela</Label>
+                    <Input id="timeWindowStart" type="time" value={editService.timeWindowStart} onChange={handleEditServiceChange} />
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="timeWindowEnd">Fim da Janela</Label>
+                    <Input id="timeWindowEnd" type="time" value={editService.timeWindowEnd} onChange={handleEditServiceChange} />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="notes">Observações</Label>
+                <Textarea id="notes" value={editService.notes} onChange={handleEditServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleSaveEditedService}>Salvar Alterações</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

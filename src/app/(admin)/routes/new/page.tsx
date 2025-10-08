@@ -177,6 +177,12 @@ export default function NewRoutePage() {
   const [fileToProcess, setFileToProcess] = React.useState<File | null>(null);
   const [csvContent, setCsvContent] = React.useState<string>('');
 
+  // States for Address Validation Groups
+  const [validatedStops, setValidatedStops] = React.useState<PlaceValue[]>([]);
+  const [problematicStops, setProblematicStops] = React.useState<PlaceValue[]>([]);
+  const [isValidationDialogOpen, setIsValidationDialogOpen] = React.useState(false);
+  const [expandedGroup, setExpandedGroup] = React.useState<'valid' | 'problematic' | null>(null);
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   
@@ -662,13 +668,28 @@ export default function NewRoutePage() {
                 }
             }
 
+            // Monta o endereço tratando ruas com números no nome
+            const ruaValue = addressParts['Rua'] || '';
+            const numeroValue = addressParts['Número'] || '';
+
+            // Verifica se a rua já termina com número separado por espaço (ex: "Rua T 48" ou "Avenida C 123")
+            // Padrão: letra/palavra + espaço + número no final
+            const ruaComNumeroNoNome = /[a-zA-Z]\s+\d+\s*$/.test(ruaValue);
+
+            // Se a rua tem número no nome, remove o campo "Número" para não duplicar
+            const addressPartsAjustado = { ...addressParts };
+            if (ruaComNumeroNoNome && numeroValue) {
+                delete addressPartsAjustado['Número'];
+            }
+
             const addressString = fieldOrder
-                .map(field => addressParts[field])
+                .map(field => addressPartsAjustado[field])
                 .filter(val => val != null && val !== '')
                 .join(', ') + ', Brasil';
 
             return {
                 addressString,
+                originalAddressParts: addressParts, // Guardar dados originais da planilha
                 customerName: getField(row, 'Nome do Cliente', ['Nome do Cliente','Cliente']),
                 phone:        getField(row, 'Telefone', ['Telefone']),
                 notes:        getField(row, 'Observações', ['Observações']),
@@ -679,11 +700,67 @@ export default function NewRoutePage() {
             };
         });
 
+        // Função para normalizar e comparar endereços
+        const normalizeForComparison = (str: string) => {
+          return str.normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+            .toLowerCase()
+            .trim();
+        };
+
+        const validateAddress = (geocoded: any, original: Record<string, string>) => {
+          const issues: string[] = [];
+
+          // Extrair componentes do endereço geocodificado
+          const addressComponents = geocoded.address_components || [];
+
+          // Função para extrair componente por tipo
+          const getComponent = (types: string[]) => {
+            for (const type of types) {
+              const component = addressComponents.find((c: any) => c.types.includes(type));
+              if (component) return component.long_name;
+            }
+            return null;
+          };
+
+          // Extrair bairro e cidade do geocoding
+          const geocodedBairro = getComponent(['sublocality_level_1', 'sublocality', 'neighborhood', 'political']);
+          const geocodedCidade = getComponent(['administrative_area_level_2', 'locality']);
+
+          // Normalizar valores
+          const originalBairro = normalizeForComparison(original['Bairro'] || '');
+          const originalCidade = normalizeForComparison(original['Município'] || '');
+          const normalizedGeoBairro = normalizeForComparison(geocodedBairro || '');
+          const normalizedGeoCidade = normalizeForComparison(geocodedCidade || '');
+
+          // Verificar bairro - usa comparação parcial (contains)
+          if (originalBairro && normalizedGeoBairro &&
+              !normalizedGeoBairro.includes(originalBairro) &&
+              !originalBairro.includes(normalizedGeoBairro)) {
+            issues.push(`Bairro divergente: esperado "${original['Bairro']}", mas não encontrado no endereço geocodificado`);
+          }
+
+          // Verificar cidade - usa comparação parcial (contains)
+          if (originalCidade && normalizedGeoCidade &&
+              !normalizedGeoCidade.includes(originalCidade) &&
+              !originalCidade.includes(normalizedGeoCidade)) {
+            issues.push(`Cidade divergente: esperado "${original['Município']}", mas não encontrado no endereço geocodificado`);
+          }
+
+          return issues;
+        };
+
         const geocodedStopsPromises = stopsToProcess.map(async (item) => {
             const geocoded = await geocodeAddress(item.addressString);
             if (geocoded) {
+                // Validar endereço
+                const validationIssues = validateAddress(geocoded, item.originalAddressParts);
+
                 const stopData: PlaceValue = {
                     ...geocoded,
+                    // Usa o endereço original da planilha ao invés do formatado pelo Google
+                    // para preservar nomes de rua com números (ex: "Rua T 48")
+                    address: item.addressString.replace(', Brasil', ''),
                     customerName: item.customerName,
                     phone: item.phone,
                     notes: item.notes,
@@ -691,6 +768,9 @@ export default function NewRoutePage() {
                     timeWindowStart: item.timeWindowStart,
                     timeWindowEnd: item.timeWindowEnd,
                     complemento: item.complemento,
+                    originalAddressParts: item.originalAddressParts,
+                    validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
+                    hasValidationIssues: validationIssues.length > 0,
                 };
                 // se "nome" vier só com dígitos (tipo 10), descarta
                 if (stopData.customerName && /^\d+$/.test(stopData.customerName)) {
@@ -703,12 +783,31 @@ export default function NewRoutePage() {
 
         const newStops = (await Promise.all(geocodedStopsPromises)).filter((s): s is PlaceValue => s !== null);
 
-        setStops(prevStops => [...prevStops, ...newStops]);
+        // Separar em grupos: válidos e problemáticos
+        const valid = newStops.filter(stop => !stop.hasValidationIssues);
+        const problematic = newStops.filter(stop => stop.hasValidationIssues);
 
-        toast({
-          title: 'Importação Concluída!',
-          description: `${newStops.length} de ${stopsToProcess.length} endereços foram adicionados à rota.`,
-        });
+        setValidatedStops(valid);
+        setProblematicStops(problematic);
+
+        // Adicionar apenas os endereços válidos às paradas
+        setStops(prevStops => [...prevStops, ...valid]);
+
+        // Mostrar diálogo de validação se houver endereços problemáticos
+        if (problematic.length > 0) {
+          setIsValidationDialogOpen(true);
+          toast({
+            title: 'Atenção: Endereços Requerem Verificação',
+            description: `${problematic.length} endereço(s) com divergências. ${valid.length} endereço(s) validado(s).`,
+            variant: 'destructive',
+          });
+        } else {
+          toast({
+            title: 'Importação Concluída!',
+            description: `${newStops.length} de ${stopsToProcess.length} endereços foram adicionados à rota.`,
+          });
+        }
+
         setIsImporting(false);
         setFileToProcess(null);
         setCsvContent('');
@@ -1140,6 +1239,154 @@ export default function NewRoutePage() {
             </DialogClose>
             <Button onClick={handleSaveNewOrigin}>
               Salvar Origem
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Address Validation Dialog */}
+      <Dialog open={isValidationDialogOpen} onOpenChange={setIsValidationDialogOpen}>
+        <DialogContent className="sm:max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Validação de Endereços Importados</DialogTitle>
+            <DialogDescription>
+              Alguns endereços apresentaram divergências e requerem sua atenção
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 overflow-y-auto max-h-[60vh] pr-2">
+            {/* Grupo: Serviços Prontos para Roteirizar */}
+            {validatedStops.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedGroup(expandedGroup === 'valid' ? null : 'valid')}
+                  className="w-full flex items-center justify-between p-4 bg-green-50 hover:bg-green-100 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-500 text-white font-bold">
+                      {validatedStops.length}
+                    </div>
+                    <div className="text-left">
+                      <h3 className="font-semibold text-green-900">Serviços prontos para roteirizar</h3>
+                      <p className="text-sm text-green-700">Endereços validados com sucesso</p>
+                    </div>
+                  </div>
+                  <div className={`transform transition-transform ${expandedGroup === 'valid' ? 'rotate-180' : ''}`}>
+                    ▼
+                  </div>
+                </button>
+                {expandedGroup === 'valid' && (
+                  <div className="p-4 bg-white border-t space-y-2 max-h-64 overflow-y-auto">
+                    {validatedStops.map((stop, index) => (
+                      <div key={index} className="p-3 border rounded-md hover:bg-gray-50">
+                        <div className="font-medium">{stop.customerName || `Parada ${index + 1}`}</div>
+                        <div className="text-sm text-muted-foreground">{stop.address}</div>
+                        {stop.orderNumber && <div className="text-xs text-muted-foreground">Pedido: {stop.orderNumber}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Grupo: Atenção! Confira esses serviços */}
+            {problematicStops.length > 0 && (
+              <div className="border rounded-lg overflow-hidden border-red-300">
+                <button
+                  onClick={() => setExpandedGroup(expandedGroup === 'problematic' ? null : 'problematic')}
+                  className="w-full flex items-center justify-between p-4 bg-red-50 hover:bg-red-100 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-500 text-white font-bold">
+                      {problematicStops.length}
+                    </div>
+                    <div className="text-left">
+                      <h3 className="font-semibold text-red-900">Atenção! Confira esses serviços</h3>
+                      <p className="text-sm text-red-700">Endereços com possíveis divergências</p>
+                    </div>
+                  </div>
+                  <div className={`transform transition-transform ${expandedGroup === 'problematic' ? 'rotate-180' : ''}`}>
+                    ▼
+                  </div>
+                </button>
+                {expandedGroup === 'problematic' && (
+                  <div className="p-4 bg-white border-t space-y-3 max-h-64 overflow-y-auto">
+                    {problematicStops.map((stop, index) => (
+                      <div key={index} className="p-3 border border-red-200 rounded-md bg-red-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium text-red-900">{stop.customerName || `Parada ${index + 1}`}</div>
+                            <div className="text-sm text-muted-foreground mt-1">{stop.address}</div>
+                            {stop.orderNumber && <div className="text-xs text-muted-foreground mt-1">Pedido: {stop.orderNumber}</div>}
+                            {stop.validationIssues && stop.validationIssues.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                {stop.validationIssues.map((issue, idx) => (
+                                  <div key={idx} className="text-xs text-red-700 flex items-start gap-1">
+                                    <span className="text-red-500">⚠</span>
+                                    <span>{issue}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              // Adicionar o endereço problemático às paradas para edição
+                              setStops(prev => [...prev, stop]);
+                              setProblematicStops(prev => prev.filter((_, i) => i !== index));
+                              toast({
+                                title: 'Endereço Adicionado',
+                                description: 'O endereço foi adicionado à lista. Você pode editá-lo manualmente.',
+                              });
+                            }}
+                          >
+                            Adicionar Mesmo Assim
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // Limpar endereços problemáticos
+                setProblematicStops([]);
+                setValidatedStops([]);
+                setIsValidationDialogOpen(false);
+              }}
+            >
+              Descartar Problemáticos
+            </Button>
+            <Button
+              onClick={() => {
+                // Adicionar todos os endereços problemáticos
+                setStops(prev => [...prev, ...problematicStops]);
+                setProblematicStops([]);
+                setValidatedStops([]);
+                setIsValidationDialogOpen(false);
+                toast({
+                  title: 'Todos Adicionados',
+                  description: 'Todos os endereços foram adicionados. Revise manualmente os que têm divergências.',
+                });
+              }}
+            >
+              Adicionar Todos
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => {
+                setValidatedStops([]);
+                setProblematicStops([]);
+                setIsValidationDialogOpen(false);
+              }}
+            >
+              Concluir
             </Button>
           </DialogFooter>
         </DialogContent>

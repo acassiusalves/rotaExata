@@ -2,16 +2,17 @@
 "use client";
 
 import * as React from 'react';
-import { X, Navigation, Share2, Copy, Check } from 'lucide-react';
+import { X, Navigation, Share2, Copy, Check, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RouteMap } from '@/components/maps/RouteMap';
-import { doc, Timestamp, onSnapshot } from 'firebase/firestore';
+import { doc, Timestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import type { PlaceValue, RouteInfo, DriverLocation } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { format, startOfDay, endOfDay } from 'date-fns';
 
 export type RouteDocument = RouteInfo & {
   id: string;
@@ -43,9 +44,57 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
   const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
   const [currentStopIndex, setCurrentStopIndex] = React.useState<number>(0);
   const [copied, setCopied] = React.useState(false);
+  const [allRoutes, setAllRoutes] = React.useState<RouteDocument[]>([]);
+  const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
-  // Subscribe to real-time updates
+  // Load all routes from the same date
+  React.useEffect(() => {
+    if (!route?.plannedDate || !isOpen) return;
+
+    const loadRoutesFromSameDay = async () => {
+      try {
+        const routeDate = route.plannedDate.toDate();
+        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
+        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
+
+        const q = query(
+          collection(db, 'routes'),
+          where('plannedDate', '>=', dayStart),
+          where('plannedDate', '<=', dayEnd)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const routes: RouteDocument[] = [];
+        const visibility: Record<string, boolean> = {};
+
+        querySnapshot.forEach((doc) => {
+          const routeData = {
+            id: doc.id,
+            ...doc.data(),
+          } as RouteDocument;
+
+          routes.push(routeData);
+          // Main route visible, others hidden by default
+          visibility[doc.id] = doc.id === route.id;
+        });
+
+        console.log('📍 Rotas carregadas:', routes.length);
+        console.log('📍 Rota principal ID:', route.id);
+        console.log('📍 Visibilidade:', visibility);
+        console.log('📍 Rotas:', routes.map(r => ({ id: r.id, name: r.name })));
+
+        setAllRoutes(routes);
+        setRouteVisibility(visibility);
+      } catch (error) {
+        console.error('Error loading routes from same day:', error);
+      }
+    };
+
+    loadRoutesFromSameDay();
+  }, [route?.id, route?.plannedDate, isOpen]);
+
+  // Subscribe to real-time updates for the main route
   React.useEffect(() => {
     if (!route?.id || !isOpen) return;
 
@@ -58,6 +107,16 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
         }
         if (data.currentStopIndex !== undefined) {
           setCurrentStopIndex(data.currentStopIndex);
+        }
+        // Update route data if stops, polyline, or distance changed
+        if (data.stops || data.encodedPolyline || data.distanceMeters || data.duration) {
+          setRoute((prev: any) => prev ? {
+            ...prev,
+            stops: data.stops || prev.stops,
+            encodedPolyline: data.encodedPolyline || prev.encodedPolyline,
+            distanceMeters: data.distanceMeters ?? prev.distanceMeters,
+            duration: data.duration || prev.duration,
+          } : prev);
         }
       }
     });
@@ -107,18 +166,35 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     }
   };
 
+  const toggleRouteVisibility = (routeId: string) => {
+    setRouteVisibility(prev => ({
+      ...prev,
+      [routeId]: !prev[routeId]
+    }));
+  };
+
   if (!route) return null;
 
-  const mapRoute: RouteInfo = {
-    stops: route.stops,
-    encodedPolyline: route.encodedPolyline,
-    distanceMeters: route.distanceMeters,
-    duration: route.duration,
-    color: route.color,
-    visible: true,
-    currentLocation: driverLocation || undefined,
-    currentStopIndex,
-  };
+  // Convert all routes to RouteInfo format with visibility
+  const mapRoutes: RouteInfo[] = allRoutes.map(r => ({
+    stops: r.stops,
+    encodedPolyline: r.encodedPolyline,
+    distanceMeters: r.distanceMeters,
+    duration: r.duration,
+    color: r.color,
+    visible: routeVisibility[r.id] ?? false,
+    // Only add location for the main route
+    currentLocation: r.id === route.id ? (driverLocation || undefined) : undefined,
+    currentStopIndex: r.id === route.id ? currentStopIndex : undefined,
+  }));
+
+  console.log('🗺️ Total de rotas no estado:', allRoutes.length);
+  console.log('🗺️ Rotas para renderizar no mapa:', mapRoutes.length);
+  console.log('🗺️ Visibilidade das rotas:', mapRoutes.map(r => ({
+    stops: r.stops.length,
+    color: r.color,
+    visible: r.visible
+  })));
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -181,10 +257,45 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                         </Badge>
                     )}
                 </div>
+
+                {/* Routes list with visibility toggles */}
+                {allRoutes.length > 1 && (
+                  <div className="absolute right-4 top-20 z-10 flex flex-col gap-2 max-w-xs">
+                    <div className="bg-white rounded-lg shadow-lg p-3">
+                      <h3 className="text-sm font-semibold mb-2">Rotas do Período</h3>
+                      <div className="space-y-1">
+                        {allRoutes.map(r => (
+                          <button
+                            key={r.id}
+                            onClick={() => toggleRouteVisibility(r.id)}
+                            className="w-full flex items-center justify-between p-2 rounded hover:bg-gray-100 transition-colors text-left"
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <div
+                                className="w-3 h-3 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: r.color }}
+                              />
+                              <span className="text-sm font-medium truncate">{r.name}</span>
+                              {r.id === route.id && (
+                                <Badge variant="outline" className="text-xs">Principal</Badge>
+                              )}
+                            </div>
+                            {routeVisibility[r.id] ? (
+                              <Eye className="h-4 w-4 text-primary flex-shrink-0" />
+                            ) : (
+                              <EyeOff className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <RouteMap
                     height={-1}
                     origin={route.origin}
-                    routes={[mapRoute]}
+                    routes={mapRoutes}
                     driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : undefined}
                 />
             </div>

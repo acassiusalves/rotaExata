@@ -38,6 +38,9 @@ const createInfoWindowContent = (
         <span style="color: #666; align-self: start;">Endereço:</span>
         <p style="margin: 0; word-break: break-word;">${address}</p>
 
+        <span style="color: #666; align-self: start;">Complemento:</span>
+        <p style="margin: 0; word-break: break-word;">${stop.complemento || '--'}</p>
+
         <span style="color: #666; align-self: start;">Obs:</span>
         <p style="margin: 0; word-break: break-word; font-style: italic;">${stop.notes || '--'}</p>
       </div>
@@ -92,6 +95,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   const entriesRef = React.useRef<Map<string, { marker: any; info: google.maps.InfoWindow }>>(
     new Map()
   );
+  const hasInitializedBoundsRef = React.useRef<boolean>(false);
 
   React.useImperativeHandle(ref, () => ({
     openStopInfo: (stopId: string) => {
@@ -222,12 +226,15 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Handle multiple routes with different colors
     if (routes && routes.length > 0) {
         routes.forEach(route => {
-            if (route.stops) {
+            // Only render if route is visible (defaults to true if not specified)
+            const isVisible = route.visible !== false;
+
+            if (isVisible && route.stops) {
                 route.stops.forEach((stop, index) => {
                     addStop(stop, index, route.color, false)
                 });
             }
-            if (route.encodedPolyline) {
+            if (isVisible && route.encodedPolyline) {
                  const path = google.maps.geometry.encoding.decodePath(route.encodedPolyline);
                  const poly = new google.maps.Polyline({ map, path, strokeColor: route.color, strokeWeight: 5, strokeOpacity: 0.8 });
                  polylinesRef.current.push(poly);
@@ -245,9 +252,10 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
-
-    if (!bounds.isEmpty()) {
+    // Only fit bounds on first render to preserve user's zoom level
+    if (!bounds.isEmpty() && !hasInitializedBoundsRef.current) {
         map.fitBounds(bounds, 100); // 100px padding
+        hasInitializedBoundsRef.current = true;
     }
 
   }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop]);

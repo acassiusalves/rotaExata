@@ -65,6 +65,8 @@ function SortableStop({
 
   // Check if this specific stop was moved by the user
   const wasMoved = (stop as any)._wasMoved === true;
+  const movedFromRoute = (stop as any)._movedFromRoute;
+  const originalRouteColor = (stop as any)._originalRouteColor;
 
   // Apply different styles based on status
   let buttonBgColor, buttonTextColor, buttonBorderColor;
@@ -111,11 +113,19 @@ function SortableStop({
               e.stopPropagation();
               setContextMenuOpen(true);
             }}
-            className={`flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs ${wasMoved ? 'font-extrabold' : 'font-semibold'} active:cursor-grabbing`}
+            className={`relative flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs ${wasMoved ? 'font-extrabold' : 'font-semibold'} active:cursor-grabbing`}
             style={{ touchAction: "none" }}
-            title={`Parada ${(originalIndex ?? index) + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}${wasMoved ? " (Posição alterada)" : ""}`}
+            title={`Parada ${(originalIndex ?? index) + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}${wasMoved ? " (Posição alterada)" : ""}${movedFromRoute ? ` (Veio da rota ${movedFromRoute})` : ""}`}
           >
             {(originalIndex ?? index) + 1}
+            {/* Show original route color indicator if moved from another route */}
+            {wasMoved && originalRouteColor && (
+              <div
+                className="absolute -top-1 -right-1 h-2 w-2 rounded-full border border-white"
+                style={{ backgroundColor: originalRouteColor }}
+                title={`Veio da rota ${movedFromRoute}`}
+              />
+            )}
           </button>
         </PopoverTrigger>
         <PopoverContent
