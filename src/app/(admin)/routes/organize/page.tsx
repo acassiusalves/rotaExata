@@ -506,9 +506,11 @@ export default function OrganizeRoutePage() {
     return () => unsubscribe();
   }, []);
 
-  // Load additional routes from same period
+  // Load additional routes from same period (only for existing routes, not new ones)
   React.useEffect(() => {
     if (!routeData?.routeDate) return;
+    // Only load additional routes if this is an existing route being edited/monitored
+    if (!routeData?.isExistingRoute) return;
 
     const loadAdditionalRoutes = async () => {
       try {
@@ -1732,25 +1734,25 @@ export default function OrganizeRoutePage() {
                             <Table>
                             <TableHeader>
                                 <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
-                                    <TableHead className='w-12'></TableHead>
-                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
-                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
-                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
-                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
-                                    <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
-                                    <TableHead className='w-[35%] text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
-                                    <TableHead className='w-32 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
+                                    <TableHead className='w-12 py-3 px-4'></TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
+                                    <TableHead className='w-[35%] py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                                    <TableHead className='w-32 py-3 px-4 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                             {routesForTable.map(routeItem => (
-                                <TableRow key={routeItem.key} className="border-b border-slate-200 dark:border-slate-800">
-                                    <TableCell className="align-middle">
+                                <TableRow key={routeItem.key} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    <TableCell className="py-4 px-4 align-middle">
                                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
                                             {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                         </Button>
                                     </TableCell>
-                                    <TableCell className="font-medium text-slate-900 dark:text-slate-100">
+                                    <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
                                         <div className="flex items-center gap-2">
                                           <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                                           <EditableRouteName
@@ -1761,11 +1763,11 @@ export default function OrganizeRoutePage() {
                                           />
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-slate-700 dark:text-slate-300">{routeItem.data.stops.length}</TableCell>
-                                    <TableCell className="text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
-                                    <TableCell className="text-slate-700 dark:text-slate-300">{formatDuration(routeItem.data.duration)}</TableCell>
-                                    <TableCell className="text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
-                                    <TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{routeItem.data.stops.length}</TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(routeItem.data.duration)}</TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
+                                    <TableCell className="py-4 px-4">
                                         <RouteTimeline
                                         routeKey={routeItem.key}
                                         stops={pendingEdits[routeItem.key] || routeItem.data.stops}
@@ -1781,7 +1783,7 @@ export default function OrganizeRoutePage() {
                                         onShowInfo={handleShowStopInfo}
                                         />
                                     </TableCell>
-                                    <TableCell className="text-right">
+                                    <TableCell className="py-4 px-4 text-right">
                                         {pendingEdits[routeItem.key] ? (
                                             <div className="flex gap-2 justify-end">
                                                 <Button
@@ -1791,6 +1793,7 @@ export default function OrganizeRoutePage() {
                                                         setPendingEdits(prev => ({ ...prev, [routeItem.key]: null }));
                                                         toast({ title: 'Edições canceladas' });
                                                     }}
+                                                    className="border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50"
                                                 >
                                                     Cancelar
                                                 </Button>
@@ -1847,20 +1850,20 @@ export default function OrganizeRoutePage() {
                     <Table>
                       <TableHeader>
                         <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
-                          <TableHead className='w-12'></TableHead>
-                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
-                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
-                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
-                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
-                          <TableHead className="text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
-                          <TableHead className='w-[35%] text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
-                          <TableHead className='w-32 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
+                          <TableHead className='w-12 py-3 px-4'></TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
+                          <TableHead className='w-[35%] py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                          <TableHead className='w-32 py-3 px-4 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {additionalRoutes.map((route, idx) => (
-                          <TableRow key={`additional-${idx}`} className="border-b border-slate-200 dark:border-slate-800">
-                            <TableCell className="align-middle">
+                          <TableRow key={`additional-${idx}`} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <TableCell className="py-4 px-4 align-middle">
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1874,17 +1877,17 @@ export default function OrganizeRoutePage() {
                                 )}
                               </Button>
                             </TableCell>
-                            <TableCell className="font-medium text-slate-900 dark:text-slate-100">
+                            <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
                               <div className="flex items-center gap-2">
                                 <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                                 <span>Rota {idx + 2}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-slate-700 dark:text-slate-300">{route.stops.length}</TableCell>
-                            <TableCell className="text-slate-700 dark:text-slate-300">{formatDistance(route.distanceMeters)} km</TableCell>
-                            <TableCell className="text-slate-700 dark:text-slate-300">{formatDuration(route.duration)}</TableCell>
-                            <TableCell className="text-slate-700 dark:text-slate-300">{calculateFreightCost(route.distanceMeters)}</TableCell>
-                            <TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{route.stops.length}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.distanceMeters)} km</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(route.duration)}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(route.distanceMeters)}</TableCell>
+                            <TableCell className="py-4 px-4">
                               <RouteTimeline
                                 routeKey={`additional-${idx}` as any}
                                 stops={route.stops}
@@ -1896,7 +1899,7 @@ export default function OrganizeRoutePage() {
                                 }}
                               />
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="py-4 px-4 text-right">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1976,21 +1979,21 @@ export default function OrganizeRoutePage() {
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    <div className="flex items-center justify-between rounded-lg border p-3">
-                                        <span className="text-sm font-medium text-muted-foreground">Motorista</span>
+                                    <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/50">
+                                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Motorista</span>
                                         {driver ? (
                                             <div className="flex items-center gap-2">
                                                 <Avatar className="h-6 w-6">
                                                     <AvatarImage src={driver.avatarUrl} alt={driver.name} />
                                                     <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
                                                 </Avatar>
-                                                <span className="text-sm font-semibold">{driver.name}</span>
+                                                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{driver.name}</span>
                                             </div>
                                         ) : (
                                             <span className="text-sm font-medium text-destructive">Não Atribuído</span>
                                         )}
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
+                                    <div className="text-xs text-slate-600 dark:text-slate-400">
                                         Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
                                     </div>
                                 </CardContent>
