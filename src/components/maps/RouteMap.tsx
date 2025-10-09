@@ -20,9 +20,22 @@ const createInfoWindowContent = (
   const title = index !== undefined ? `Parada ${index + 1}` : 'Serviço Avulso';
   const stopId = String(stop.id ?? stop.placeId ?? index);
 
+  // Status badge
+  let statusBadge = '';
+  if (stop.deliveryStatus === 'completed') {
+    statusBadge = '<div style="display: inline-block; background: #22c55e; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 12px;">✓ ENTREGUE</div>';
+  } else if (stop.deliveryStatus === 'failed') {
+    statusBadge = '<div style="display: inline-block; background: #ef4444; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 12px;">✗ FALHOU</div>';
+  } else if (stop.deliveryStatus === 'arrived') {
+    statusBadge = '<div style="display: inline-block; background: #3b82f6; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 12px;">↓ CHEGOU</div>';
+  } else if (stop.deliveryStatus === 'en_route') {
+    statusBadge = '<div style="display: inline-block; background: #f59e0b; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 12px;">→ A CAMINHO</div>';
+  }
+
   return `
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
-      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">${title}</h4>
+      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 8px 0;">${title}</h4>
+      ${statusBadge}
       <div style="display: grid; grid-template-columns: 90px 1fr; gap: 8px;">
         <span style="color: #666;">Cliente:</span>
         <strong style="color: #000;">${stop.customerName || '--'}</strong>
@@ -179,6 +192,29 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       if (!stop.lat || !stop.lng) return;
       const sid = String(stop.id ?? stop.placeId ?? index);
       const isHighlighted = highlightedStopIds.includes(sid);
+      const isCompleted = stop.deliveryStatus === 'completed';
+      const isFailed = stop.deliveryStatus === 'failed';
+
+      // Determinar cor e ícone baseado no status
+      let markerBackground = color;
+      let markerBorder = "#FFFFFF";
+      let markerGlyph = index !== undefined ? `${index + 1}` : '';
+      let markerScale = 1;
+
+      if (isHighlighted) {
+        markerBackground = '#FFD700';
+        markerBorder = '#FF6B00';
+        markerGlyph = '★';
+        markerScale = 1.5;
+      } else if (isCompleted) {
+        markerBackground = '#22c55e'; // Verde para concluído
+        markerBorder = '#16a34a';
+        markerGlyph = '✓';
+      } else if (isFailed) {
+        markerBackground = '#ef4444'; // Vermelho para falha
+        markerBorder = '#dc2626';
+        markerGlyph = '✗';
+      }
 
       const pinElement = isUnassigned
         ? new google.maps.marker.PinElement({
@@ -189,11 +225,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             glyph: isHighlighted ? '★' : ''
           })
         : new google.maps.marker.PinElement({
-            background: isHighlighted ? '#FFD700' : color,
-            borderColor: isHighlighted ? '#FF6B00' : "#FFFFFF",
-            glyph: index !== undefined ? `${index + 1}` : '',
-            glyphColor: isHighlighted ? "#000000" : "#FFFFFF",
-            scale: isHighlighted ? 1.5 : 1,
+            background: markerBackground,
+            borderColor: markerBorder,
+            glyph: markerGlyph,
+            glyphColor: "#FFFFFF",
+            scale: markerScale,
           });
 
       const marker = new google.maps.marker.AdvancedMarkerElement({
