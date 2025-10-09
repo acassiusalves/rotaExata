@@ -211,7 +211,36 @@ export function DeliveryConfirmationDialog({
     setIsCameraActive(false);
   };
 
-  const capturePhoto = () => {
+  const compressImage = (dataUrl: string, maxWidth: number = 800, quality: number = 0.6): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Redimensionar se necessário
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = dataUrl;
+    });
+  };
+
+  const capturePhoto = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -221,16 +250,22 @@ export function DeliveryConfirmationDialog({
     canvas.height = video.videoHeight;
     context.drawImage(video, 0, 0);
     const photoData = canvas.toDataURL('image/jpeg', 0.8);
-    setPhoto(photoData);
+
+    // Comprimir a imagem antes de salvar
+    const compressedPhoto = await compressImage(photoData, 800, 0.6);
+    setPhoto(compressedPhoto);
     stopCamera();
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
-      setPhoto(e.target?.result as string);
+    reader.onload = async (e) => {
+      const photoData = e.target?.result as string;
+      // Comprimir a imagem antes de salvar
+      const compressedPhoto = await compressImage(photoData, 800, 0.6);
+      setPhoto(compressedPhoto);
     };
     reader.readAsDataURL(file);
   };
