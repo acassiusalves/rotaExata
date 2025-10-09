@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   StopCircle,
   RadioTower,
+  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -208,7 +209,9 @@ export default function RouteDetailsPage() {
 
   const getCompletionPercentage = () => {
     if (!route || route.stops.length === 0) return 0;
-    const completedCount = route.stops.filter(stop => stop.deliveryStatus === 'completed').length;
+    const completedCount = route.stops.filter(stop =>
+      stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed'
+    ).length;
     return (completedCount / route.stops.length) * 100;
   };
 
@@ -392,7 +395,7 @@ export default function RouteDetailsPage() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {route.stops.filter(s => s.deliveryStatus === 'completed').length} de {route.stops.length} entregas concluídas
+                  {route.stops.filter(s => s.deliveryStatus === 'completed' || s.deliveryStatus === 'failed').length} de {route.stops.length} entregas processadas
                   {!canFinishRoute() && ' • Mínimo 80% para finalizar'}
                 </p>
               </div>
@@ -450,6 +453,12 @@ export default function RouteDetailsPage() {
                                         Entregue
                                     </Badge>
                                 )}
+                                {stop.deliveryStatus === 'failed' && (
+                                    <Badge variant="destructive">
+                                        <XCircle className="mr-1 h-3 w-3" />
+                                        Falhou
+                                    </Badge>
+                                )}
                             </div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
                             {stop.orderNumber && (
@@ -482,7 +491,8 @@ export default function RouteDetailsPage() {
                                         <WhatsAppIcon className="h-4 w-4" />
                                     </Button>
                                  )}
-                                {(route.status === 'in_progress' || route.status === 'dispatched') && stop.deliveryStatus !== 'completed' && (
+                                {(route.status === 'in_progress' || route.status === 'dispatched') &&
+                                 !stop.deliveryStatus && (
                                     <Button
                                         size="sm"
                                         variant="default"
