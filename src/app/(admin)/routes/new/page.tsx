@@ -577,7 +577,7 @@ export default function NewRoutePage() {
     const fieldSynonyms: Record<string, string[]> = {
       'Nome do Cliente': ['nome do cliente','nome cliente','cliente','destinatario','contato'],
       'Número Pedido':   ['numero pedido','n pedido','pedido numero','pedido n','nº pedido','n° pedido','order id','id pedido','pedido'],
-      'Número':          ['numero','nº','n°','no','n','num','#','numero casa','numero endereco'],
+      'Número':          ['numero','nº','n°','no','n','num','#','numero casa','numero endereco','nr','n º','nro'],
       // ... adicione outros sinônimos se necessário
     };
     
@@ -656,6 +656,11 @@ export default function NewRoutePage() {
                 if (systemField !== 'Ignorar') {
                     const value = getRowValue(header);
 
+                    // Debug para campo Número
+                    if (systemField === 'Número' && index < 5) {
+                        console.log(`[DEBUG Linha ${index + 1}] Header: "${header}", Valor: "${value}", Tipo: ${typeof value}`);
+                    }
+
                     if (value != null && String(value).trim() !== '') {
                         if (fieldOrder.includes(systemField)) {
                             // Apenas adiciona se o campo ainda não foi preenchido
@@ -668,13 +673,44 @@ export default function NewRoutePage() {
                 }
             }
 
+            // Debug: mostrar o que foi extraído
+            if (index < 5) {
+                console.log(`[DEBUG Linha ${index + 1}] addressParts:`, addressParts);
+            }
+
+            // Tentativa de extrair número do complemento se não houver número explícito
+            if (!addressParts['Número'] || addressParts['Número'].trim() === '') {
+                const complemento = getField(row, 'Complemento', ['Complemento']);
+                if (complemento) {
+                    // Tenta extrair número de padrões como "qd 37 lt 28", "Qd.5 Lt.20", "apt 2603", etc.
+                    // Prioriza números que aparecem após palavras como "lt", "lote", "casa", "apt", "apto"
+                    const loteMatch = complemento.match(/(?:lt|lote)\s*\.?\s*(\d+)/i);
+                    const casaMatch = complemento.match(/(?:casa|cs)\s*\.?\s*(\d+)/i);
+                    const aptoMatch = complemento.match(/(?:apt|apto|ap)\s*\.?\s*(\d+)/i);
+                    const quadraMatch = complemento.match(/(?:qd|quadra)\s*\.?\s*(\d+)/i);
+
+                    // Usa a primeira correspondência encontrada (prioriza lote > casa > apto > quadra)
+                    const extractedNumber = loteMatch?.[1] || casaMatch?.[1] || aptoMatch?.[1] || quadraMatch?.[1];
+
+                    if (extractedNumber && index < 5) {
+                        console.log(`[DEBUG Linha ${index + 1}] Número extraído do complemento "${complemento}": ${extractedNumber}`);
+                    }
+
+                    if (extractedNumber) {
+                        addressParts['Número'] = extractedNumber;
+                    }
+                }
+            }
+
             // Monta o endereço tratando ruas com números no nome
             const ruaValue = addressParts['Rua'] || '';
             const numeroValue = addressParts['Número'] || '';
 
-            // Verifica se a rua já termina com número separado por espaço (ex: "Rua T 48" ou "Avenida C 123")
-            // Padrão: letra/palavra + espaço + número no final
-            const ruaComNumeroNoNome = /[a-zA-Z]\s+\d+\s*$/.test(ruaValue);
+            // Verifica se a rua já termina com número separado por espaço E tem uma letra/palavra curta antes
+            // Exemplos que devem casar: "Rua T 48", "Avenida C 123", "Rua T4 150"
+            // Exemplos que NÃO devem casar: "Rua 137" (nome completo da rua sem letra antes)
+            // Padrão: palavra + espaço + letra curta (1-3 chars) + opcional(número) + espaço + número final
+            const ruaComNumeroNoNome = /\b[A-Za-z]{1,3}\s*\d*\s+\d+\s*$/.test(ruaValue) && !/^(Rua|Avenida|Av)\s+\d+\s*$/.test(ruaValue);
 
             // Se a rua tem número no nome, remove o campo "Número" para não duplicar
             const addressPartsAjustado = { ...addressParts };

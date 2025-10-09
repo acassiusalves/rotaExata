@@ -6,6 +6,7 @@ import type { PlaceValue, RouteInfo, DriverLocation } from "@/lib/types";
 
 export type RouteMapHandle = {
   openStopInfo: (stopId: string) => void;
+  centerOnLocation: (lat: number, lng: number, zoom?: number) => void;
 };
 
 // Função para gerar o conteúdo HTML do InfoWindow
@@ -104,6 +105,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         activeInfoWindowRef.current?.close();
         entry.info.open(mapRef.current, entry.marker);
         activeInfoWindowRef.current = entry.info;
+      }
+    },
+    centerOnLocation: (lat: number, lng: number, zoom = 15) => {
+      if (mapRef.current) {
+        mapRef.current.setCenter({ lat, lng });
+        mapRef.current.setZoom(zoom);
       }
     },
   }));

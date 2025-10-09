@@ -87,7 +87,7 @@ function SortableStop({
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} className="flex items-center relative">
+    <div ref={setNodeRef} style={style} {...attributes} className="flex items-center relative" id={`stop-${stop.id}`}>
       <div className="h-1 w-3" style={{ backgroundColor: color }} />
       <Popover open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
         <PopoverTrigger asChild onClick={(e) => e.preventDefault()}>

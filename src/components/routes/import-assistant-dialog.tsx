@@ -50,7 +50,9 @@ const normalizeString = (str: string) => {
   if (!str) return '';
   return str
     .replace(/^\uFEFF/, '')      // BOM
-    .replace(/\uFFFD/g, '')      // replacement char 
+    .replace(/\uFFFD/g, '')      // replacement char
+    .replace(/°/g, '')           // remove graus
+    .replace(/º/g, '')           // remove ordinal
     .normalize('NFKC')
     .normalize('NFD').replace(/\p{Diacritic}/gu, '') // remove acentos
     .toLowerCase()
@@ -70,7 +72,7 @@ const fieldSynonyms: Record<string, string[]> = {
   'Rua': ['logradouro', 'endereco'],
   'Município': ['cidade'],
   'Estado': ['uf'],
-  'Número': ['numero', 'nº', 'n°', 'no', 'n', 'num', '#', 'numero casa', 'numero endereco'],
+  'Número': ['numero', 'nº', 'n°', 'no', 'n', 'num', '#', 'numero casa', 'numero endereco', 'nr', 'n º', 'n°', 'nro'],
 };
 
 

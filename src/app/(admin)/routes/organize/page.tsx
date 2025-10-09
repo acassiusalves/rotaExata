@@ -34,6 +34,8 @@ import {
   Plus,
   PackagePlus,
   MoreHorizontal,
+  Search,
+  X,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
@@ -436,6 +438,16 @@ export default function OrganizeRoutePage() {
   const startYRef = React.useRef<number>(0);
   const startHeightRef = React.useRef<number>(50);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [searchResults, setSearchResults] = React.useState<Array<{
+    stop: PlaceValue;
+    routeKey: 'A' | 'B' | 'unassigned';
+    index: number;
+    matchedField: string;
+  }>>([]);
+  const [selectedSearchResult, setSelectedSearchResult] = React.useState<number>(-1);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsResizing(true);
     startYRef.current = e.clientY;
@@ -702,6 +714,102 @@ export default function OrganizeRoutePage() {
     },
     []
   );
+
+  // Search functionality
+  const handleSearch = React.useCallback((query: string) => {
+    setSearchQuery(query);
+    setSelectedSearchResult(-1);
+
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    const normalizedQuery = query.toLowerCase().trim();
+    const results: Array<{
+      stop: PlaceValue;
+      routeKey: 'A' | 'B' | 'unassigned';
+      index: number;
+      matchedField: string;
+    }> = [];
+
+    const searchInStop = (stop: PlaceValue, routeKey: 'A' | 'B' | 'unassigned', index: number) => {
+      const fields = [
+        { value: stop.customerName, label: 'Nome do Cliente' },
+        { value: stop.address, label: 'Endereço' },
+        { value: stop.phone, label: 'Telefone' },
+        { value: stop.orderNumber, label: 'Número do Pedido' },
+        { value: stop.notes, label: 'Observações' },
+        { value: stop.complemento, label: 'Complemento' },
+      ];
+
+      for (const field of fields) {
+        if (field.value && field.value.toLowerCase().includes(normalizedQuery)) {
+          results.push({ stop, routeKey, index, matchedField: field.label });
+          break; // Only add once per stop
+        }
+      }
+    };
+
+    // Search in Route A
+    if (routeA && routeA.stops) {
+      routeA.stops.forEach((stop, index) => searchInStop(stop, 'A', index));
+    }
+
+    // Search in Route B
+    if (routeB && routeB.stops) {
+      routeB.stops.forEach((stop, index) => searchInStop(stop, 'B', index));
+    }
+
+    // Search in unassigned stops
+    unassignedStops.forEach((stop, index) => searchInStop(stop, 'unassigned', index));
+
+    setSearchResults(results);
+  }, [routeA, routeB, unassignedStops]);
+
+  const highlightSearchResult = React.useCallback((result: typeof searchResults[0]) => {
+    // Scroll to the stop in the timeline
+    const element = document.getElementById(`stop-${result.stop.id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Add a temporary highlight effect
+      element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+      setTimeout(() => {
+        element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
+      }, 2000);
+    }
+
+    // Center the map on the stop
+    if (mapApiRef.current) {
+      mapApiRef.current.centerOnLocation(result.stop.lat, result.stop.lng, 16);
+    }
+  }, []);
+
+  const handleSearchResultSelect = React.useCallback((index: number) => {
+    setSelectedSearchResult(index);
+    if (index >= 0 && index < searchResults.length) {
+      highlightSearchResult(searchResults[index]);
+    }
+  }, [searchResults, highlightSearchResult]);
+
+  const handleSearchKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    if (searchResults.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSearchResult(prev =>
+        prev < searchResults.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSearchResult(prev =>
+        prev > 0 ? prev - 1 : searchResults.length - 1
+      );
+    } else if (e.key === 'Enter' && selectedSearchResult >= 0) {
+      e.preventDefault();
+      highlightSearchResult(searchResults[selectedSearchResult]);
+    }
+  }, [searchResults, selectedSearchResult, highlightSearchResult]);
 
   const handleManualServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
@@ -1616,6 +1724,82 @@ export default function OrganizeRoutePage() {
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
+      {/* Search Bar at Top */}
+      <div className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Organizar Rota</h1>
+
+          {/* Search Box */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Buscar ponto (nome, endereço, telefone, pedido...)"
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              className="pl-9 pr-9 h-9"
+            />
+            {searchQuery && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                onClick={() => handleSearch('')}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Search Results Dropdown */}
+            {searchResults.length > 0 && (
+              <div className="absolute top-full mt-2 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg max-h-80 overflow-y-auto z-50">
+                <div className="p-2 space-y-1">
+                  {searchResults.map((result, index) => (
+                    <button
+                      key={`${result.stop.id}-${index}`}
+                      className={`w-full text-left p-3 rounded-md transition-colors ${
+                        selectedSearchResult === index
+                          ? 'bg-primary/10 dark:bg-primary/20'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                      onClick={() => handleSearchResultSelect(index)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">
+                            {result.stop.customerName || 'Cliente não informado'}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {result.stop.address}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {result.matchedField}
+                            </Badge>
+                            <Badge variant={result.routeKey === 'A' ? 'default' : result.routeKey === 'B' ? 'secondary' : 'outline'} className="text-xs">
+                              {result.routeKey === 'A' ? 'Rota 1' : result.routeKey === 'B' ? 'Rota 2' : 'Não alocado'}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {searchQuery && searchResults.length === 0 && (
+              <div className="absolute top-full mt-2 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg p-4 z-50">
+                <p className="text-sm text-muted-foreground text-center">
+                  Nenhum ponto encontrado
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}vh` }}>
         <RouteMap
           ref={mapApiRef}
