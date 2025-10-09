@@ -41,7 +41,7 @@ service cloud.firestore {
     // RULES FOR ROUTES
     match /routes/{routeId} {
       // Admins can do anything
-      allow create, delete, read, list: if isAppAdmin();
+      allow create, delete, read, list, update: if isAppAdmin();
       // Drivers can only read routes assigned to them
       allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
       // Drivers can update their assigned routes (e.g., change status)

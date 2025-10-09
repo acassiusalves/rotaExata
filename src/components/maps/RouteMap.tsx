@@ -80,10 +80,11 @@ type Props = {
   driverLocations?: DriverLocation[];
   onRemoveStop?: (stopId: string) => void;
   onEditStop?: (stopId: string) => void;
+  highlightedStopIds?: string[];
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop, highlightedStopIds = [] }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -177,14 +178,22 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     const addStop = (stop: PlaceValue, index?: number, color?: string, isUnassigned = false) => {
       if (!stop.lat || !stop.lng) return;
       const sid = String(stop.id ?? stop.placeId ?? index);
+      const isHighlighted = highlightedStopIds.includes(sid);
 
       const pinElement = isUnassigned
-        ? new google.maps.marker.PinElement({ background: '#000000', borderColor: '#FFFFFF', glyph: '' })
+        ? new google.maps.marker.PinElement({
+            background: isHighlighted ? '#FFD700' : '#000000',
+            borderColor: isHighlighted ? '#FF6B00' : '#FFFFFF',
+            glyphColor: '#000000',
+            scale: isHighlighted ? 1.5 : 1,
+            glyph: isHighlighted ? '★' : ''
+          })
         : new google.maps.marker.PinElement({
-            background: color,
-            borderColor: "#FFFFFF",
+            background: isHighlighted ? '#FFD700' : color,
+            borderColor: isHighlighted ? '#FF6B00' : "#FFFFFF",
             glyph: index !== undefined ? `${index + 1}` : '',
-            glyphColor: "#FFFFFF",
+            glyphColor: isHighlighted ? "#000000" : "#FFFFFF",
+            scale: isHighlighted ? 1.5 : 1,
           });
 
       const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -192,6 +201,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         position: stop,
         content: pinElement.element,
         title: `Parada ${index !== undefined ? index + 1 : 'Avulsa'}: ${stop.customerName ?? ""}`,
+        zIndex: isHighlighted ? 1000 : undefined,
       });
       const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
 
@@ -265,7 +275,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         hasInitializedBoundsRef.current = true;
     }
 
-  }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop]);
+  }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
 
   // Update driver location marker (single)
   React.useEffect(() => {
@@ -284,7 +294,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       const truckIcon = document.createElement('div');
       truckIcon.innerHTML = `
         <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="18" fill="#2563eb" stroke="white" stroke-width="3"/>
+          <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3"/>
           <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
         </svg>
       `;
@@ -327,7 +337,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             const truckIcon = document.createElement('div');
             truckIcon.innerHTML = `
                 <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="20" cy="20" r="18" fill="#2563eb" stroke="white" stroke-width="3"/>
+                <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3"/>
                 <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
                 </svg>
             `;

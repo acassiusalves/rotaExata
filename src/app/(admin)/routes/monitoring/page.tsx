@@ -6,6 +6,15 @@ import {
   Home,
   Loader2,
   Route as RouteIcon,
+  MapPin,
+  Phone,
+  Package,
+  Clock,
+  Camera,
+  FileText,
+  CheckCircle,
+  XCircle,
+  DollarSign,
 } from 'lucide-react';
 import {
   Card,
@@ -26,6 +35,13 @@ import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { RouteMapDialog } from '@/components/routes/route-map-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -50,7 +66,11 @@ const DateBadge: React.FC<{ date: Date }> = ({ date }) => (
   </div>
 );
 
-const Rotograma: React.FC<{ stops: PlaceValue[], color?: string }> = ({ stops, color }) => (
+const Rotograma: React.FC<{
+  stops: PlaceValue[],
+  color?: string,
+  onStopClick?: (stop: PlaceValue, index: number) => void
+}> = ({ stops, color, onStopClick }) => (
   <div className="flex items-center gap-1">
     <div
       className="flex h-7 w-7 items-center justify-center rounded-md"
@@ -58,15 +78,31 @@ const Rotograma: React.FC<{ stops: PlaceValue[], color?: string }> = ({ stops, c
     >
       <Home className="h-4 w-4 text-white" />
     </div>
-    {stops.slice(0, 10).map((stop, index) => (
-      <div
-        key={stop.id || index}
-        className="flex h-7 w-7 items-center justify-center rounded-md border bg-muted text-xs font-semibold text-muted-foreground"
-        title={stop.address}
-      >
-        {index + 1}
-      </div>
-    ))}
+    {stops.slice(0, 10).map((stop, index) => {
+      const isCompleted = stop.deliveryStatus === 'completed';
+      const isFailed = stop.deliveryStatus === 'failed';
+
+      return (
+        <div
+          key={stop.id || index}
+          className={`flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold transition-colors ${
+            isCompleted
+              ? 'bg-green-500 text-white border-green-600 cursor-pointer hover:bg-green-600'
+              : isFailed
+              ? 'bg-red-500 text-white border-red-600 cursor-pointer hover:bg-red-600'
+              : 'bg-muted text-muted-foreground'
+          }`}
+          title={stop.address}
+          onClick={() => {
+            if ((isCompleted || isFailed) && onStopClick) {
+              onStopClick(stop, index);
+            }
+          }}
+        >
+          {index + 1}
+        </div>
+      );
+    })}
     {stops.length > 10 && (
       <div className="text-xs text-muted-foreground">+{stops.length - 10}</div>
     )}
@@ -78,6 +114,8 @@ export default function MonitoringPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isMapOpen, setIsMapOpen] = React.useState(false);
+  const [selectedStop, setSelectedStop] = React.useState<{ stop: PlaceValue; index: number } | null>(null);
+  const [isStopInfoOpen, setIsStopInfoOpen] = React.useState(false);
 
   React.useEffect(() => {
     const q = query(collection(db, 'routes'), orderBy('plannedDate', 'desc'));
@@ -116,6 +154,20 @@ export default function MonitoringPage() {
   const handleOpenMap = (route: RouteDocument) => {
     setSelectedRoute(route);
     setIsMapOpen(true);
+  };
+
+  const handleStopClick = (stop: PlaceValue, index: number) => {
+    setSelectedStop({ stop, index });
+    setIsStopInfoOpen(true);
+  };
+
+  const getRouteStats = (stops: PlaceValue[]) => {
+    const completed = stops.filter(s => s.deliveryStatus === 'completed').length;
+    const failed = stops.filter(s => s.deliveryStatus === 'failed').length;
+    const total = stops.length;
+    const occurrences = total;
+
+    return { completed, failed, total, occurrences };
   };
 
   if (isLoading) {
@@ -160,44 +212,47 @@ export default function MonitoringPage() {
           </div>
           {/* Body */}
           <div className="divide-y">
-            {routes.map((route) => (
-              <div
-                key={route.id}
-                className="grid grid-cols-12 gap-4 items-center px-4 py-3"
-              >
-                <div className="col-span-1">
-                  <DateBadge date={route.plannedDate.toDate()} />
-                </div>
-                <div className="col-span-2 flex items-center gap-2">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback>
-                      {route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-semibold">{route.driverInfo?.name || 'Não atribuído'}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {route.driverInfo?.vehicle?.plate ? `${route.driverInfo?.vehicle.type} - ${route.driverInfo?.vehicle.plate}` : 'Veículo não informado'}
-                    </p>
+            {routes.map((route) => {
+              const stats = getRouteStats(route.stops);
+              return (
+                <div
+                  key={route.id}
+                  className="grid grid-cols-12 gap-4 items-center px-4 py-3"
+                >
+                  <div className="col-span-1">
+                    <DateBadge date={route.plannedDate.toDate()} />
+                  </div>
+                  <div className="col-span-2 flex items-center gap-2">
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback>
+                        {route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-semibold">{route.driverInfo?.name || 'Não atribuído'}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {route.driverInfo?.vehicle?.plate ? `${route.driverInfo?.vehicle.type} - ${route.driverInfo?.vehicle.plate}` : 'Veículo não informado'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="col-span-1">
+                    <Badge variant="secondary">{route.status}</Badge>
+                  </div>
+                  <div className="col-span-1 text-center font-medium">{stats.occurrences}/{stats.total}</div>
+                  <div className="col-span-1 text-center font-medium">{stats.completed + stats.failed}/{stats.total}</div>
+                  <div className="col-span-1 text-center font-medium text-destructive">{stats.failed}</div>
+                  <div className="col-span-1 text-center font-medium text-green-600">{stats.completed}</div>
+                  <div className="col-span-3">
+                    <Rotograma stops={route.stops} color={route.color} onStopClick={handleStopClick} />
+                  </div>
+                  <div className="col-span-1 text-right">
+                    <Button variant="link" size="sm" onClick={() => handleOpenMap(route)}>
+                      VER MAPA
+                    </Button>
                   </div>
                 </div>
-                <div className="col-span-1">
-                  <Badge variant="secondary">{route.status}</Badge>
-                </div>
-                <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
-                <div className="col-span-1 text-center font-medium">0/{route.stops.length}</div>
-                <div className="col-span-1 text-center font-medium text-destructive">0</div>
-                <div className="col-span-1 text-center font-medium text-green-600">0</div>
-                <div className="col-span-3">
-                   <Rotograma stops={route.stops} color={route.color} />
-                </div>
-                <div className="col-span-1 text-right">
-                  <Button variant="link" size="sm" onClick={() => handleOpenMap(route)}>
-                    VER MAPA
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -208,6 +263,209 @@ export default function MonitoringPage() {
               route={selectedRoute}
           />
       )}
+
+      {/* Dialog de Informações da Parada */}
+      <Dialog open={isStopInfoOpen} onOpenChange={setIsStopInfoOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedStop?.stop.deliveryStatus === 'completed' ? (
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  <span>Entrega Concluída - Parada #{(selectedStop?.index || 0) + 1}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  <span>Entrega Falhou - Parada #{(selectedStop?.index || 0) + 1}</span>
+                </div>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Informações registradas pelo motorista no momento da confirmação
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedStop && (
+            <div className="space-y-6 pt-4">
+              {/* Informações do Cliente */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm text-muted-foreground uppercase">Informações do Cliente</h3>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-3">
+                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">Endereço</p>
+                      <p className="text-sm text-muted-foreground">{selectedStop.stop.address}</p>
+                    </div>
+                  </div>
+
+                  {selectedStop.stop.customerName && (
+                    <div className="flex items-start gap-3">
+                      <Package className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">Cliente</p>
+                        <p className="text-sm text-muted-foreground">{selectedStop.stop.customerName}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedStop.stop.phone && (
+                    <div className="flex items-start gap-3">
+                      <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">Telefone</p>
+                        <p className="text-sm text-muted-foreground">{selectedStop.stop.phone}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedStop.stop.orderNumber && (
+                    <div className="flex items-start gap-3">
+                      <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">Número do Pedido</p>
+                        <p className="text-sm text-muted-foreground">{selectedStop.stop.orderNumber}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Horários */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm text-muted-foreground uppercase">Horários</h3>
+                <div className="space-y-2">
+                  {selectedStop.stop.arrivedAt && (() => {
+                    try {
+                      const date = selectedStop.stop.arrivedAt instanceof Timestamp
+                        ? selectedStop.stop.arrivedAt.toDate()
+                        : new Date(selectedStop.stop.arrivedAt);
+
+                      if (isNaN(date.getTime())) return null;
+
+                      return (
+                        <div className="flex items-start gap-3">
+                          <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">Chegada</p>
+                            <p className="text-sm text-muted-foreground">
+                              {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    } catch (error) {
+                      console.error('Erro ao formatar data de chegada:', error);
+                      return null;
+                    }
+                  })()}
+
+                  {selectedStop.stop.completedAt && (() => {
+                    try {
+                      const date = selectedStop.stop.completedAt instanceof Timestamp
+                        ? selectedStop.stop.completedAt.toDate()
+                        : new Date(selectedStop.stop.completedAt);
+
+                      if (isNaN(date.getTime())) return null;
+
+                      return (
+                        <div className="flex items-start gap-3">
+                          <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">Conclusão</p>
+                            <p className="text-sm text-muted-foreground">
+                              {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    } catch (error) {
+                      console.error('Erro ao formatar data de conclusão:', error);
+                      return null;
+                    }
+                  })()}
+                </div>
+              </div>
+
+              {/* Pagamentos */}
+              {selectedStop.stop.payments && selectedStop.stop.payments.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Pagamentos</h3>
+                  <div className="space-y-2">
+                    {selectedStop.stop.payments.map((payment, idx) => (
+                      <div key={payment.id || idx} className="flex items-start gap-3">
+                        <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{payment.method}</p>
+                          <p className="text-sm text-muted-foreground">
+                            R$ {payment.value.toFixed(2)}
+                            {payment.installments && ` (${payment.installments}x)`}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Motivo da Falha */}
+              {selectedStop.stop.deliveryStatus === 'failed' && selectedStop.stop.failureReason && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Motivo da Falha</h3>
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                    <p className="text-sm text-red-900">{selectedStop.stop.failureReason}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Foto */}
+              {selectedStop.stop.photoUrl && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
+                    <Camera className="h-4 w-4" />
+                    Foto da Entrega
+                  </h3>
+                  <div className="rounded-lg overflow-hidden border">
+                    <img
+                      src={selectedStop.stop.photoUrl}
+                      alt="Foto da entrega"
+                      className="w-full h-auto"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Assinatura */}
+              {selectedStop.stop.signatureUrl && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Assinatura
+                  </h3>
+                  <div className="rounded-lg overflow-hidden border bg-white">
+                    <img
+                      src={selectedStop.stop.signatureUrl}
+                      alt="Assinatura"
+                      className="w-full h-auto"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Observações */}
+              {selectedStop.stop.notes && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Observações</h3>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-sm">{selectedStop.stop.notes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -108,16 +108,6 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
         if (data.currentStopIndex !== undefined) {
           setCurrentStopIndex(data.currentStopIndex);
         }
-        // Update route data if stops, polyline, or distance changed
-        if (data.stops || data.encodedPolyline || data.distanceMeters || data.duration) {
-          setRoute((prev: any) => prev ? {
-            ...prev,
-            stops: data.stops || prev.stops,
-            encodedPolyline: data.encodedPolyline || prev.encodedPolyline,
-            distanceMeters: data.distanceMeters ?? prev.distanceMeters,
-            duration: data.duration || prev.duration,
-          } : prev);
-        }
       }
     });
 
