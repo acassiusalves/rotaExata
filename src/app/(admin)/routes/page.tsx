@@ -62,6 +62,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useRouter } from 'next/navigation';
+import { useRouteSearch } from './layout';
 
 
 // Extend RouteInfo to include fields from Firestore doc
@@ -102,6 +103,7 @@ const getRoutePeriod = (date: Date): { label: string; color: string } => {
 
 export default function RoutesPage() {
   const router = useRouter();
+  const { searchQuery } = useRouteSearch();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
@@ -326,8 +328,50 @@ export default function RoutesPage() {
     router.push('/routes/organize');
   };
   
+  // Filter routes based on search query
+  const filteredRoutes = React.useMemo(() => {
+    if (!searchQuery.trim()) {
+      return routes;
+    }
+
+    const normalizedQuery = searchQuery.toLowerCase().trim();
+
+    return routes.filter((route) => {
+      // Search in route name
+      if (route.name?.toLowerCase().includes(normalizedQuery)) {
+        return true;
+      }
+
+      // Search in driver name
+      if (route.driverInfo?.name?.toLowerCase().includes(normalizedQuery)) {
+        return true;
+      }
+
+      // Search in driver vehicle plate
+      if (route.driverInfo?.vehicle?.plate?.toLowerCase().includes(normalizedQuery)) {
+        return true;
+      }
+
+      // Search in stops (customer name, address, phone, order number, notes)
+      if (route.stops?.some((stop) => {
+        return (
+          stop.customerName?.toLowerCase().includes(normalizedQuery) ||
+          stop.address?.toLowerCase().includes(normalizedQuery) ||
+          stop.phone?.toLowerCase().includes(normalizedQuery) ||
+          stop.orderNumber?.toLowerCase().includes(normalizedQuery) ||
+          stop.notes?.toLowerCase().includes(normalizedQuery) ||
+          stop.complemento?.toLowerCase().includes(normalizedQuery)
+        );
+      })) {
+        return true;
+      }
+
+      return false;
+    });
+  }, [routes, searchQuery]);
+
   const groupedRoutes = React.useMemo(() => {
-    return routes.reduce((acc, route) => {
+    return filteredRoutes.reduce((acc, route) => {
       const dateKey = format(route.plannedDate.toDate(), 'yyyy-MM-dd');
       if (!acc[dateKey]) {
         acc[dateKey] = [];
@@ -335,7 +379,7 @@ export default function RoutesPage() {
       acc[dateKey].push(route);
       return acc;
     }, {} as Record<string, RouteDocument[]>);
-  }, [routes]);
+  }, [filteredRoutes]);
 
 
   if (isLoading) {
@@ -358,6 +402,23 @@ export default function RoutesPage() {
             <Button className="mt-4" asChild>
                 <Link href="/routes/new">Criar Primeira Rota</Link>
             </Button>
+            </CardContent>
+        </Card>
+      );
+  }
+
+  if (searchQuery && filteredRoutes.length === 0) {
+      return (
+        <Card className="min-h-[400px] flex items-center justify-center border-dashed">
+            <CardContent className="text-center pt-6">
+                <RouteIcon className="mx-auto h-12 w-12 text-muted-foreground" />
+            <h3 className="mt-4 text-lg font-semibold">Nenhum resultado encontrado</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+                Não encontramos rotas que correspondam à busca &quot;{searchQuery}&quot;.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+                Tente buscar por nome da rota, motorista, cliente, endereço ou placa.
+            </p>
             </CardContent>
         </Card>
       );
