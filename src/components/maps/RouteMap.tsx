@@ -2,7 +2,9 @@
 "use client";
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-import type { PlaceValue, RouteInfo, DriverLocation } from "@/lib/types";
+import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from "@/lib/types";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export type RouteMapHandle = {
   openStopInfo: (stopId: string) => void;
@@ -83,6 +85,27 @@ const createInfoWindowContent = (
   `;
 };
 
+// Função para gerar o conteúdo HTML do InfoWindow do motorista
+const createDriverInfoWindowContent = (
+  driverName: string,
+  timestamp: Date
+): string => {
+  const formattedDate = format(timestamp, "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR });
+
+  return `
+    <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
+      <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 8px 0;">🚚 Motorista</h4>
+      <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px;">
+        <span style="color: #666;">Nome:</span>
+        <strong style="color: #000;">${driverName}</strong>
+
+        <span style="color: #666;">Última atualização:</span>
+        <span>${formattedDate}</span>
+      </div>
+    </div>
+  `;
+};
+
 type Props = {
   origin?: PlaceValue | null;
   stops?: PlaceValue[];
@@ -90,7 +113,7 @@ type Props = {
   unassignedStops?: PlaceValue[];
   height?: number;
   driverLocation?: { lat: number; lng: number; heading?: number };
-  driverLocations?: DriverLocation[];
+  driverLocations?: DriverLocationWithInfo[];
   onRemoveStop?: (stopId: string) => void;
   onEditStop?: (stopId: string) => void;
   highlightedStopIds?: string[];
@@ -107,6 +130,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   const activeInfoWindowRef = React.useRef<google.maps.InfoWindow | null>(null);
   const driverMarkerRef = React.useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const driverMarkersRef = React.useRef<Map<string, google.maps.marker.AdvancedMarkerElement>>(new Map());
+  const driverInfoWindowsRef = React.useRef<Map<string, google.maps.InfoWindow>>(new Map());
   const entriesRef = React.useRef<Map<string, { marker: any; info: google.maps.InfoWindow }>>(
     new Map()
   );
@@ -360,44 +384,69 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       return;
     }
 
+    console.log('🗺️ RouteMap recebeu driverLocations:', driverLocations);
+
     const bounds = new google.maps.LatLngBounds();
     const currentMarkerIds = new Set<string>();
 
     driverLocations.forEach((loc, index) => {
-        const markerId = `driver-${index}`;
+        const markerId = `driver-${loc.driverId}`;
         currentMarkerIds.add(markerId);
-        
+
         let marker = driverMarkersRef.current.get(markerId);
+        let infoWindow = driverInfoWindowsRef.current.get(markerId);
 
         if (!marker) {
             const truckIcon = document.createElement('div');
             truckIcon.innerHTML = `
-                <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3"/>
-                <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
+                <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="pointer-events: none;">
+                <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3" style="pointer-events: none;"/>
+                <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white" style="pointer-events: none;"/>
                 </svg>
             `;
+            truckIcon.style.cursor = 'pointer';
+            truckIcon.style.pointerEvents = 'auto';
             marker = new google.maps.marker.AdvancedMarkerElement({
                 map,
                 content: truckIcon,
-                title: `Motorista ${index + 1}`,
+                title: loc.driverName,
+                gmpClickable: true,
             });
             driverMarkersRef.current.set(markerId, marker);
+
+            // Criar InfoWindow para o motorista
+            const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
+            infoWindow = new google.maps.InfoWindow({
+                content: createDriverInfoWindowContent(loc.driverName, timestamp),
+            });
+            driverInfoWindowsRef.current.set(markerId, infoWindow);
+
+            // Adicionar listener de click
+            marker.addListener("click", () => {
+                activeInfoWindowRef.current?.close();
+                infoWindow!.open(map, marker as any);
+                activeInfoWindowRef.current = infoWindow!;
+            });
+        } else {
+            // Atualizar o conteúdo da InfoWindow existente
+            const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
+            infoWindow!.setContent(createDriverInfoWindowContent(loc.driverName, timestamp));
         }
 
         marker.position = { lat: loc.lat, lng: loc.lng };
         if (loc.heading && marker.content instanceof HTMLElement) {
             marker.content.style.transform = `rotate(${loc.heading}deg)`;
         }
-        
+
         bounds.extend(marker.position);
     });
 
-    // Remove old markers
+    // Remove old markers and info windows
     driverMarkersRef.current.forEach((marker, id) => {
         if (!currentMarkerIds.has(id)) {
             marker.map = null;
             driverMarkersRef.current.delete(id);
+            driverInfoWindowsRef.current.delete(id);
         }
     });
 

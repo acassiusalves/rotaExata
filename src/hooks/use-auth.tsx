@@ -7,7 +7,6 @@ import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { Toaster } from '@/components/ui/toaster';
-import { getDatabase, ref, onValue, goOnline, goOffline, onDisconnect, set, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
 
 interface AuthContextType {
   user: User | null;
@@ -35,18 +34,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
+    let heartbeatInterval: NodeJS.Timeout | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      // Limpar interval anterior se existir
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+
       if (user) {
         // User is signed in, fetch role from Firestore
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
-        
+
         let role = 'socio'; // default
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
           role = data?.role || 'socio';
           setUserRole(role);
           setMustChangePassword(data?.mustChangePassword || false);
+          console.log('👤 [use-auth] Usuário autenticado:', {
+            uid: user.uid,
+            email: user.email,
+            role: role,
+            currentStatus: data?.status,
+          });
         } else {
           // Handle case where user exists in Auth but not in Firestore
           console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
@@ -54,59 +67,65 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setMustChangePassword(false);
         }
         setUser(user);
-        
-        // --- Firebase Realtime Database Presence ---
+
+        // --- Firestore Presence System (Heartbeat) ---
+        console.log('🔍 [use-auth] Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
         if (role === 'driver') {
-            const rtdb = getDatabase();
-            const userStatusDatabaseRef = ref(rtdb, '/status/' + user.uid);
             const userFirestoreRef = doc(db, 'users', user.uid);
 
-            const isOfflineForDatabase = {
-                state: 'offline',
-                last_changed: rtdbServerTimestamp(),
-            };
-            const isOnlineForDatabase = {
-                state: 'online',
-                last_changed: rtdbServerTimestamp(),
-            };
+            // Atualizar status para online imediatamente
+            try {
+                await updateDoc(userFirestoreRef, {
+                    status: 'online',
+                    lastSeenAt: serverTimestamp(),
+                });
+                console.log('✅ [use-auth] Status do motorista atualizado para ONLINE no Firestore', {
+                    userId: user.uid,
+                    email: user.email,
+                    status: 'online',
+                    timestamp: new Date().toISOString()
+                });
+            } catch (err) {
+                console.error('❌ [use-auth] Falha ao registrar presença do motorista', err);
+            }
 
-            const connectedRef = ref(rtdb, '.info/connected');
-            onValue(connectedRef, async (snapshot) => {
-                if (snapshot.val() === false) {
-                    try {
-                        await updateDoc(userFirestoreRef, {
-                            status: 'offline',
-                            lastSeenAt: serverTimestamp(),
-                        });
-                        console.log('⚠️ [use-auth] Conexão perdida - Status atualizado para OFFLINE', {
-                            userId: user.uid,
-                            status: 'offline'
-                        });
-                    } catch (err) {
-                        console.error('❌ [use-auth] Falha ao registrar status offline', err);
-                    }
-                    return;
-                }
-
-                goOnline(rtdb);
-
+            // Configurar heartbeat para manter o status online
+            heartbeatInterval = setInterval(async () => {
                 try {
-                    await onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase);
-                    await set(userStatusDatabaseRef, isOnlineForDatabase);
                     await updateDoc(userFirestoreRef, {
                         status: 'online',
                         lastSeenAt: serverTimestamp(),
                     });
-                    console.log('✅ [use-auth] Status do motorista atualizado para ONLINE no Firestore', {
-                        userId: user.uid,
-                        email: user.email,
-                        status: 'online',
-                        timestamp: new Date().toISOString()
-                    });
+                    console.log('💓 [use-auth] Heartbeat enviado - motorista online');
                 } catch (err) {
-                    console.error('❌ [use-auth] Falha ao registrar presença do motorista', err);
+                    console.error('❌ [use-auth] Falha no heartbeat', err);
                 }
-            });
+            }, 30000); // Atualiza a cada 30 segundos
+
+            // Marcar offline quando a aba fica visível novamente
+            const handleVisibilityChange = async () => {
+                if (!document.hidden) {
+                    console.log('✅ [use-auth] Aba visível - garantindo status online');
+                    try {
+                        await updateDoc(userFirestoreRef, {
+                            status: 'online',
+                            lastSeenAt: serverTimestamp(),
+                        });
+                    } catch (err) {
+                        console.error('❌ [use-auth] Erro ao atualizar status', err);
+                    }
+                }
+            };
+
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+
+            // Cleanup function será chamada no próximo auth state change ou unmount
+            return () => {
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                }
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            };
         }
         // --- End Presence ---
 
@@ -114,25 +133,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(null);
         setUserRole(null);
         setMustChangePassword(false);
-        // Ensure RTDB connection is closed on sign out
-        const rtdb = getDatabase();
-        goOffline(rtdb);
       }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
+    };
   }, []);
-  
+
   const signIn = async (email: string, pass: string) => {
     return signInWithEmailAndPassword(auth, email, pass);
   }
 
   const signOut = async () => {
     setLoading(true);
-    // Disconnect from RTDB before signing out
-    const rtdb = getDatabase();
-    goOffline(rtdb);
     const currentUser = auth.currentUser;
     if (currentUser) {
       try {
@@ -140,8 +158,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           status: 'offline',
           lastSeenAt: serverTimestamp(),
         });
+        console.log('✅ [use-auth] Status atualizado para OFFLINE no signOut');
       } catch (err) {
-        console.error('Falha ao registrar status offline no signOut', err);
+        console.error('❌ [use-auth] Falha ao registrar status offline no signOut', err);
       }
     }
     await firebaseSignOut(auth);

@@ -23,6 +23,7 @@ import { User } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import { EditUserDialog } from './edit-user-dialog';
 
 const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
     admin: { label: 'Admin', variant: 'default' },
@@ -91,14 +92,53 @@ export const columns: ColumnDef<any>[] = [
 ];
 
 export function UserTable({ users }: { users: any[] }) {
+  const [selectedUser, setSelectedUser] = React.useState<any | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
+
+  const handleEdit = (user: any) => {
+    setSelectedUser(user);
+    setIsEditDialogOpen(true);
+  };
+
+  const columnsWithActions: ColumnDef<any>[] = [
+    ...columns.slice(0, -1), // Todas as colunas exceto 'actions'
+    {
+      id: 'actions',
+      cell: ({ row }) => {
+        return (
+          <div className="text-right">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                  <span className="sr-only">Abrir menu</span>
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleEdit(row.original)}>
+                  Editar
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled>Alterar Senha</DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" disabled>
+                  Remover
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      },
+    },
+  ];
+
   const table = useReactTable({
     data: users,
-    columns,
+    columns: columnsWithActions,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
   });
 
   return (
+    <>
     <div className="w-full">
       <div className="rounded-md border">
         <Table>
@@ -164,5 +204,16 @@ export function UserTable({ users }: { users: any[] }) {
         </Button>
       </div>
     </div>
+    {selectedUser && (
+      <EditUserDialog
+        isOpen={isEditDialogOpen}
+        onClose={() => {
+          setIsEditDialogOpen(false);
+          setSelectedUser(null);
+        }}
+        user={selectedUser}
+      />
+    )}
+    </>
   );
 }

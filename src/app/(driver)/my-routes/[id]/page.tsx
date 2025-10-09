@@ -25,8 +25,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { db } from '@/lib/firebase/client';
+import { db, storage } from '@/lib/firebase/client';
 import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { PlaceValue, RouteInfo, Payment } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
@@ -263,7 +264,18 @@ export default function RouteDetailsPage() {
     failureReason?: string;
     payments?: Payment[];
   }) => {
-    if (!route || selectedStopIndex === null) return;
+    if (!route || selectedStopIndex === null) {
+      console.error('❌ Confirmação falhou: route ou selectedStopIndex é null');
+      return;
+    }
+
+    console.log('🔄 Iniciando confirmação de entrega:', {
+      stopIndex: selectedStopIndex,
+      status: data.status,
+      hasPhoto: !!data.photo,
+      hasNotes: !!data.notes,
+      hasPayments: !!data.payments,
+    });
 
     try {
       const updatedStops = [...route.stops];
@@ -273,19 +285,67 @@ export default function RouteDetailsPage() {
         completedAt: Timestamp.now(),
       };
 
-      // Só adiciona campos se não forem undefined
-      if (data.photo) updatedStop.photoUrl = data.photo;
-      if (data.notes) updatedStop.notes = data.notes;
-      if (data.failureReason) updatedStop.failureReason = data.failureReason;
-      if (data.payments) updatedStop.payments = data.payments;
+      console.log('📦 Stop atualizado (antes da foto):', updatedStop);
+
+      // Upload da foto para o Storage se houver
+      if (data.photo) {
+        try {
+          console.log('📸 Iniciando upload da foto...');
+          // Cria referência única para a foto
+          const photoRef = ref(
+            storage,
+            `delivery-photos/${routeId}/${selectedStopIndex}-${Date.now()}.jpg`
+          );
+
+          // Faz upload da foto em base64
+          await uploadString(photoRef, data.photo, 'data_url');
+
+          // Obtém a URL de download
+          const photoURL = await getDownloadURL(photoRef);
+
+          // Salva apenas a URL no documento
+          updatedStop.photoUrl = photoURL;
+
+          console.log('✅ Foto enviada para Storage:', photoURL);
+        } catch (photoError) {
+          console.error('❌ Erro ao fazer upload da foto:', photoError);
+          // Se falhar o upload, continua sem a foto
+          toast({
+            variant: 'destructive',
+            title: 'Aviso',
+            description: 'Não foi possível salvar a foto, mas a entrega foi registrada.',
+          });
+        }
+      }
+
+      if (data.notes) {
+        updatedStop.notes = data.notes;
+        console.log('📝 Notas adicionadas:', data.notes);
+      }
+      if (data.failureReason) {
+        updatedStop.failureReason = data.failureReason;
+        console.log('⚠️ Motivo da falha:', data.failureReason);
+      }
+      if (data.payments) {
+        updatedStop.payments = data.payments;
+        console.log('💰 Pagamentos:', data.payments);
+      }
 
       updatedStops[selectedStopIndex] = updatedStop;
+
+      console.log('📤 Salvando no Firestore...', {
+        routeId,
+        stopIndex: selectedStopIndex,
+        updatedStop,
+      });
 
       const routeRef = doc(db, 'routes', routeId);
       await updateDoc(routeRef, {
         stops: updatedStops,
         currentStopIndex: selectedStopIndex + 1,
       });
+
+      console.log('✅ Salvo com sucesso no Firestore!');
 
       toast({
         title: data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada',
@@ -297,7 +357,12 @@ export default function RouteDetailsPage() {
       setIsConfirmDialogOpen(false);
       setSelectedStopIndex(null);
     } catch (error) {
-      console.error('Error confirming delivery:', error);
+      console.error('❌ ERRO ao confirmar entrega:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao confirmar',
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+      });
       throw error;
     }
   };

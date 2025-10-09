@@ -56,6 +56,11 @@ export type DriverLocation = {
   timestamp: Timestamp | Date;
 };
 
+export type DriverLocationWithInfo = DriverLocation & {
+  driverName: string;
+  driverId: string;
+};
+
 export type RouteInfo = {
   stops: PlaceValue[];
   encodedPolyline: string;

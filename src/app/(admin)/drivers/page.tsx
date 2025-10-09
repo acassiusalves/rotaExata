@@ -34,8 +34,19 @@ export default function DriversPage() {
       q,
       (querySnapshot) => {
         const driversData: Driver[] = [];
+        console.log('🚗 [drivers] Total de motoristas encontrados:', querySnapshot.size);
+
         querySnapshot.forEach((doc) => {
           const data = doc.data();
+
+          console.log('🚗 [drivers] Dados do motorista:', {
+            id: doc.id,
+            email: data.email,
+            role: data.role,
+            status: data.status,
+            statusType: typeof data.status,
+            lastSeenAt: data.lastSeenAt,
+          });
 
           driversData.push({
             id: doc.id,
@@ -50,6 +61,11 @@ export default function DriversPage() {
             avatarUrl: data.photoURL,
           });
         });
+
+        console.log('🚗 [drivers] Motoristas processados:', driversData.map(d => ({
+          email: d.email,
+          status: d.status,
+        })));
 
         setDrivers(driversData);
         setIsLoading(false);

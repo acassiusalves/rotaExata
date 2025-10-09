@@ -71,7 +71,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { PlaceValue, RouteInfo, Driver } from '@/lib/types';
+import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -370,6 +370,7 @@ export default function OrganizeRoutePage() {
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [highlightedStops, setHighlightedStops] = React.useState<string[]>([]);
   const [driverLocation, setDriverLocation] = React.useState<{lat: number; lng: number; heading?: number} | null>(null);
+  const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
 
   // State for additional routes from same period
   const [additionalRoutes, setAdditionalRoutes] = React.useState<RouteInfo[]>([]);
@@ -510,6 +511,64 @@ export default function OrganizeRoutePage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Buscar localizações dos motoristas em tempo real a partir das rotas ativas
+  React.useEffect(() => {
+    if (availableDrivers.length === 0) return;
+
+    // Buscar rotas que estão em progresso ou despachadas
+    const routesQuery = query(
+      collection(db, 'routes'),
+      where('status', 'in', ['in_progress', 'dispatched'])
+    );
+
+    const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
+      const locations: DriverLocationWithInfo[] = [];
+
+      console.log('🔍 Total de rotas ativas encontradas:', snapshot.size);
+
+      snapshot.forEach((routeDoc) => {
+        const routeData = routeDoc.data();
+        console.log(`📋 Rota ${routeDoc.id}:`, {
+          hasCurrentLocation: !!routeData.currentLocation,
+          hasDriverInfo: !!routeData.driverInfo,
+          status: routeData.status,
+          currentLocation: routeData.currentLocation,
+          driverInfo: routeData.driverInfo
+        });
+
+        // Verificar se há localização atual e informações do motorista
+        if (routeData.currentLocation && routeData.driverInfo) {
+          const currentLoc = routeData.currentLocation;
+
+          const timestamp = currentLoc.timestamp?.toDate?.() || new Date(0);
+          const minutesAgo = Math.floor((Date.now() - timestamp.getTime()) / 1000 / 60);
+
+          console.log(`⏰ Timestamp da localização (rota ${routeDoc.id}):`, {
+            timestamp: timestamp.toLocaleString('pt-BR'),
+            minutesAgo: `${minutesAgo} minutos atrás`,
+          });
+
+          // Adicionar localização (sem filtro de tempo para desenvolvimento)
+          locations.push({
+            driverId: routeDoc.id,
+            driverName: routeData.driverInfo.name,
+            lat: currentLoc.lat,
+            lng: currentLoc.lng,
+            accuracy: currentLoc.accuracy || 0,
+            heading: currentLoc.heading,
+            speed: currentLoc.speed,
+            timestamp: timestamp,
+          });
+        }
+      });
+
+      console.log('🚚 Localizações de motoristas encontradas:', locations);
+      setDriverLocations(locations);
+    });
+
+    return () => unsubscribe();
+  }, [availableDrivers]);
 
   // Load additional routes from same period (only for existing routes, not new ones)
   React.useEffect(() => {
@@ -1897,6 +1956,7 @@ export default function OrganizeRoutePage() {
           onEditStop={handleEditStop}
           highlightedStopIds={highlightedStops}
           driverLocation={driverLocation || undefined}
+          driverLocations={driverLocations}
         />
       </div>
 

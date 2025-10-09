@@ -26,32 +26,43 @@ import { RouteMap } from '@/components/maps/RouteMap';
 import { placeholderImages } from '@/lib/placeholder-images';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
-import { Driver, RouteInfo, DriverLocation } from '@/lib/types';
+import { Driver, RouteInfo, DriverLocationWithInfo } from '@/lib/types';
 
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
   status: 'dispatched' | 'in_progress' | 'completed';
   plannedDate: Timestamp;
+  driverInfo?: {
+    name: string;
+    vehicle: {
+      type: string;
+      plate: string;
+    };
+  } | null;
 };
 
 export default function DashboardPage() {
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [drivers, setDrivers] = React.useState<Driver[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [driverLocations, setDriverLocations] = React.useState<DriverLocation[]>([]);
+  const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
 
   React.useEffect(() => {
     // Firestore listener for routes
     const routesQuery = query(collection(db, 'routes'), where('status', 'in', ['in_progress', 'dispatched']));
     const unsubscribeRoutes = onSnapshot(routesQuery, (snapshot) => {
       const routesData: RouteDocument[] = [];
-      const locations: DriverLocation[] = [];
+      const locations: DriverLocationWithInfo[] = [];
       snapshot.forEach((doc) => {
         const route = { id: doc.id, ...doc.data() } as RouteDocument;
         routesData.push(route);
-        if (route.currentLocation && route.status === 'in_progress') {
-          locations.push(route.currentLocation as DriverLocation);
+        if (route.currentLocation && route.status === 'in_progress' && route.driverInfo) {
+          locations.push({
+            ...route.currentLocation,
+            driverId: doc.id,
+            driverName: route.driverInfo.name,
+          });
         }
       });
       setRoutes(routesData);
