@@ -809,7 +809,6 @@ export default function OrganizeRoutePage() {
         updatedStops[stopToEdit.index] = updatedStop;
 
         // Recalculate route
-        setter(prev => prev ? { ...prev, stops: updatedStops, encodedPolyline: '' } : null);
         const newRouteInfo = await computeRoute(routeData.origin, updatedStops);
         if (newRouteInfo) {
           setter(prev => prev ? {
@@ -873,7 +872,6 @@ export default function OrganizeRoutePage() {
         customerName: manualService.customerName,
         phone: manualService.phone,
         notes: manualService.notes,
-        isManuallyAdded: true,
       };
 
       // Add to selected route or unassigned
