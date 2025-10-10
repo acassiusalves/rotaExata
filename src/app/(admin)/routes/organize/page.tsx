@@ -1965,7 +1965,7 @@ export default function OrganizeRoutePage() {
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
-      <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}vh` }}>
+      <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}%` }}>
         <RouteMap
           ref={mapApiRef}
           height={-1}
@@ -2107,7 +2107,7 @@ export default function OrganizeRoutePage() {
             </div>
           </div>
 
-          <div className="p-8 pb-32">
+          <div className="p-8">
             <TabsContent value="organize" className="m-0">
               <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm overflow-hidden">
                    {isLoading ? (
