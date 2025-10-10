@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -41,7 +42,7 @@ type RouteDocument = RouteInfo & {
 
 export default function PublicTrackingPage() {
   const params = useParams();
-  const routeId = params.id as string;
+  const routeId = params?.id as string;
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);

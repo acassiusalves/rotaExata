@@ -71,7 +71,7 @@ const formatDuration = (durationString: string = '0s') => {
 
 export default function RouteDetailsPage() {
   const params = useParams();
-  const routeId = params.id as string;
+  const routeId = params?.id as string;
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedStopIndex, setSelectedStopIndex] = React.useState<number | null>(null);
@@ -597,7 +597,9 @@ export default function RouteDetailsPage() {
                 }
               : undefined
           }
-          currentLocation={location}
+          currentLocation={
+            location ? { lat: location.coords.latitude, lng: location.coords.longitude } : null
+          }
         />
       )}
     </div>
