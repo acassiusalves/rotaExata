@@ -41,11 +41,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 
 
 interface HeaderProps {
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
 }
 
-export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
+export function Header({}: HeaderProps) {
   const pathname = usePathname();
   const { user, userRole, signOut } = useAuth();
   const isDriver = userRole === 'driver';
@@ -87,23 +85,6 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:h-16 sm:px-6">
-      {/* Sidebar toggle button for desktop */}
-      {!isDriver && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleSidebar}
-          className="hidden md:flex h-8 w-8"
-          title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
-        >
-          {sidebarOpen ? (
-            <PanelLeftClose className="h-4 w-4" />
-          ) : (
-            <PanelLeftOpen className="h-4 w-4" />
-          )}
-        </Button>
-      )}
-
       {/* Mobile menu button */}
       <Sheet>
         <SheetTrigger asChild>

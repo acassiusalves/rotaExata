@@ -16,6 +16,8 @@ import {
   Plus,
   Wand2,
   LogOut,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -45,9 +47,10 @@ import { useState } from 'react';
 
 interface SidebarProps {
   isOpen: boolean;
+  onToggleSidebar: () => void;
 }
 
-export function Sidebar({ isOpen }: SidebarProps) {
+export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const pathname = usePathname();
   const { user, userRole, signOut } = useAuth();
   const isDriver = userRole === 'driver';
@@ -228,6 +231,28 @@ export function Sidebar({ isOpen }: SidebarProps) {
               </Tooltip>
             </TooltipProvider>
           ))}
+          
+           <TooltipProvider delayDuration={0}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button
+                        onClick={onToggleSidebar}
+                        className={cn(
+                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted',
+                            !isOpen && "justify-center"
+                        )}
+                    >
+                        {isOpen ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                        {isOpen && (isOpen ? 'Minimizar Menu' : 'Expandir Menu')}
+                    </button>
+                </TooltipTrigger>
+                {!isOpen && (
+                    <TooltipContent side="right">
+                        Expandir Menu
+                    </TooltipContent>
+                )}
+            </Tooltip>
+        </TooltipProvider>
       </div>
     </aside>
   );

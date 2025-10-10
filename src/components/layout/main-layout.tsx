@@ -16,9 +16,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
      return (
       <div className="flex h-[100dvh] min-h-0 w-full">
         {/* Sidebar on the left for full-height pages (except map) */}
-        <Sidebar isOpen={sidebarOpen} />
+        <Sidebar isOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 flex-col min-h-0">
-           <Header sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+           <Header />
           <main className="flex-1 min-h-0 overflow-auto md:overflow-hidden">{children}</main>
         </div>
       </div>
@@ -27,9 +27,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full">
-      <Sidebar isOpen={sidebarOpen} />
+      <Sidebar isOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
       <div className="flex flex-1 flex-col">
-        <Header sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+        <Header />
         <main className="flex flex-1 flex-col gap-4 bg-muted/40 p-4 md:gap-8 md:p-8">
           {children}
         </main>
