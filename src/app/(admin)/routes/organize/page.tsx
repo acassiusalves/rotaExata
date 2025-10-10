@@ -8,7 +8,6 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-  CardFooter
 } from '@/components/ui/card';
 import {
   Tabs,
@@ -2050,7 +2049,7 @@ export default function OrganizeRoutePage() {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        setPendingEdits({});
+                        setPendingEdits({ A: null, B: null });
                         toast({ title: 'Todas as edições foram canceladas' });
                       }}
                       className="border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50"
@@ -2365,7 +2364,7 @@ export default function OrganizeRoutePage() {
                                         Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
                                     </div>
                                 </CardContent>
-                                <CardFooter className="flex gap-2">
+                                <Card.Footer className="flex gap-2">
                                      {routeData?.isExistingRoute ? (
                                         <Button
                                             className="w-full"
@@ -2385,7 +2384,7 @@ export default function OrganizeRoutePage() {
                                             {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
                                         </Button>
                                      )}
-                                </CardFooter>
+                                </Card.Footer>
                             </Card>
                         )
                     }) : (
@@ -2664,3 +2663,5 @@ export default function OrganizeRoutePage() {
     </>
   );
 }
+
+    

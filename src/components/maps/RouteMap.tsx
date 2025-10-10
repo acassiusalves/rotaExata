@@ -135,6 +135,8 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     new Map()
   );
   const hasInitializedBoundsRef = React.useRef<boolean>(false);
+  const previousRoutesDataRef = React.useRef<string>('');
+  const previousDriverLocationsRef = React.useRef<string>('');
 
   React.useImperativeHandle(ref, () => ({
     openStopInfo: (stopId: string) => {
@@ -329,13 +331,23 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
-    // Fit bounds to show all routes and stops
-    if (!bounds.isEmpty()) {
+    // Fit bounds to show all routes and stops (only on data changes, not on resize)
+    const currentRoutesData = JSON.stringify({
+      origin,
+      stops: stops?.map(s => s.id),
+      routes: routes?.map(r => ({ id: r.id, stops: r.stops.map(s => s.id), visible: r.visible })),
+      unassignedStops: unassignedStops?.map(s => s.id)
+    });
+
+    const shouldFitBounds = !hasInitializedBoundsRef.current || currentRoutesData !== previousRoutesDataRef.current;
+
+    if (!bounds.isEmpty() && shouldFitBounds) {
         // Small delay to ensure map is fully rendered
         requestAnimationFrame(() => {
           map.fitBounds(bounds, 100); // 100px padding
         });
         hasInitializedBoundsRef.current = true;
+        previousRoutesDataRef.current = currentRoutesData;
     }
 
   }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
@@ -453,8 +465,16 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         }
     });
 
-    if (!bounds.isEmpty()) {
+    // Only fit bounds if driver locations actually changed (not on resize)
+    const currentDriverLocationsData = JSON.stringify(
+      driverLocations?.map(loc => ({ driverId: loc.driverId, lat: loc.lat, lng: loc.lng }))
+    );
+
+    const shouldFitBounds = currentDriverLocationsData !== previousDriverLocationsRef.current;
+
+    if (!bounds.isEmpty() && shouldFitBounds) {
       map.fitBounds(bounds, 100);
+      previousDriverLocationsRef.current = currentDriverLocationsData;
     }
 
   }, [driverLocations]);
