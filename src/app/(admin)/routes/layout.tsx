@@ -39,32 +39,7 @@ export default function RoutesLayout({
   return (
     <SearchContext.Provider value={{ searchQuery, setSearchQuery }}>
       <div className="flex-1 space-y-4">
-        <div className="flex items-center justify-between">
-           <div>
-              <h2 className="text-3xl font-bold tracking-tight">Rotas</h2>
-              <p className="text-muted-foreground">
-                Gerencie, monitore e crie suas rotas.
-              </p>
-            </div>
-          <div className="flex items-center gap-2">
-              <Tabs value={pathname}>
-                <TabsList>
-                  {tabs.map((tab) => (
-                    <TabsTrigger key={tab.href} value={tab.href} asChild>
-                      <Link href={tab.href}>{tab.name}</Link>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-
-               <Button asChild>
-                <Link href="/routes/new">
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Criar Nova Rota
-                </Link>
-              </Button>
-          </div>
-        </div>
+        
         {children}
       </div>
     </SearchContext.Provider>
