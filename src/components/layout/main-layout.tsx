@@ -10,14 +10,15 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Special layout for new route page and map page
-  const isFullHeightPage = ['/routes/new', '/routes/organize'].includes(pathname) || pathname.startsWith('/routes/map/');
+  const isFullHeightPage = ['/routes/new', '/routes/organize'].includes(pathname);
 
   if (isFullHeightPage) {
      return (
       <div className="flex h-[100dvh] min-h-0 w-full">
         {/* Sidebar on the left for full-height pages (except map) */}
-        {!pathname.startsWith('/routes/map/') && <Sidebar isOpen={sidebarOpen} />}
+        <Sidebar isOpen={sidebarOpen} />
         <div className="flex flex-1 flex-col min-h-0">
+           <Header sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
           <main className="flex-1 min-h-0 overflow-auto md:overflow-hidden">{children}</main>
         </div>
       </div>

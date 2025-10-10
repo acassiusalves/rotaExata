@@ -82,23 +82,28 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
     return name.substring(0, 2);
   };
 
+  const isFullHeightPage = ['/routes/new', '/routes/organize'].includes(pathname);
+
 
   return (
-    <header className="sticky top-0 z-30 flex h-12 items-center gap-4 border-b bg-background px-4 md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:h-16 sm:px-6">
       {/* Sidebar toggle button for desktop */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onToggleSidebar}
-        className="hidden md:flex h-8 w-8"
-        title={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
-      >
-        {sidebarOpen ? (
-          <PanelLeftClose className="h-4 w-4" />
-        ) : (
-          <PanelLeftOpen className="h-4 w-4" />
-        )}
-      </Button>
+      {!isDriver && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleSidebar}
+          className="hidden md:flex h-8 w-8"
+          title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+        >
+          {sidebarOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </Button>
+      )}
+
       {/* Mobile menu button */}
       <Sheet>
         <SheetTrigger asChild>
@@ -179,39 +184,62 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
           </nav>
         </SheetContent>
       </Sheet>
+
       {/* Page title for desktop */}
       <div className="hidden md:block">
-        <h1 className="text-lg font-semibold">
-          {pathname === '/dashboard' && 'Dashboard'}
-          {pathname === '/users' && 'Usuários'}
-          {pathname === '/drivers' && 'Motoristas'}
-          {pathname === '/history' && 'Histórico'}
-          {pathname === '/reports' && 'Relatórios'}
-          {pathname === '/settings' && 'Configurações'}
-          {pathname === '/api' && 'API'}
-          {pathname === '/routes' && 'Rotas Ativas'}
-          {pathname === '/routes/new' && 'Criar Nova Rota'}
-          {pathname === '/routes/organize' && 'Organizar Rota'}
-          {pathname === '/routes/monitoring' && 'Monitoramento'}
-          {pathname === '/my-routes' && 'Minhas Rotas'}
-          {pathname === '/my-routes/history' && 'Histórico de Rotas'}
-        </h1>
-      </div>
-      <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4">
-        {/* Hide search bar on organize page to save space */}
-        {pathname !== '/routes/organize' && (
-          <form className="ml-auto flex-1 sm:flex-initial">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Buscar..."
-                className="pl-8 sm:w-[300px] md:w-[200px] lg:w-[300px]"
-              />
-            </div>
-          </form>
+        {!isFullHeightPage && (
+          <h1 className="text-lg font-semibold">
+            {pathname === '/dashboard' && 'Dashboard'}
+            {pathname === '/users' && 'Usuários'}
+            {pathname === '/drivers' && 'Motoristas'}
+            {pathname === '/history' && 'Histórico'}
+            {pathname === '/reports' && 'Relatórios'}
+            {pathname === '/settings' && 'Configurações'}
+            {pathname === '/api' && 'API'}
+            {pathname === '/routes' && 'Rotas Ativas'}
+            {pathname === '/routes/monitoring' && 'Monitoramento'}
+            {pathname === '/my-routes' && 'Minhas Rotas'}
+            {pathname.startsWith('/my-routes/history') && 'Histórico de Rotas'}
+          </h1>
         )}
-        {pathname === '/routes/organize' && <div className="ml-auto" />}
+      </div>
+
+      <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4">
+        <form className="ml-auto flex-1 sm:flex-initial">
+          {/* Search bar can be added back here if needed */}
+        </form>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+             <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+              <Avatar className="h-9 w-9">
+                  <AvatarImage src={user?.photoURL ?? undefined} />
+                  <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
+                </Avatar>
+             </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
+                <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+                {!isDriver && (
+                  <DropdownMenuItem onClick={() => router.push('/settings')}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Configurações</span>
+                  </DropdownMenuItem>
+                )}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => signOut()}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Sair</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );

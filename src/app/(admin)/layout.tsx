@@ -1,3 +1,4 @@
+
 'use client';
 import { MainLayout } from '@/components/layout/main-layout';
 import { useAuth } from '@/hooks/use-auth';
@@ -32,8 +33,13 @@ export default function AdminLayout({
     );
   }
 
+  // Renderiza nulo enquanto redireciona para evitar piscar o layout errado
   if (!user || (userRole && !['admin', 'socio', 'gestor'].includes(userRole))) {
-    return null;
+    return (
+        <div className="flex h-screen w-full items-center justify-center bg-background">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+    );
   }
 
   return <MainLayout>{children}</MainLayout>;
