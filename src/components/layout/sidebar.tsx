@@ -16,11 +16,13 @@ import {
   Plus,
   Wand2,
   LogOut,
+} from 'lucide-react';
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from 'lucide-react';
+} from '@/components/ui/tooltip';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
