@@ -13,7 +13,6 @@ import {
   ChevronDown,
   Monitor,
   Plus,
-  Wand2,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -96,7 +95,6 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   };
 
   if (isDriver) {
-    // A simplified sidebar or no sidebar for drivers
     return null;
   }
 
@@ -115,8 +113,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
         </Link>
       </div>
 
-      <nav className={cn("flex-1 overflow-y-auto p-2")}>
-        <div className="space-y-1">
+      <div className="flex flex-1 flex-col overflow-y-auto p-2">
+        <nav className="flex-1 space-y-1">
           {navItems.map((item) => (
             <TooltipProvider key={item.href} delayDuration={0}>
               <Tooltip>
@@ -143,8 +141,6 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
               </Tooltip>
             </TooltipProvider>
           ))}
-        </div>
-        <div className="mt-4 space-y-1">
           <Collapsible open={routesOpen} onOpenChange={setRoutesOpen}>
             <TooltipProvider delayDuration={0}>
               <Tooltip>
@@ -200,103 +196,107 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                </CollapsibleContent>
             )}
           </Collapsible>
-        </div>
-      </nav>
-      {/* Footer / Settings and User profile */}
-      <div className={cn("mt-auto border-t p-2", !isOpen && "space-y-2")}>
-        {settingsItems.map((item) => (
-            <TooltipProvider key={item.href} delayDuration={0}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                      isActive(item.href)
-                        ? 'bg-muted'
-                        : 'text-muted-foreground hover:bg-muted',
-                      !isOpen && "justify-center"
-                    )}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    {isOpen && item.label}
-                  </Link>
-                </TooltipTrigger>
-                {!isOpen && (
-                  <TooltipContent side="right">
-                    {item.label}
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </TooltipProvider>
-          ))}
-          
-           <TooltipProvider delayDuration={0}>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <button
-                        onClick={onToggleSidebar}
-                        className={cn(
-                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted',
-                            !isOpen && "justify-center"
-                        )}
-                    >
-                        {isOpen ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                        {isOpen && (isOpen ? 'Minimizar Menu' : 'Expandir Menu')}
-                    </button>
-                </TooltipTrigger>
-                {!isOpen && (
-                    <TooltipContent side="right">
-                        {isOpen ? 'Minimizar Menu' : 'Expandir Menu'}
-                    </TooltipContent>
-                )}
-            </Tooltip>
-        </TooltipProvider>
+        </nav>
         
-        {user && (
-          <DropdownMenu>
+        {/* Spacer to push items below to the bottom */}
+        <div className="mt-auto" />
+
+        {/* Bottom items */}
+        <div className={cn("space-y-1 border-t pt-2", !isOpen && "space-y-2")}>
+          {settingsItems.map((item) => (
+              <TooltipProvider key={item.href} delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={item.href}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        isActive(item.href)
+                          ? 'bg-muted'
+                          : 'text-muted-foreground hover:bg-muted',
+                        !isOpen && "justify-center"
+                      )}
+                    >
+                      <item.icon className="h-5 w-5" />
+                      {isOpen && item.label}
+                    </Link>
+                  </TooltipTrigger>
+                  {!isOpen && (
+                    <TooltipContent side="right">
+                      {item.label}
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            ))}
+            
             <TooltipProvider delayDuration={0}>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <div className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted cursor-pointer',
-                      !isOpen && "justify-center"
-                    )}>
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={user.photoURL ?? undefined} />
-                        <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
-                      </Avatar>
-                      {isOpen && (
-                        <div className="flex-1 truncate">
-                          <p className="font-semibold text-foreground truncate">{user.displayName || user.email}</p>
-                        </div>
-                      )}
-                    </div>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                 {!isOpen && (
-                  <TooltipContent side="right">
-                    {user.displayName || user.email}
-                  </TooltipContent>
-                )}
+                  <TooltipTrigger asChild>
+                      <button
+                          onClick={onToggleSidebar}
+                          className={cn(
+                              'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted',
+                              !isOpen && "justify-center"
+                          )}
+                      >
+                          {isOpen ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                          {isOpen && (isOpen ? 'Minimizar Menu' : 'Expandir Menu')}
+                      </button>
+                  </TooltipTrigger>
+                  {!isOpen && (
+                      <TooltipContent side="right">
+                          {isOpen ? 'Minimizar Menu' : 'Expandir Menu'}
+                      </TooltipContent>
+                  )}
               </Tooltip>
-            </TooltipProvider>
-            <DropdownMenuContent side="right" align="end" className="w-56 mb-2">
-              <DropdownMenuLabel>
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
-                  <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => signOut()}>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Sair</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+          </TooltipProvider>
+          
+          {user && (
+            <DropdownMenu>
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <div className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted cursor-pointer',
+                        !isOpen && "justify-center"
+                      )}>
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={user.photoURL ?? undefined} />
+                          <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
+                        </Avatar>
+                        {isOpen && (
+                          <div className="flex-1 truncate">
+                            <p className="font-semibold text-foreground truncate">{user.displayName || user.email}</p>
+                          </div>
+                        )}
+                      </div>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  {!isOpen && (
+                    <TooltipContent side="right">
+                      {user.displayName || user.email}
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+              <DropdownMenuContent side="right" align="end" className="w-56 mb-2">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
+                    <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Sair</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
     </aside>
   );
