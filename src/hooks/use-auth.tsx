@@ -35,12 +35,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     let heartbeatInterval: NodeJS.Timeout | null = null;
+    let visibilityHandler: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       // Limpar interval anterior se existir
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
+      }
+
+      // Limpar listener anterior se existir
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler);
+        visibilityHandler = null;
       }
 
       if (user) {
@@ -67,6 +74,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setMustChangePassword(false);
         }
         setUser(user);
+        console.log('✅ [use-auth] Usuário configurado, role:', role);
 
         // --- Firestore Presence System (Heartbeat) ---
         console.log('🔍 [use-auth] Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
@@ -103,7 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }, 30000); // Atualiza a cada 30 segundos
 
             // Marcar offline quando a aba fica visível novamente
-            const handleVisibilityChange = async () => {
+            visibilityHandler = async () => {
                 if (!document.hidden) {
                     console.log('✅ [use-auth] Aba visível - garantindo status online');
                     try {
@@ -117,15 +125,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 }
             };
 
-            document.addEventListener('visibilitychange', handleVisibilityChange);
-
-            // Cleanup function será chamada no próximo auth state change ou unmount
-            return () => {
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                }
-                document.removeEventListener('visibilitychange', handleVisibilityChange);
-            };
+            document.addEventListener('visibilitychange', visibilityHandler);
         }
         // --- End Presence ---
 
@@ -134,6 +134,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUserRole(null);
         setMustChangePassword(false);
       }
+      console.log('🔄 [use-auth] Finalizando onAuthStateChanged, definindo loading = false');
       setLoading(false);
     });
 
@@ -141,6 +142,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       unsubscribe();
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
+      }
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler);
       }
     };
   }, []);

@@ -34,6 +34,7 @@ import {
   Plus,
   PackagePlus,
   MoreHorizontal,
+  Search,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import {
@@ -75,7 +76,6 @@ import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/li
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useRouteSearch } from '../layout';
 import {
   DndContext,
   closestCenter,
@@ -359,8 +359,7 @@ export default function OrganizeRoutePage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState<{ [key: string]: boolean }>({});
 
-
-  const { searchQuery } = useRouteSearch();
+  const [searchQuery, setSearchQuery] = React.useState('');
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
@@ -1158,7 +1157,9 @@ export default function OrganizeRoutePage() {
     if (routeKey && index !== undefined) {
       const route = routeKey === 'A' ? routeA : routeB;
       if (route) {
-        setActiveStop(route.stops[index]);
+        // Get from pendingEdits if exists, otherwise from route
+        const stops = pendingEdits[routeKey] || route.stops;
+        setActiveStop(stops[index]);
       }
     }
   };
@@ -1269,12 +1270,6 @@ export default function OrganizeRoutePage() {
       const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
 
-      // Get stop to move and preserve its original index and color
-      const stopToMove = sourceRoute.stops[activeIndex];
-
-      // Get the original index if it exists, otherwise use current index
-      const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? activeIndex;
-
       // Check if there's already a pending edit for source route
       const currentSourcePending = pendingEdits[activeRouteKey];
       const sourceStopsToEdit = currentSourcePending || sourceRoute.stops.map((stop, idx) => ({
@@ -1289,19 +1284,44 @@ export default function OrganizeRoutePage() {
         _originalIndex: (stop as any)._originalIndex ?? idx
       }));
 
+      // Get stop to move from the correct source (pending edits or original route)
+      const stopToMove = sourceStopsToEdit[activeIndex];
+
+      // Get the original index if it exists, otherwise use current index
+      const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? activeIndex;
+
       // Remove from source
       const newSourceStops = sourceStopsToEdit.filter((_, i) => i !== activeIndex);
 
       // Add to target at the position of the over item with marker for cross-route movement
-      const newTargetStops = [...targetStopsToEdit];
-      const movedStop = {
-        ...stopToMove,
-        _originalIndex: originalIndexOfMovedStop, // Preserve the original index from source route
-        _wasMoved: true,
-        _movedFromRoute: activeRouteKey, // Track which route it came from
-        _originalRouteColor: sourceRoute.color, // Preserve original route color
-      };
-      newTargetStops.splice(overIndex, 0, movedStop);
+      const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
+
+      // Check if stop already exists in target (to prevent duplicates)
+      const existsInTarget = targetStopsToEdit.some(s =>
+        String(s.id ?? s.placeId) === movedStopId
+      );
+
+      let newTargetStops;
+      if (existsInTarget) {
+        // If already exists, just reorder within target
+        const existingIndex = targetStopsToEdit.findIndex(s =>
+          String(s.id ?? s.placeId) === movedStopId
+        );
+        newTargetStops = [...targetStopsToEdit];
+        const [removed] = newTargetStops.splice(existingIndex, 1);
+        newTargetStops.splice(overIndex, 0, removed);
+      } else {
+        // Normal case: add to target
+        newTargetStops = [...targetStopsToEdit];
+        const movedStop = {
+          ...stopToMove,
+          _originalIndex: originalIndexOfMovedStop, // Preserve the original index from source route
+          _wasMoved: true,
+          _movedFromRoute: activeRouteKey, // Track which route it came from
+          _originalRouteColor: sourceRoute.color, // Preserve original route color
+        };
+        newTargetStops.splice(overIndex, 0, movedStop);
+      }
 
       // Save as pending edits for both routes
       setPendingEdits(prev => ({
@@ -1976,14 +1996,19 @@ export default function OrganizeRoutePage() {
       <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <Tabs defaultValue="organize" className="w-full">
-          <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-6">
-            <div className="flex items-start justify-between mb-4">
+          <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4">
+            <div className="flex items-center justify-between gap-4">
               <div className='flex items-center gap-4'>
-                 <div>
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Organizar e Atribuir Rota</h2>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
-                      Otimize a sequência, atribua um motorista e salve a rota.
-                    </p>
+                 {/* Search Bar */}
+                 <div className="relative w-64">
+                   <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                   <Input
+                     type="search"
+                     placeholder="Buscar endereços..."
+                     className="h-8 pl-8 text-sm"
+                     value={searchQuery}
+                     onChange={(e) => setSearchQuery(e.target.value)}
+                   />
                  </div>
                  {unassignedStops.length > 0 && (
                     <Popover>
@@ -2019,6 +2044,36 @@ export default function OrganizeRoutePage() {
                  )}
               </div>
               <div className='flex items-center gap-2'>
+                {Object.keys(pendingEdits).some(key => pendingEdits[key as 'A' | 'B']) && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setPendingEdits({});
+                        toast({ title: 'Todas as edições foram canceladas' });
+                      }}
+                      className="border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                    >
+                      Cancelar Todas
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={async () => {
+                        const keysWithPending = Object.keys(pendingEdits).filter(key => pendingEdits[key as 'A' | 'B']) as ('A' | 'B')[];
+                        for (const key of keysWithPending) {
+                          await handleApplyPendingEdits(key);
+                        }
+                        toast({ title: 'Todas as edições foram aplicadas com sucesso!' });
+                      }}
+                      className="bg-primary hover:bg-primary/90"
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      Aplicar Todas as Edições
+                    </Button>
+                  </div>
+                )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
@@ -2093,12 +2148,13 @@ export default function OrganizeRoutePage() {
                                           />
                                         </div>
                                     </TableCell>
-                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{routeItem.data.stops.length}</TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[routeItem.key] || routeItem.data.stops).length}</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(routeItem.data.duration)}</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell className="py-4 px-4">
                                         <RouteTimeline
+                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
                                         routeKey={routeItem.key}
                                         stops={pendingEdits[routeItem.key] || routeItem.data.stops}
                                         originalStops={pendingEdits[routeItem.key] ? routeItem.data.stops : undefined}
@@ -2115,27 +2171,9 @@ export default function OrganizeRoutePage() {
                                     </TableCell>
                                     <TableCell className="py-4 px-4 text-right">
                                         {pendingEdits[routeItem.key] ? (
-                                            <div className="flex gap-2 justify-end">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setPendingEdits(prev => ({ ...prev, [routeItem.key]: null }));
-                                                        toast({ title: 'Edições canceladas' });
-                                                    }}
-                                                    className="border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50"
-                                                >
-                                                    Cancelar
-                                                </Button>
-                                                <Button
-                                                    variant="default"
-                                                    size="sm"
-                                                    onClick={() => handleApplyPendingEdits(routeItem.key)}
-                                                >
-                                                    <Check className="mr-2 h-4 w-4" />
-                                                    Editar ({pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length})
-                                                </Button>
-                                            </div>
+                                            <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                                                {pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
+                                            </Badge>
                                         ) : (
                                             <Button
                                                 variant="ghost"
@@ -2374,10 +2412,12 @@ export default function OrganizeRoutePage() {
                 className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
                   activeStop.isManuallyAdded
                     ? 'border-green-300 bg-green-100 text-green-700'
+                    : (activeStop as any)._wasMoved
+                    ? 'border-amber-400 bg-amber-100 text-amber-900'
                     : 'border-gray-300 bg-gray-100 text-gray-700'
                 }`}
               >
-                {activeIndex + 1}
+                {((activeStop as any)._originalIndex ?? activeIndex) + 1}
               </div>
             ) : null}
           </DragOverlay>

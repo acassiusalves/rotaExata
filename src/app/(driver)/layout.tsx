@@ -14,6 +14,8 @@ export default function DriverLayout({
   const { loading, mustChangePassword } = useAuth();
   const router = useRouter();
 
+  console.log('🚗 [DriverLayout] Renderizando. Loading:', loading, 'MustChangePassword:', mustChangePassword);
+
   useEffect(() => {
     if (!loading && mustChangePassword) {
       router.replace('/auth/change-password');

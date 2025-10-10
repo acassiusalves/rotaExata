@@ -18,6 +18,8 @@ import {
   LayoutDashboard,
   Smartphone,
   Monitor,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,7 +40,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 
 
-export function Header() {
+interface HeaderProps {
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+}
+
+export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   const pathname = usePathname();
   const { user, userRole, signOut } = useAuth();
   const isDriver = userRole === 'driver';
@@ -77,65 +84,22 @@ export function Header() {
 
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6">
-      <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-lg font-semibold md:text-base"
-        >
-          <BotMessageSquare className="h-6 w-6 text-primary" />
-          <span className="sr-only">RotaExata</span>
-        </Link>
-        {!isDriver && navItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              'transition-colors hover:text-foreground',
-              isActive(item.href)
-                ? 'text-foreground font-semibold'
-                : 'text-muted-foreground'
-            )}
-          >
-            {item.label}
-          </Link>
-        ))}
-        {/* Routes Dropdown */}
-        {!isDriver && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className={cn(
-                  'gap-1 px-3 py-2 transition-colors hover:text-foreground md:flex',
-                  isActive('/routes')
-                    ? 'text-foreground font-semibold'
-                    : 'text-muted-foreground'
-                )}
-              >
-                <Route className="h-4 w-4" />
-                Rotas
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-               <DropdownMenuItem asChild>
-                <Link href="/routes">Rotas Ativas</Link>
-              </DropdownMenuItem>
-               <DropdownMenuItem asChild>
-                <Link href="/routes/monitoring">
-                  <Monitor className="mr-2 h-4 w-4" />
-                  Monitoramento
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/routes/new">Criar Nova Rota</Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+    <header className="sticky top-0 z-30 flex h-12 items-center gap-4 border-b bg-background px-4 md:px-6">
+      {/* Sidebar toggle button for desktop */}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onToggleSidebar}
+        className="hidden md:flex h-8 w-8"
+        title={sidebarOpen ? 'Ocultar menu' : 'Mostrar menu'}
+      >
+        {sidebarOpen ? (
+          <PanelLeftClose className="h-4 w-4" />
+        ) : (
+          <PanelLeftOpen className="h-4 w-4" />
         )}
-      </nav>
+      </Button>
+      {/* Mobile menu button */}
       <Sheet>
         <SheetTrigger asChild>
           <Button variant="outline" size="icon" className="shrink-0 md:hidden">
@@ -215,58 +179,39 @@ export function Header() {
           </nav>
         </SheetContent>
       </Sheet>
+      {/* Page title for desktop */}
+      <div className="hidden md:block">
+        <h1 className="text-lg font-semibold">
+          {pathname === '/dashboard' && 'Dashboard'}
+          {pathname === '/users' && 'Usuários'}
+          {pathname === '/drivers' && 'Motoristas'}
+          {pathname === '/history' && 'Histórico'}
+          {pathname === '/reports' && 'Relatórios'}
+          {pathname === '/settings' && 'Configurações'}
+          {pathname === '/api' && 'API'}
+          {pathname === '/routes' && 'Rotas Ativas'}
+          {pathname === '/routes/new' && 'Criar Nova Rota'}
+          {pathname === '/routes/organize' && 'Organizar Rota'}
+          {pathname === '/routes/monitoring' && 'Monitoramento'}
+          {pathname === '/my-routes' && 'Minhas Rotas'}
+          {pathname === '/my-routes/history' && 'Histórico de Rotas'}
+        </h1>
+      </div>
       <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4">
-        <form className="ml-auto flex-1 sm:flex-initial">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Buscar..."
-              className="pl-8 sm:w-[300px] md:w-[200px] lg:w-[300px]"
-            />
-          </div>
-        </form>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="icon" className="rounded-full">
-              <Avatar className="h-8 w-8">
-                  <AvatarImage src={user?.photoURL ?? undefined} />
-                  <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
-              </Avatar>
-              <span className="sr-only">Toggle user menu</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user?.displayName || 'Motorista'}</p>
-                <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {!isDriver && (
-                <DropdownMenuGroup>
-                    <DropdownMenuItem asChild>
-                    <Link href="/settings">
-                        <Settings className="mr-2 h-4 w-4" />
-                        <span>Configurações</span>
-                    </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                    <Link href="/api">
-                        <Code className="mr-2 h-4 w-4" />
-                        <span>API</span>
-                    </Link>
-                    </DropdownMenuItem>
-                     <DropdownMenuSeparator />
-                </DropdownMenuGroup>
-            )}
-            <DropdownMenuItem onClick={() => signOut()}>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Sair</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Hide search bar on organize page to save space */}
+        {pathname !== '/routes/organize' && (
+          <form className="ml-auto flex-1 sm:flex-initial">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Buscar..."
+                className="pl-8 sm:w-[300px] md:w-[200px] lg:w-[300px]"
+              />
+            </div>
+          </form>
+        )}
+        {pathname === '/routes/organize' && <div className="ml-auto" />}
       </div>
     </header>
   );

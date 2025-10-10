@@ -57,28 +57,6 @@ export default function RoutesLayout({
                 </TabsList>
               </Tabs>
 
-              {/* Search Box */}
-              <div className="relative w-80">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Buscar ponto (nome, endereço, telefone, pedido...)"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-9 h-10"
-                />
-                {searchQuery && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-                    onClick={() => setSearchQuery('')}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-
                <Button asChild>
                 <Link href="/routes/new">
                   <PlusCircle className="mr-2 h-4 w-4" />

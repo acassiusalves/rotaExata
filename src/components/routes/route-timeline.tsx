@@ -48,8 +48,8 @@ function SortableStop({
     transform,
     transition,
   } = useSortable({
-    id: stop.id ?? stop.placeId ?? `${routeKey}-${index}`,
-    data: { routeKey, index },
+    id: `${routeKey}-${stop.id ?? stop.placeId ?? index}`,
+    data: { routeKey, index, stop },
   });
 
   const style = {
@@ -199,7 +199,8 @@ export function RouteTimeline({
   if (stops.length === 0) {
     return null;
   }
-  const stopIds = stops.map((s, i) => s.id ?? s.placeId ?? `${routeKey}-${i}`);
+  // Generate unique IDs that include routeKey to force re-render when moving between routes
+  const stopIds = stops.map((s, i) => `${routeKey}-${s.id ?? s.placeId ?? i}`);
 
   return (
     <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>

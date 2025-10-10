@@ -329,9 +329,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
-    // Only fit bounds on first render to preserve user's zoom level
-    if (!bounds.isEmpty() && !hasInitializedBoundsRef.current) {
-        map.fitBounds(bounds, 100); // 100px padding
+    // Fit bounds to show all routes and stops
+    if (!bounds.isEmpty()) {
+        // Small delay to ensure map is fully rendered
+        requestAnimationFrame(() => {
+          map.fitBounds(bounds, 100); // 100px padding
+        });
         hasInitializedBoundsRef.current = true;
     }
 
