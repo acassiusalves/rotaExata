@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
+  CardFooter
 } from '@/components/ui/card';
 import {
   Tabs,
@@ -2364,7 +2365,7 @@ export default function OrganizeRoutePage() {
                                         Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
                                     </div>
                                 </CardContent>
-                                <Card.Footer className="flex gap-2">
+                                <CardFooter className="flex gap-2">
                                      {routeData?.isExistingRoute ? (
                                         <Button
                                             className="w-full"
@@ -2384,7 +2385,7 @@ export default function OrganizeRoutePage() {
                                             {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
                                         </Button>
                                      )}
-                                </Card.Footer>
+                                </CardFooter>
                             </Card>
                         )
                     }) : (

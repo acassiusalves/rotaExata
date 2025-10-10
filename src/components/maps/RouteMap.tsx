@@ -184,6 +184,38 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     const map = mapRef.current;
     if (!map) return;
 
+    // Only clear and redraw when data actually changes
+    const currentRoutesDataCheck = JSON.stringify({
+      originLat: origin?.lat,
+      originLng: origin?.lng,
+      stopsCount: stops?.length || 0,
+      routesData: routes?.map(r => ({
+        stopsCount: r.stops.length,
+        visible: r.visible,
+        color: r.color,
+        name: r.name
+      })),
+      unassignedCount: unassignedStops?.length || 0,
+      highlightedIds: highlightedStopIds.join(',')
+    });
+
+    // Skip if data hasn't changed (avoid unnecessary redraws)
+    const dataUnchanged = currentRoutesDataCheck === previousRoutesDataRef.current;
+    const alreadyInitialized = hasInitializedBoundsRef.current;
+
+    console.log('🗺️ RouteMap useEffect:', {
+      dataUnchanged,
+      alreadyInitialized,
+      willSkip: dataUnchanged && alreadyInitialized,
+      routesCount: routes?.length,
+      boundsWillBeEmpty: !origin && (!routes || routes.length === 0) && (!stops || stops.length === 0)
+    });
+
+    if (dataUnchanged && alreadyInitialized) {
+      console.log('⏭️ Skipping redraw - data unchanged');
+      return;
+    }
+
     // Clear previous elements
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
@@ -331,23 +363,30 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
-    // Fit bounds to show all routes and stops (only on data changes, not on resize)
-    const currentRoutesData = JSON.stringify({
-      origin,
-      stops: stops?.map(s => s.id),
-      routes: routes?.map(r => ({ id: r.id, stops: r.stops.map(s => s.id), visible: r.visible })),
-      unassignedStops: unassignedStops?.map(s => s.id)
-    });
+    // Fit bounds to show all routes and stops (only on first load or when data changes)
+    const isFirstLoad = !hasInitializedBoundsRef.current;
+    const dataChanged = currentRoutesDataCheck !== previousRoutesDataRef.current;
+    const shouldFitBounds = isFirstLoad || dataChanged;
 
-    const shouldFitBounds = !hasInitializedBoundsRef.current || currentRoutesData !== previousRoutesDataRef.current;
+    console.log('🎯 FitBounds decision:', {
+      isFirstLoad,
+      dataChanged,
+      shouldFitBounds,
+      boundsEmpty: bounds.isEmpty()
+    });
 
     if (!bounds.isEmpty() && shouldFitBounds) {
         // Small delay to ensure map is fully rendered
         requestAnimationFrame(() => {
+          console.log('✅ Executing fitBounds with bounds:', bounds.toJSON());
           map.fitBounds(bounds, 100); // 100px padding
         });
         hasInitializedBoundsRef.current = true;
-        previousRoutesDataRef.current = currentRoutesData;
+        previousRoutesDataRef.current = currentRoutesDataCheck;
+    } else if (bounds.isEmpty()) {
+      console.log('⚠️ Bounds is empty, not executing fitBounds');
+    } else {
+      console.log('⚠️ Should not fit bounds (already initialized and data unchanged)');
     }
 
   }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);

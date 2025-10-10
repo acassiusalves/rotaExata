@@ -1,4 +1,3 @@
-
 'use client';
 
 import Link from 'next/link';
@@ -104,7 +103,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   return (
     <aside className={cn(
       "hidden md:flex flex-col border-r bg-background transition-all duration-300",
-      isOpen ? "w-64" : "w-20"
+      isOpen ? "w-64" : "w-14"
     )}>
       <div className={cn(
         "flex h-16 items-center border-b px-6",
