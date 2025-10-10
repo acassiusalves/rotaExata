@@ -248,11 +248,56 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                 </TooltipTrigger>
                 {!isOpen && (
                     <TooltipContent side="right">
-                        Expandir Menu
+                        {isOpen ? 'Minimizar Menu' : 'Expandir Menu'}
                     </TooltipContent>
                 )}
             </Tooltip>
         </TooltipProvider>
+        
+        {user && (
+          <DropdownMenu>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <div className={cn(
+                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted cursor-pointer',
+                      !isOpen && "justify-center"
+                    )}>
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={user.photoURL ?? undefined} />
+                        <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
+                      </Avatar>
+                      {isOpen && (
+                        <div className="flex-1 truncate">
+                          <p className="font-semibold text-foreground truncate">{user.displayName || user.email}</p>
+                        </div>
+                      )}
+                    </div>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                 {!isOpen && (
+                  <TooltipContent side="right">
+                    {user.displayName || user.email}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
+            <DropdownMenuContent side="right" align="end" className="w-56 mb-2">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
+                  <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => signOut()}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Sair</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </aside>
   );

@@ -189,38 +189,40 @@ export function Header({}: HeaderProps) {
         <form className="ml-auto flex-1 sm:flex-initial">
           {/* Search bar can be added back here if needed */}
         </form>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-             <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-              <Avatar className="h-9 w-9">
-                  <AvatarImage src={user?.photoURL ?? undefined} />
-                  <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
-                </Avatar>
-             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
-                <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-                {!isDriver && (
-                  <DropdownMenuItem onClick={() => router.push('/settings')}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    <span>Configurações</span>
-                  </DropdownMenuItem>
-                )}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => signOut()}>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Sair</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {user && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                <Avatar className="h-9 w-9">
+                    <AvatarImage src={user?.photoURL ?? undefined} />
+                    <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
+                  </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">{user?.displayName || 'Usuário'}</p>
+                  <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                  {!isDriver && (
+                    <DropdownMenuItem onClick={() => router.push('/settings')}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Configurações</span>
+                    </DropdownMenuItem>
+                  )}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => signOut()}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Sair</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </header>
   );
