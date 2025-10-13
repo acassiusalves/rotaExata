@@ -15,6 +15,8 @@ import {
   CheckCircle,
   XCircle,
   DollarSign,
+  User,
+  ClipboardList,
 } from 'lucide-react';
 import {
   Card,
@@ -42,6 +44,12 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -287,182 +295,213 @@ export default function MonitoringPage() {
           </DialogHeader>
 
           {selectedStop && (
-            <div className="space-y-6 pt-4">
-              {/* Informações do Cliente */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-sm text-muted-foreground uppercase">Informações do Cliente</h3>
-                <div className="space-y-2">
-                  <div className="flex items-start gap-3">
-                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">Endereço</p>
-                      <p className="text-sm text-muted-foreground">{selectedStop.stop.address}</p>
+            <Tabs defaultValue="delivery" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="delivery" className="flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4" />
+                  Dados da Entrega
+                </TabsTrigger>
+                <TabsTrigger value="customer" className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Dados do Cliente
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Aba: Dados da Entrega */}
+              <TabsContent value="delivery" className="space-y-6 pt-4">
+                {/* Horários */}
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Horários</h3>
+                  <div className="space-y-2">
+                    {selectedStop.stop.arrivedAt && (() => {
+                      try {
+                        const date = selectedStop.stop.arrivedAt instanceof Timestamp
+                          ? selectedStop.stop.arrivedAt.toDate()
+                          : new Date(selectedStop.stop.arrivedAt);
+
+                        if (isNaN(date.getTime())) return null;
+
+                        return (
+                          <div className="flex items-start gap-3">
+                            <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">Chegada</p>
+                              <p className="text-sm text-muted-foreground">
+                                {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      } catch (error) {
+                        console.error('Erro ao formatar data de chegada:', error);
+                        return null;
+                      }
+                    })()}
+
+                    {selectedStop.stop.completedAt && (() => {
+                      try {
+                        const date = selectedStop.stop.completedAt instanceof Timestamp
+                          ? selectedStop.stop.completedAt.toDate()
+                          : new Date(selectedStop.stop.completedAt);
+
+                        if (isNaN(date.getTime())) return null;
+
+                        return (
+                          <div className="flex items-start gap-3">
+                            <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium">Conclusão</p>
+                              <p className="text-sm text-muted-foreground">
+                                {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      } catch (error) {
+                        console.error('Erro ao formatar data de conclusão:', error);
+                        return null;
+                      }
+                    })()}
+                  </div>
+                </div>
+
+                {/* Pagamentos */}
+                {selectedStop.stop.payments && selectedStop.stop.payments.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase">Pagamentos</h3>
+                    <div className="space-y-2">
+                      {selectedStop.stop.payments.map((payment, idx) => (
+                        <div key={payment.id || idx} className="flex items-start gap-3">
+                          <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{payment.method}</p>
+                            <p className="text-sm text-muted-foreground">
+                              R$ {payment.value.toFixed(2)}
+                              {payment.installments && ` (${payment.installments}x)`}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
+                )}
 
-                  {selectedStop.stop.customerName && (
-                    <div className="flex items-start gap-3">
-                      <Package className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Cliente</p>
-                        <p className="text-sm text-muted-foreground">{selectedStop.stop.customerName}</p>
-                      </div>
+                {/* Motivo da Falha */}
+                {selectedStop.stop.deliveryStatus === 'failed' && selectedStop.stop.failureReason && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase">Motivo da Falha</h3>
+                    <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                      <p className="text-sm text-red-900">{selectedStop.stop.failureReason}</p>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {selectedStop.stop.phone && (
-                    <div className="flex items-start gap-3">
-                      <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Telefone</p>
-                        <p className="text-sm text-muted-foreground">{selectedStop.stop.phone}</p>
-                      </div>
+                {/* Foto */}
+                {selectedStop.stop.photoUrl && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
+                      <Camera className="h-4 w-4" />
+                      Foto da Entrega
+                    </h3>
+                    <div className="rounded-lg overflow-hidden border">
+                      <img
+                        src={selectedStop.stop.photoUrl}
+                        alt="Foto da entrega"
+                        className="w-full h-auto"
+                      />
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {selectedStop.stop.orderNumber && (
-                    <div className="flex items-start gap-3">
-                      <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Número do Pedido</p>
-                        <p className="text-sm text-muted-foreground">{selectedStop.stop.orderNumber}</p>
-                      </div>
+                {/* Assinatura */}
+                {selectedStop.stop.signatureUrl && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Assinatura
+                    </h3>
+                    <div className="rounded-lg overflow-hidden border bg-white">
+                      <img
+                        src={selectedStop.stop.signatureUrl}
+                        alt="Assinatura"
+                        className="w-full h-auto"
+                      />
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
 
-              {/* Horários */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-sm text-muted-foreground uppercase">Horários</h3>
-                <div className="space-y-2">
-                  {selectedStop.stop.arrivedAt && (() => {
-                    try {
-                      const date = selectedStop.stop.arrivedAt instanceof Timestamp
-                        ? selectedStop.stop.arrivedAt.toDate()
-                        : new Date(selectedStop.stop.arrivedAt);
+                {/* Observações da Entrega */}
+                {selectedStop.stop.notes && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase">Observações da Entrega</h3>
+                    <div className="rounded-lg bg-muted p-3">
+                      <p className="text-sm">{selectedStop.stop.notes}</p>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
 
-                      if (isNaN(date.getTime())) return null;
-
-                      return (
-                        <div className="flex items-start gap-3">
-                          <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">Chegada</p>
-                            <p className="text-sm text-muted-foreground">
-                              {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    } catch (error) {
-                      console.error('Erro ao formatar data de chegada:', error);
-                      return null;
-                    }
-                  })()}
-
-                  {selectedStop.stop.completedAt && (() => {
-                    try {
-                      const date = selectedStop.stop.completedAt instanceof Timestamp
-                        ? selectedStop.stop.completedAt.toDate()
-                        : new Date(selectedStop.stop.completedAt);
-
-                      if (isNaN(date.getTime())) return null;
-
-                      return (
-                        <div className="flex items-start gap-3">
-                          <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">Conclusão</p>
-                            <p className="text-sm text-muted-foreground">
-                              {format(date, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    } catch (error) {
-                      console.error('Erro ao formatar data de conclusão:', error);
-                      return null;
-                    }
-                  })()}
-                </div>
-              </div>
-
-              {/* Pagamentos */}
-              {selectedStop.stop.payments && selectedStop.stop.payments.length > 0 && (
+              {/* Aba: Dados do Cliente */}
+              <TabsContent value="customer" className="space-y-6 pt-4">
                 <div className="space-y-3">
-                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Pagamentos</h3>
-                  <div className="space-y-2">
-                    {selectedStop.stop.payments.map((payment, idx) => (
-                      <div key={payment.id || idx} className="flex items-start gap-3">
-                        <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Informações do Cliente</h3>
+                  <div className="space-y-4">
+                    {selectedStop.stop.customerName && (
+                      <div className="flex items-start gap-3">
+                        <User className="h-4 w-4 text-muted-foreground mt-0.5" />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">{payment.method}</p>
+                          <p className="text-sm font-medium">Nome</p>
+                          <p className="text-sm text-muted-foreground">{selectedStop.stop.customerName}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedStop.stop.phone && (
+                      <div className="flex items-start gap-3">
+                        <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Telefone</p>
+                          <p className="text-sm text-muted-foreground">{selectedStop.stop.phone}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedStop.stop.orderNumber && (
+                      <div className="flex items-start gap-3">
+                        <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Número do Pedido</p>
+                          <p className="text-sm text-muted-foreground">{selectedStop.stop.orderNumber}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">Endereço</p>
+                        <p className="text-sm text-muted-foreground">{selectedStop.stop.address}</p>
+                      </div>
+                    </div>
+
+                    {/* Janela de Tempo */}
+                    {(selectedStop.stop.timeWindowStart || selectedStop.stop.timeWindowEnd) && (
+                      <div className="flex items-start gap-3">
+                        <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Janela de Atendimento</p>
                           <p className="text-sm text-muted-foreground">
-                            R$ {payment.value.toFixed(2)}
-                            {payment.installments && ` (${payment.installments}x)`}
+                            {selectedStop.stop.timeWindowStart && selectedStop.stop.timeWindowEnd
+                              ? `${selectedStop.stop.timeWindowStart} às ${selectedStop.stop.timeWindowEnd}`
+                              : selectedStop.stop.timeWindowStart || selectedStop.stop.timeWindowEnd}
                           </p>
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
-              )}
-
-              {/* Motivo da Falha */}
-              {selectedStop.stop.deliveryStatus === 'failed' && selectedStop.stop.failureReason && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Motivo da Falha</h3>
-                  <div className="rounded-lg bg-red-50 border border-red-200 p-3">
-                    <p className="text-sm text-red-900">{selectedStop.stop.failureReason}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Foto */}
-              {selectedStop.stop.photoUrl && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
-                    <Camera className="h-4 w-4" />
-                    Foto da Entrega
-                  </h3>
-                  <div className="rounded-lg overflow-hidden border">
-                    <img
-                      src={selectedStop.stop.photoUrl}
-                      alt="Foto da entrega"
-                      className="w-full h-auto"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Assinatura */}
-              {selectedStop.stop.signatureUrl && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-sm text-muted-foreground uppercase flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Assinatura
-                  </h3>
-                  <div className="rounded-lg overflow-hidden border bg-white">
-                    <img
-                      src={selectedStop.stop.signatureUrl}
-                      alt="Assinatura"
-                      className="w-full h-auto"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Observações */}
-              {selectedStop.stop.notes && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-sm text-muted-foreground uppercase">Observações</h3>
-                  <div className="rounded-lg bg-muted p-3">
-                    <p className="text-sm">{selectedStop.stop.notes}</p>
-                  </div>
-                </div>
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
           )}
         </DialogContent>
       </Dialog>
