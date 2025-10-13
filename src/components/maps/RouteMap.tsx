@@ -193,9 +193,21 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         stopsCount: r.stops.length,
         visible: r.visible,
         color: r.color,
-        name: r.name
+        name: r.name,
+        stops: r.stops.map(s => ({
+          id: s.id,
+          lat: s.lat,
+          lng: s.lng,
+          address: s.address
+        }))
       })),
       unassignedCount: unassignedStops?.length || 0,
+      unassignedStops: unassignedStops?.map(s => ({
+        id: s.id,
+        lat: s.lat,
+        lng: s.lng,
+        address: s.address
+      })),
       highlightedIds: highlightedStopIds.join(',')
     });
 
