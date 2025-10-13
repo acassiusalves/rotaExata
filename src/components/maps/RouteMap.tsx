@@ -411,11 +411,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     // Always update the full data check to trigger marker re-render
     previousRoutesDataRef.current = currentRoutesDataCheck;
-    } else if (bounds.isEmpty()) {
-      console.log('⚠️ Bounds is empty, not executing fitBounds');
-    } else {
-      console.log('⚠️ Should not fit bounds (already initialized and data unchanged)');
-    }
 
   }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
 
