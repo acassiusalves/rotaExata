@@ -983,52 +983,7 @@ export default function OrganizeRoutePage() {
         cep: newCep,
       }));
 
-      // Geocodifica o novo endereço para atualizar a posição no mapa
-      if (newRua && editService.numero && newBairro && newCidade) {
-        toast({ title: "Geocodificando...", description: "Atualizando posição no mapa." });
-
-        const addressString = `${newRua}, ${editService.numero}, ${newBairro}, ${newCidade}, ${newCep}, Brasil`;
-        const geocoded = await geocodeAddress(addressString);
-
-        if (geocoded && stopToEdit) {
-          // Atualiza o marcador no mapa com as novas coordenadas
-          const updatedStop: PlaceValue = {
-            ...stopToEdit.stop,
-            lat: geocoded.lat,
-            lng: geocoded.lng,
-            address: geocoded.address,
-            placeId: geocoded.placeId,
-          };
-
-          // Atualiza o stop na lista apropriada
-          if (stopToEdit.routeKey && stopToEdit.routeKey !== 'unassigned') {
-            setRouteData(prev => {
-              if (!prev) return prev;
-              const routeKey = stopToEdit.routeKey as 'A' | 'B';
-              const updatedStops = prev[routeKey].stops.map((s: PlaceValue) =>
-                s.id === stopToEdit.stop.id ? updatedStop : s
-              );
-              return {
-                ...prev,
-                [routeKey]: {
-                  ...prev[routeKey],
-                  stops: updatedStops,
-                },
-              };
-            });
-          } else {
-            setUnassignedStops(prev =>
-              prev.map(s => (s.id === stopToEdit.stop.id ? updatedStop : s))
-            );
-          }
-
-          toast({ title: "Endereço atualizado!", description: "Posição no mapa atualizada com sucesso." });
-        } else {
-          toast({ title: "Endereço preenchido!", description: "Não foi possível geocodificar automaticamente. Verifique o endereço." });
-        }
-      } else {
-        toast({ title: "Endereço encontrado!", description: "Preencha o número para atualizar a posição no mapa." });
-      }
+      toast({ title: "Endereço encontrado!", description: "Os campos foram preenchidos. Clique em 'Salvar Alterações' para atualizar o mapa." });
     } catch (error) {
       console.error('Error fetching CEP:', error);
       toast({ variant: 'destructive', title: "Erro na busca", description: "Ocorreu um erro ao buscar o CEP." });
