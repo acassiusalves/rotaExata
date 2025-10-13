@@ -11,6 +11,8 @@ const pwaConfig = withPWA({
   fallbacks: {
     document: '/offline.html',
   },
+  buildExcludes: [/middleware-manifest\.json$/, /middleware-runtime\.js$/, /_client-reference-manifest\.js$/],
+  publicExcludes: ['!robots.txt', '!sitemap.xml'],
 });
 
 const nextConfig: NextConfig = {
