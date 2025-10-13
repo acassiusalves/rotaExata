@@ -951,6 +951,72 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  const handleSearchCepForEdit = async () => {
+    const cep = editService.cep.replace(/\D/g, '');
+    if (cep.length !== 8) {
+      toast({ variant: 'destructive', title: "CEP inválido", description: "Digite um CEP válido com 8 dígitos." });
+      return;
+    }
+
+    toast({ title: "Buscando CEP...", description: "Procurando informações do endereço." });
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await response.json();
+
+      if (data.erro) {
+        toast({ variant: 'destructive', title: "CEP não encontrado", description: "Não foi possível encontrar o endereço para este CEP." });
+        return;
+      }
+
+      setEditService(prev => ({
+        ...prev,
+        rua: data.logradouro || prev.rua,
+        bairro: data.bairro || prev.bairro,
+        cidade: data.localidade || prev.cidade,
+        cep: data.cep || prev.cep,
+      }));
+
+      toast({ title: "Endereço encontrado!", description: "Os campos foram preenchidos automaticamente." });
+    } catch (error) {
+      console.error('Error fetching CEP:', error);
+      toast({ variant: 'destructive', title: "Erro na busca", description: "Ocorreu um erro ao buscar o CEP." });
+    }
+  };
+
+  const handleSearchCepForManual = async () => {
+    const cep = manualService.cep.replace(/\D/g, '');
+    if (cep.length !== 8) {
+      toast({ variant: 'destructive', title: "CEP inválido", description: "Digite um CEP válido com 8 dígitos." });
+      return;
+    }
+
+    toast({ title: "Buscando CEP...", description: "Procurando informações do endereço." });
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await response.json();
+
+      if (data.erro) {
+        toast({ variant: 'destructive', title: "CEP não encontrado", description: "Não foi possível encontrar o endereço para este CEP." });
+        return;
+      }
+
+      setManualService(prev => ({
+        ...prev,
+        rua: data.logradouro || prev.rua,
+        bairro: data.bairro || prev.bairro,
+        cidade: data.localidade || prev.cidade,
+        cep: data.cep || prev.cep,
+      }));
+
+      toast({ title: "Endereço encontrado!", description: "Os campos foram preenchidos automaticamente." });
+    } catch (error) {
+      console.error('Error fetching CEP:', error);
+      toast({ variant: 'destructive', title: "Erro na busca", description: "Ocorreu um erro ao buscar o CEP." });
+    }
+  };
+
   const handleSaveEditedService = async () => {
     if (!stopToEdit || !routeData) return;
 
@@ -2459,7 +2525,12 @@ export default function OrganizeRoutePage() {
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor="cep">CEP</Label>
-                    <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
+                    <div className="flex gap-2">
+                      <Input id="cep" value={manualService.cep} onChange={handleManualServiceChange} placeholder="00000-000" />
+                      <Button type="button" variant="outline" size="icon" onClick={handleSearchCepForManual} disabled={!manualService.cep || manualService.cep.replace(/\D/g, '').length !== 8}>
+                        <Search className="h-4 w-4" />
+                      </Button>
+                    </div>
                 </div>
             </div>
              <div className="space-y-2">
@@ -2606,7 +2677,12 @@ export default function OrganizeRoutePage() {
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor="cep">CEP</Label>
-                    <Input id="cep" value={editService.cep} onChange={handleEditServiceChange} placeholder="00000-000" />
+                    <div className="flex gap-2">
+                      <Input id="cep" value={editService.cep} onChange={handleEditServiceChange} placeholder="00000-000" />
+                      <Button type="button" variant="outline" size="icon" onClick={handleSearchCepForEdit} disabled={!editService.cep || editService.cep.replace(/\D/g, '').length !== 8}>
+                        <Search className="h-4 w-4" />
+                      </Button>
+                    </div>
                 </div>
             </div>
             <div className="space-y-2">
