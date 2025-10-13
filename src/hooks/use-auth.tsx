@@ -5,7 +5,6 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { useRouter } from 'next/navigation';
 import { Toaster } from '@/components/ui/toaster';
 
 interface AuthContextType {
@@ -31,7 +30,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     let heartbeatInterval: NodeJS.Timeout | null = null;
@@ -171,8 +169,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(null);
     setUserRole(null);
     setMustChangePassword(false);
-    router.push('/login');
     setLoading(false);
+    // Redireciona usando window.location para evitar problemas com hooks
+    window.location.href = '/login';
   };
 
   const value = {
