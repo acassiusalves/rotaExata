@@ -136,6 +136,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   );
   const hasInitializedBoundsRef = React.useRef<boolean>(false);
   const previousRoutesDataRef = React.useRef<string>('');
+  const previousCountCheckRef = React.useRef<string>('');
   const previousDriverLocationsRef = React.useRef<string>('');
 
   React.useImperativeHandle(ref, () => ({
@@ -375,14 +376,25 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
     }
 
-    // Fit bounds to show all routes and stops (only on first load or when data changes)
+    // Fit bounds to show all routes and stops (only on first load or when count changes)
     const isFirstLoad = !hasInitializedBoundsRef.current;
     const dataChanged = currentRoutesDataCheck !== previousRoutesDataRef.current;
-    const shouldFitBounds = isFirstLoad || dataChanged;
+
+    // Check if only coordinates changed (not the count of stops)
+    const currentCountCheck = JSON.stringify({
+      stopsCount: stops?.length || 0,
+      routesStopsCounts: routes?.map(r => r.stops.length),
+      unassignedCount: unassignedStops?.length || 0,
+    });
+    const countChanged = currentCountCheck !== previousCountCheckRef.current;
+
+    // Only fit bounds on first load or when the number of stops changes
+    const shouldFitBounds = isFirstLoad || countChanged;
 
     console.log('🎯 FitBounds decision:', {
       isFirstLoad,
       dataChanged,
+      countChanged,
       shouldFitBounds,
       boundsEmpty: bounds.isEmpty()
     });
@@ -394,7 +406,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
           map.fitBounds(bounds, 100); // 100px padding
         });
         hasInitializedBoundsRef.current = true;
-        previousRoutesDataRef.current = currentRoutesDataCheck;
+        previousCountCheckRef.current = currentCountCheck;
+    }
+
+    // Always update the full data check to trigger marker re-render
+    previousRoutesDataRef.current = currentRoutesDataCheck;
     } else if (bounds.isEmpty()) {
       console.log('⚠️ Bounds is empty, not executing fitBounds');
     } else {
