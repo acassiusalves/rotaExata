@@ -1024,7 +1024,7 @@ export default function OrganizeRoutePage() {
   };
 
   const handleSaveEditedService = async () => {
-    if (!stopToEdit || !routeData) return;
+    if (!stopToEdit) return;
 
     const { rua, numero, bairro, cidade, cep } = editService;
     if (!rua || !numero || !bairro || !cidade) {
@@ -1060,6 +1060,12 @@ export default function OrganizeRoutePage() {
         setUnassignedStops(updatedStops);
         toast({ title: 'Serviço Atualizado!', description: 'As informações do serviço foram atualizadas.' });
       } else {
+        // Para stops em uma rota, precisa do routeData
+        if (!routeData) {
+          toast({ variant: 'destructive', title: 'Erro', description: 'Dados da rota não encontrados.' });
+          return;
+        }
+
         const targetRoute = stopToEdit.routeKey === 'A' ? routeA : routeB;
         const setter = stopToEdit.routeKey === 'A' ? setRouteA : setRouteB;
 
