@@ -2,19 +2,6 @@
 import type {NextConfig} from 'next';
 import withPWA from 'next-pwa';
 
-const pwaConfig = withPWA({
-  dest: 'public',
-  register: true,
-  skipWaiting: true,
-  disable: process.env.NODE_ENV === 'development',
-  sw: 'sw.js',
-  fallbacks: {
-    document: '/offline.html',
-  },
-  buildExcludes: [/middleware-manifest\.json$/, /middleware-runtime\.js$/, /_client-reference-manifest\.js$/],
-  publicExcludes: ['!robots.txt', '!sitemap.xml'],
-});
-
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
@@ -52,5 +39,17 @@ const nextConfig: NextConfig = {
     ],
   },
 };
+
+// Desabilita PWA na Vercel temporariamente devido a incompatibilidade com Next.js 15
+const pwaConfig = withPWA({
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1',
+  sw: 'sw.js',
+  fallbacks: {
+    document: '/offline.html',
+  },
+});
 
 export default pwaConfig(nextConfig);
