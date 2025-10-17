@@ -93,16 +93,16 @@ const Rotograma: React.FC<{
       return (
         <div
           key={stop.id || index}
-          className={`flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold transition-colors ${
+          className={`flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold transition-colors cursor-pointer ${
             isCompleted
-              ? 'bg-green-500 text-white border-green-600 cursor-pointer hover:bg-green-600'
+              ? 'bg-green-500 text-white border-green-600 hover:bg-green-600'
               : isFailed
-              ? 'bg-red-500 text-white border-red-600 cursor-pointer hover:bg-red-600'
-              : 'bg-muted text-muted-foreground'
+              ? 'bg-red-500 text-white border-red-600 hover:bg-red-600'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
           }`}
           title={stop.address}
           onClick={() => {
-            if ((isCompleted || isFailed) && onStopClick) {
+            if (onStopClick) {
               onStopClick(stop, index);
             }
           }}
