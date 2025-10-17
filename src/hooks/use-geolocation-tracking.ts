@@ -64,6 +64,15 @@ export function useGeolocationTracking({
     }
 
     try {
+      console.log('📍 Atualizando localização no Firebase:', {
+        routeId,
+        lat: latitude,
+        lng: longitude,
+        accuracy,
+        heading,
+        speed
+      });
+
       const routeRef = doc(db, 'routes', routeId);
       await updateDoc(routeRef, {
         currentLocation: {
@@ -77,10 +86,11 @@ export function useGeolocationTracking({
         lastUpdated: serverTimestamp(),
       });
 
+      console.log('✅ Localização atualizada com sucesso!');
       lastLocationRef.current = { lat: latitude, lng: longitude };
       lastUpdateRef.current = now;
     } catch (err) {
-      console.error('Erro ao atualizar localização:', err);
+      console.error('❌ Erro ao atualizar localização:', err);
     }
   };
 

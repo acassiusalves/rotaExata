@@ -98,20 +98,36 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
   React.useEffect(() => {
     if (!route?.id || !isOpen) return;
 
+    console.log('🎯 Iniciando monitoramento da rota:', route.id);
+
     const routeRef = doc(db, 'routes', route.id);
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
+        console.log('📡 Dados da rota recebidos:', {
+          hasCurrentLocation: !!data.currentLocation,
+          currentLocation: data.currentLocation,
+          currentStopIndex: data.currentStopIndex,
+          status: data.status
+        });
+
         if (data.currentLocation) {
           setDriverLocation(data.currentLocation as DriverLocation);
+          console.log('✅ Localização do motorista atualizada:', data.currentLocation);
+        } else {
+          console.log('⚠️ Nenhuma localização disponível');
         }
+
         if (data.currentStopIndex !== undefined) {
           setCurrentStopIndex(data.currentStopIndex);
         }
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      console.log('🛑 Parando monitoramento da rota:', route.id);
+      unsubscribe();
+    };
   }, [route?.id, isOpen]);
 
   const handleCopyTrackingLink = async () => {
