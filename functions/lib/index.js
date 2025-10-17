@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.syncAuthUsers = exports.authUserMirror = exports.notifyRouteChanges = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -231,6 +231,41 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
     }
     catch (error) {
         const msg = error.message || "Falha ao duplicar a rota.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
+/* ========== notifyRouteChanges (callable) ========== */
+exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const driverId = String(d.driverId || "").trim();
+    const changes = d.changes || [];
+    if (!routeId || !driverId) {
+        throw new https_1.HttpsError("invalid-argument", "routeId e driverId são obrigatórios");
+    }
+    if (!Array.isArray(changes) || changes.length === 0) {
+        throw new https_1.HttpsError("invalid-argument", "changes deve ser um array não vazio");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        // Criar ou atualizar a notificação
+        await db.collection("routeChangeNotifications").doc(routeId).set({
+            routeId,
+            driverId,
+            changes,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            acknowledged: false,
+        });
+        // Marcar a rota com flag de mudanças pendentes
+        await db.collection("routes").doc(routeId).update({
+            pendingChanges: true,
+            lastModifiedAt: firestore_1.FieldValue.serverTimestamp(),
+            lastModifiedBy: req.auth?.uid || "admin",
+        });
+        return { ok: true, message: "Notificação de mudanças criada com sucesso." };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao notificar mudanças.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
 });
