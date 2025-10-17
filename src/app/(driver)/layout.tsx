@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/header';
 import { useAuth } from '@/hooks/use-auth';
 import { Loader2 } from 'lucide-react';
+import { NotificationPermissionPrompt } from '@/components/notifications/notification-permission-prompt';
 
 export default function DriverLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { loading, mustChangePassword } = useAuth();
+  const { user, userRole, loading, mustChangePassword } = useAuth();
   const router = useRouter();
 
   console.log('🚗 [DriverLayout] Renderizando. Loading:', loading, 'MustChangePassword:', mustChangePassword);
@@ -39,6 +40,10 @@ export default function DriverLayout({
           {children}
         </div>
       </main>
+      {/* Prompt de permissão de notificações */}
+      {user && userRole && (
+        <NotificationPermissionPrompt userId={user.uid} userRole={userRole} />
+      )}
     </div>
   );
 }

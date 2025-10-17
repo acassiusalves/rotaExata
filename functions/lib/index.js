@@ -39,6 +39,7 @@ const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
+const messaging_1 = require("firebase-admin/messaging");
 (0, app_1.initializeApp)();
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
@@ -262,6 +263,70 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
             lastModifiedAt: firestore_1.FieldValue.serverTimestamp(),
             lastModifiedBy: req.auth?.uid || "admin",
         });
+        // Buscar FCM token do motorista
+        const driverDoc = await db.collection("users").doc(driverId).get();
+        const driverData = driverDoc.data();
+        const fcmToken = driverData?.fcmToken;
+        // Enviar push notification se o motorista tiver token FCM
+        if (fcmToken) {
+            const messaging = (0, messaging_1.getMessaging)();
+            // Criar mensagem de notificação baseada no tipo de mudança
+            let notificationTitle = "Alterações na Rota";
+            let notificationBody = `Sua rota foi atualizada com ${changes.length} alteração${changes.length > 1 ? 'ões' : ''}.`;
+            // Personalizar mensagem baseada no tipo de mudança mais prioritário
+            const changeTypes = changes.map((c) => c.changeType);
+            if (changeTypes.includes('address')) {
+                notificationBody = `Endereço de parada foi modificado. Total: ${changes.length} alterações.`;
+            }
+            else if (changeTypes.includes('sequence')) {
+                notificationBody = `Sequência de paradas foi alterada. Total: ${changes.length} alterações.`;
+            }
+            else if (changeTypes.includes('added')) {
+                notificationBody = `Nova parada foi adicionada à rota. Total: ${changes.length} alterações.`;
+            }
+            else if (changeTypes.includes('removed')) {
+                notificationBody = `Parada foi removida da rota. Total: ${changes.length} alterações.`;
+            }
+            const message = {
+                notification: {
+                    title: notificationTitle,
+                    body: notificationBody,
+                },
+                data: {
+                    routeId,
+                    changeCount: String(changes.length),
+                    type: 'route_change',
+                },
+                token: fcmToken,
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'default',
+                        priority: 'high',
+                        channelId: 'route_updates',
+                    },
+                },
+                webpush: {
+                    notification: {
+                        icon: '/icons/pwa-192.png',
+                        badge: '/icons/pwa-192.png',
+                        requireInteraction: true,
+                        tag: routeId,
+                    },
+                    fcmOptions: {
+                        link: `/my-routes/${routeId}`,
+                    },
+                },
+            };
+            try {
+                await messaging.send(message);
+                console.log(`✅ Push notification enviada para motorista ${driverId}`);
+            }
+            catch (notificationError) {
+                console.error('❌ Erro ao enviar push notification:', notificationError);
+                // Não falhar a função inteira se a notificação falhar
+            }
+        }
         return { ok: true, message: "Notificação de mudanças criada com sucesso." };
     }
     catch (error) {
