@@ -437,7 +437,7 @@ export default function RoutesPage() {
                   <AccordionTrigger className="p-4 hover:no-underline [&[data-state=open]>svg]:text-primary">
                     <div className="flex w-full items-center justify-between">
                       <div className="text-left">
-                        <p className="font-semibold text-lg">{format(new Date(date), "dd 'de' MMMM, yyyy", { locale: ptBR })}</p>
+                        <p className="font-semibold text-lg">{format(dailyRoutes[0].plannedDate.toDate(), "dd 'de' MMMM, yyyy", { locale: ptBR })}</p>
                         <p className="text-sm text-muted-foreground">
                           {dailyRoutes.length} rota{dailyRoutes.length > 1 ? 's' : ''} planejada{dailyRoutes.length > 1 ? 's' : ''}
                         </p>
