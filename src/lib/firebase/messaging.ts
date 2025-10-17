@@ -58,15 +58,16 @@ async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | undefi
     return undefined;
   }
 
-  const swUrl = '/sw.js';
+  const swUrl = '/firebase-messaging-sw.js';
   let registration = await navigator.serviceWorker.getRegistration();
 
   if (!registration) {
     try {
       registration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
+      console.log('Service Worker registrado:', swUrl);
     } catch (err) {
       console.error('Falha ao registrar service worker de push', err);
-      throw new Error('Não foi possível registrar o service worker de notificações. Verifique se /sw.js está acessível.');
+      throw new Error('Não foi possível registrar o service worker de notificações. Verifique se /firebase-messaging-sw.js está acessível.');
     }
   }
 
