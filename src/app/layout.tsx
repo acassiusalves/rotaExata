@@ -2,7 +2,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 // import { Toaster } from '@/components/ui/toaster'; // Removido daqui
-import { AuthProvider } from '@/hooks/use-auth';
+import { AuthProviderWrapper } from '@/components/providers/auth-provider-wrapper';
 import React from 'react';
 import { ServiceWorkerRegistration } from '@/components/pwa/service-worker-registration';
 
@@ -30,9 +30,9 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png"></link>
       </head>
       <body className="font-body antialiased">
-        <AuthProvider>
+        <AuthProviderWrapper>
           {children}
-        </AuthProvider>
+        </AuthProviderWrapper>
         {/* <Toaster /> Foi movido para o AuthProvider */}
         <ServiceWorkerRegistration />
       </body>

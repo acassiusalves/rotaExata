@@ -255,6 +255,50 @@ export const duplicateRoute = onCall(
 );
 
 
+/* ========== notifyRouteChanges (callable) ========== */
+export const notifyRouteChanges = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const driverId = String(d.driverId || "").trim();
+    const changes = d.changes || [];
+
+    if (!routeId || !driverId) {
+      throw new HttpsError("invalid-argument", "routeId e driverId são obrigatórios");
+    }
+
+    if (!Array.isArray(changes) || changes.length === 0) {
+      throw new HttpsError("invalid-argument", "changes deve ser um array não vazio");
+    }
+
+    try {
+      const db = getFirestore();
+
+      // Criar ou atualizar a notificação
+      await db.collection("routeChangeNotifications").doc(routeId).set({
+        routeId,
+        driverId,
+        changes,
+        createdAt: FieldValue.serverTimestamp(),
+        acknowledged: false,
+      });
+
+      // Marcar a rota com flag de mudanças pendentes
+      await db.collection("routes").doc(routeId).update({
+        pendingChanges: true,
+        lastModifiedAt: FieldValue.serverTimestamp(),
+        lastModifiedBy: req.auth?.uid || "admin",
+      });
+
+      return { ok: true, message: "Notificação de mudanças criada com sucesso." };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao notificar mudanças.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
 /* ========== Espelho: Auth -> Firestore (v1 trigger) ========== */
 export const authUserMirror=functionsV1.region("southamerica-east1")
   .auth.user()

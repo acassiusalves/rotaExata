@@ -101,10 +101,12 @@ import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { db } from '@/lib/firebase/client';
+import { db, functions } from '@/lib/firebase/client';
 import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc } from "firebase/firestore";
-import { startOfDay, endOfDay } from 'date-fns'; 
+import { httpsCallable } from 'firebase/functions';
+import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
 
 
 interface RouteData {
@@ -1549,17 +1551,56 @@ export default function OrganizeRoutePage() {
     try {
         const routeRef = doc(db, 'routes', currentRouteId);
 
+        // Buscar a rota atual do Firestore para comparar
+        const currentRouteDoc = await getDoc(routeRef);
+        if (!currentRouteDoc.exists()) {
+          throw new Error('Rota não encontrada no Firebase');
+        }
+
+        const currentRouteData = currentRouteDoc.data();
+        const oldStops = currentRouteData.stops || [];
+        const newStops = routeToUpdate.stops;
+
+        // Detectar mudanças
+        const changes = detectRouteChanges(oldStops, newStops);
+
+        // Marcar paradas modificadas
+        const stopsWithFlags = markModifiedStops(newStops, changes);
+
         await updateDoc(routeRef, {
-            stops: routeToUpdate.stops,
+            stops: stopsWithFlags,
             distanceMeters: routeToUpdate.distanceMeters,
             duration: routeToUpdate.duration,
             encodedPolyline: routeToUpdate.encodedPolyline,
         });
 
-        toast({
-            title: 'Rota Atualizada!',
-            description: `A ${routeName} foi atualizada com sucesso. As alterações serão refletidas no app do motorista.`,
-        });
+        // Se houver mudanças e a rota estiver em progresso, notificar o motorista
+        if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
+          try {
+            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+            await notifyFn({
+              routeId: currentRouteId,
+              driverId: currentRouteData.driverId,
+              changes,
+            });
+
+            toast({
+                title: 'Rota Atualizada!',
+                description: `A ${routeName} foi atualizada. O motorista será notificado das ${changes.length} alterações.`,
+            });
+          } catch (notifyError) {
+            console.error('Error notifying driver:', notifyError);
+            toast({
+                title: 'Rota Atualizada!',
+                description: `A ${routeName} foi atualizada, mas houve erro ao notificar o motorista.`,
+            });
+          }
+        } else {
+          toast({
+              title: 'Rota Atualizada!',
+              description: `A ${routeName} foi atualizada com sucesso.`,
+          });
+        }
 
     } catch (error) {
         console.error("Error updating route:", error);

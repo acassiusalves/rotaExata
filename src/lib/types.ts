@@ -45,6 +45,11 @@ export type PlaceValue = {
   signatureUrl?: string;
   failureReason?: string;
   payments?: Payment[]; // Substituído paymentMethod e creditCardInstallments
+  // Campos de alteração de rota
+  wasModified?: boolean;
+  modifiedAt?: Timestamp | Date;
+  modificationType?: 'address' | 'sequence' | 'data' | 'removed' | 'added';
+  originalSequence?: number;
 };
 
 export type DriverLocation = {
@@ -61,6 +66,22 @@ export type DriverLocationWithInfo = DriverLocation & {
   driverId: string;
 };
 
+export type RouteChangeNotification = {
+  id: string;
+  routeId: string;
+  driverId: string;
+  changes: Array<{
+    stopId: string;
+    stopIndex: number;
+    changeType: 'address' | 'sequence' | 'data' | 'removed' | 'added';
+    oldValue?: any;
+    newValue?: any;
+  }>;
+  createdAt: Timestamp | Date;
+  acknowledgedAt?: Timestamp | Date;
+  acknowledged: boolean;
+};
+
 export type RouteInfo = {
   stops: PlaceValue[];
   encodedPolyline: string;
@@ -75,6 +96,10 @@ export type RouteInfo = {
   startedAt?: Timestamp | Date;
   completedAt?: Timestamp | Date;
   actualPath?: Array<{ lat: number; lng: number; timestamp: Timestamp | Date }>;
+  // Sistema de notificação de alterações
+  pendingChanges?: boolean;
+  lastModifiedAt?: Timestamp | Date;
+  lastModifiedBy?: string;
 };
 
 export type OrderStatus =

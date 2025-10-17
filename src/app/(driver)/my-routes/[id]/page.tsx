@@ -28,7 +28,7 @@ import {
 import { db, storage } from '@/lib/firebase/client';
 import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import type { PlaceValue, RouteInfo, Payment } from '@/lib/types';
+import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
@@ -36,6 +36,8 @@ import { notFound } from 'next/navigation';
 import { useGeolocationTracking } from '@/hooks/use-geolocation-tracking';
 import { useToast } from '@/hooks/use-toast';
 import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
+import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
+import { StopChangeBadge } from '@/components/driver/stop-change-badge';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -76,6 +78,8 @@ export default function RouteDetailsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedStopIndex, setSelectedStopIndex] = React.useState<number | null>(null);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
+  const [notification, setNotification] = React.useState<RouteChangeNotification | null>(null);
+  const [isAcknowledging, setIsAcknowledging] = React.useState(false);
   const { toast } = useToast();
 
   // GPS Tracking
@@ -109,6 +113,78 @@ export default function RouteDetailsPage() {
 
     return () => unsubscribe();
   }, [routeId]);
+
+  // Listen for route change notifications
+  React.useEffect(() => {
+    if (!routeId) return;
+
+    const notificationRef = doc(db, 'routeChangeNotifications', routeId);
+    const unsubscribe = onSnapshot(
+      notificationRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as RouteChangeNotification;
+          if (!data.acknowledged) {
+            setNotification({ ...data, id: docSnap.id });
+          } else {
+            setNotification(null);
+          }
+        } else {
+          setNotification(null);
+        }
+      },
+      (error) => {
+        console.error('Error fetching notification:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [routeId]);
+
+  const handleAcknowledgeChanges = async () => {
+    if (!notification) return;
+
+    setIsAcknowledging(true);
+    try {
+      const notificationRef = doc(db, 'routeChangeNotifications', routeId);
+      await updateDoc(notificationRef, {
+        acknowledged: true,
+        acknowledgedAt: Timestamp.now(),
+      });
+
+      // Limpar os flags wasModified das paradas
+      if (route) {
+        const updatedStops = route.stops.map(stop => ({
+          ...stop,
+          wasModified: false,
+          modificationType: undefined,
+          originalSequence: undefined,
+        }));
+
+        const routeRef = doc(db, 'routes', routeId);
+        await updateDoc(routeRef, {
+          stops: updatedStops,
+          pendingChanges: false,
+        });
+      }
+
+      toast({
+        title: 'Alterações confirmadas',
+        description: 'Você confirmou o recebimento das alterações.',
+      });
+
+      setNotification(null);
+    } catch (error) {
+      console.error('Error acknowledging changes:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Não foi possível confirmar as alterações.',
+      });
+    } finally {
+      setIsAcknowledging(false);
+    }
+  };
 
   const handleNavigation = (stop: PlaceValue, app: 'google' | 'waze') => {
     if (!stop) return;
@@ -526,6 +602,13 @@ export default function RouteDetailsPage() {
                                 )}
                             </div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
+                            {stop.wasModified && (
+                              <StopChangeBadge
+                                modificationType={stop.modificationType}
+                                originalSequence={stop.originalSequence}
+                                currentSequence={index}
+                              />
+                            )}
                             {stop.orderNumber && (
                                 <p className="text-xs text-muted-foreground">Pedido: #{stop.orderNumber}</p>
                             )}
@@ -602,6 +685,13 @@ export default function RouteDetailsPage() {
           }
         />
       )}
+
+      {/* Route Changes Notification */}
+      <RouteChangesNotification
+        notification={notification}
+        onAcknowledge={handleAcknowledgeChanges}
+        isAcknowledging={isAcknowledging}
+      />
     </div>
   );
 }

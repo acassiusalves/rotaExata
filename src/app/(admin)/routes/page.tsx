@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -107,6 +107,7 @@ export default function RoutesPage() {
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
+  const [pendingNotifications, setPendingNotifications] = React.useState<Set<string>>(new Set());
   const [isChangeDriverDialogOpen, setIsChangeDriverDialogOpen] = React.useState(false);
   const [isEditNameDialogOpen, setIsEditNameDialogOpen] = React.useState(false);
   const [routeToModify, setRouteToModify] = React.useState<RouteDocument | null>(null);
@@ -163,6 +164,36 @@ export default function RoutesPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Monitor pending notifications
+  React.useEffect(() => {
+    const routeIds = routes.map(r => r.id);
+    if (routeIds.length === 0) return;
+
+    const unsubscribes = routeIds.map(routeId => {
+      const notificationRef = doc(db, 'routeChangeNotifications', routeId);
+      return onSnapshot(notificationRef, (docSnap) => {
+        if (docSnap.exists() && !docSnap.data().acknowledged) {
+          setPendingNotifications(prev => new Set(prev).add(routeId));
+        } else {
+          setPendingNotifications(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(routeId);
+            return newSet;
+          });
+        }
+      }, () => {
+        // On error, remove from pending
+        setPendingNotifications(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(routeId);
+          return newSet;
+        });
+      });
+    });
+
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [routes.map(r => r.id).join(',')]);
 
   const handleOpenChangeDriver = (route: RouteDocument) => {
     setRouteToModify(route);
@@ -461,11 +492,17 @@ export default function RoutesPage() {
                               <CardHeader>
                                 <div className="flex items-start justify-between">
                                   <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-1">
+                                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                                         <CardTitle>{route.name}</CardTitle>
                                         <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
                                           {getRoutePeriod(route.plannedDate.toDate()).label}
                                         </Badge>
+                                        {pendingNotifications.has(route.id) && (
+                                          <Badge className="bg-orange-500 hover:bg-orange-600 text-white animate-pulse">
+                                            <AlertCircle className="mr-1 h-3 w-3" />
+                                            Aguardando confirmação
+                                          </Badge>
+                                        )}
                                       </div>
                                       <CardDescription>
                                           {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
