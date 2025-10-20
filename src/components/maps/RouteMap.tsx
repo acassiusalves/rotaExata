@@ -1,10 +1,12 @@
 
 "use client";
 import * as React from "react";
+import { createRoot } from "react-dom/client";
 import { Loader } from "@googlemaps/js-api-loader";
 import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from "@/lib/types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { DriverLocationPulse } from "./DriverLocationPulse";
 
 export type RouteMapHandle = {
   openStopInfo: (stopId: string) => void;
@@ -427,30 +429,20 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     // Create or update driver marker
     if (!driverMarkerRef.current) {
-      // Create truck icon
-      const truckIcon = document.createElement('div');
-      truckIcon.innerHTML = `
-        <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3"/>
-          <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white"/>
-        </svg>
-      `;
-      truckIcon.style.transform = driverLocation.heading ? `rotate(${driverLocation.heading}deg)` : '';
+      // Create pulse marker container
+      const markerContainer = document.createElement('div');
+      const root = createRoot(markerContainer);
+      root.render(<DriverLocationPulse size={44.8} />);
 
       driverMarkerRef.current = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: driverLocation,
-        content: truckIcon,
+        content: markerContainer,
         title: "Motorista",
       });
     } else {
       // Update position
       driverMarkerRef.current.position = driverLocation;
-
-      // Update rotation if heading available
-      if (driverLocation.heading && driverMarkerRef.current.content instanceof HTMLElement) {
-        driverMarkerRef.current.content.style.transform = `rotate(${driverLocation.heading}deg)`;
-      }
     }
   }, [driverLocation]);
 
@@ -474,18 +466,16 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         let infoWindow = driverInfoWindowsRef.current.get(markerId);
 
         if (!marker) {
-            const truckIcon = document.createElement('div');
-            truckIcon.innerHTML = `
-                <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="pointer-events: none;">
-                <circle cx="20" cy="20" r="18" fill="#ef4444" stroke="white" stroke-width="3" style="pointer-events: none;"/>
-                <path d="M12 18h8v-4h-2l-2-3h-4v7zm8 0h6l2 2v4h-8v-6zm-6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="white" style="pointer-events: none;"/>
-                </svg>
-            `;
-            truckIcon.style.cursor = 'pointer';
-            truckIcon.style.pointerEvents = 'auto';
+            // Create pulse marker container
+            const markerContainer = document.createElement('div');
+            markerContainer.style.cursor = 'pointer';
+            markerContainer.style.pointerEvents = 'auto';
+            const root = createRoot(markerContainer);
+            root.render(<DriverLocationPulse size={44.8} />);
+
             marker = new google.maps.marker.AdvancedMarkerElement({
                 map,
-                content: truckIcon,
+                content: markerContainer,
                 title: loc.driverName,
                 gmpClickable: true,
             });
