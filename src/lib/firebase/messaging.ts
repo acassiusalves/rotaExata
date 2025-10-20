@@ -1,18 +1,37 @@
 import { app, db } from '@/lib/firebase/client';
-import { getMessaging, getToken, onMessage, isSupported, type Messaging } from 'firebase/messaging';
 import { doc, setDoc } from 'firebase/firestore';
 
-let messagingPromise: Promise<Messaging | null> | null = null;
+let messagingPromise: Promise<any | null> | null = null;
 
 export async function getMessagingInstance() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return null;
+  }
+
   if (!messagingPromise) {
-    messagingPromise = isSupported().then(s => (s ? getMessaging(app) : null));
+    messagingPromise = import('firebase/messaging').then(async ({ getMessaging, isSupported }) => {
+      const supported = await isSupported();
+      return supported ? getMessaging(app) : null;
+    }).catch(error => {
+      console.error('Erro ao importar Firebase Messaging:', error);
+      return null;
+    });
   }
   return messagingPromise;
 }
 
-export function isPushSupported() {
-  return isSupported();
+export async function isPushSupported() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return false;
+  }
+
+  try {
+    const { isSupported } = await import('firebase/messaging');
+    return await isSupported();
+  } catch (error) {
+    console.error('Erro ao verificar suporte a push:', error);
+    return false;
+  }
 }
 
 export async function requestPushPermission(vapidKey: string) {
@@ -22,6 +41,8 @@ export async function requestPushPermission(vapidKey: string) {
   if (!isValidVapidKey(vapidKey)) {
     throw new Error('NEXT_PUBLIC_VAPID_KEY inválida. Copie a chave Web Push (Key pair) do Firebase Console e atualize .env.local.');
   }
+
+  const { getToken } = await import('firebase/messaging');
 
   const currentPermission = Notification.permission;
 
@@ -105,8 +126,14 @@ export async function saveCourierToken(uid: string, token: string) {
   await setDoc(doc(db, 'couriers', uid, 'tokens', token), { createdAt: Date.now() }, { merge: true });
 }
 
-export function onForegroundNotification(cb: (p: any) => void) {
-  getMessagingInstance().then(m => {
-    if (m) onMessage(m, cb);
-  });
+export async function onForegroundNotification(cb: (p: any) => void) {
+  try {
+    const messaging = await getMessagingInstance();
+    if (!messaging) return;
+
+    const { onMessage } = await import('firebase/messaging');
+    onMessage(messaging, cb);
+  } catch (error) {
+    console.error('Erro ao configurar listener de mensagens:', error);
+  }
 }

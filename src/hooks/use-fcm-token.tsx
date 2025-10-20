@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { app } from '@/lib/firebase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -24,33 +23,53 @@ export function useFCMToken() {
       retrieveToken();
     }
 
-    // Listener para mensagens em foreground
-    const messaging = getMessaging(app);
-    const unsubscribe = onMessage(messaging, (payload) => {
-      console.log('Mensagem recebida em foreground:', payload);
+    // Listener para mensagens em foreground - importação dinâmica
+    let unsubscribe: (() => void) | undefined;
 
-      // Mostrar toast para notificação em foreground
-      toast({
-        title: payload.notification?.title || 'Nova Notificação',
-        description: payload.notification?.body || 'Você tem uma nova mensagem',
-        duration: 5000,
+    if ('serviceWorker' in navigator) {
+      import('firebase/messaging').then(({ getMessaging, onMessage }) => {
+        try {
+          const messaging = getMessaging(app);
+          unsubscribe = onMessage(messaging, (payload) => {
+            console.log('Mensagem recebida em foreground:', payload);
+
+            // Mostrar toast para notificação em foreground
+            toast({
+              title: payload.notification?.title || 'Nova Notificação',
+              description: payload.notification?.body || 'Você tem uma nova mensagem',
+              duration: 5000,
+            });
+
+            // Também mostrar notificação nativa se possível
+            if (Notification.permission === 'granted') {
+              new Notification(payload.notification?.title || 'Nova Notificação', {
+                body: payload.notification?.body,
+                icon: '/icons/pwa-192.png',
+                tag: payload.data?.routeId || 'notification',
+              });
+            }
+          });
+        } catch (error) {
+          console.error('Erro ao configurar Firebase Messaging:', error);
+        }
+      }).catch(error => {
+        console.error('Erro ao importar Firebase Messaging:', error);
       });
+    }
 
-      // Também mostrar notificação nativa se possível
-      if (Notification.permission === 'granted') {
-        new Notification(payload.notification?.title || 'Nova Notificação', {
-          body: payload.notification?.body,
-          icon: '/icons/pwa-192.png',
-          tag: payload.data?.routeId || 'notification',
-        });
-      }
-    });
-
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [toast]);
 
   const retrieveToken = async () => {
     try {
+      if (!('serviceWorker' in navigator)) {
+        console.log('Service Worker não suportado');
+        return null;
+      }
+
+      const { getMessaging, getToken } = await import('firebase/messaging');
       const messaging = getMessaging(app);
 
       const currentToken = await getToken(messaging, {
@@ -73,6 +92,11 @@ export function useFCMToken() {
 
   const requestPermission = async () => {
     try {
+      if (typeof window === 'undefined' || !('Notification' in window)) {
+        console.log('Notificações não suportadas');
+        return null;
+      }
+
       const permission = await Notification.requestPermission();
       setNotificationPermission(permission);
 
