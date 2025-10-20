@@ -628,6 +628,9 @@ export default function RouteDetailsPage() {
                                 )}
                             </div>
                             <p className="text-sm text-muted-foreground">{stop.address}</p>
+                            {stop.complemento && (
+                              <p className="text-xs text-muted-foreground">{stop.complemento}</p>
+                            )}
                             {stop.wasModified && (
                               <StopChangeBadge
                                 modificationType={stop.modificationType}
@@ -698,6 +701,7 @@ export default function RouteDetailsPage() {
           onConfirm={handleConfirmDelivery}
           customerName={route.stops[selectedStopIndex]?.customerName}
           address={route.stops[selectedStopIndex]?.address}
+          complement={route.stops[selectedStopIndex]?.complemento}
           stopLocation={
             route.stops[selectedStopIndex]?.lat && route.stops[selectedStopIndex]?.lng
               ? {

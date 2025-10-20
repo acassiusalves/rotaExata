@@ -53,7 +53,14 @@ import {
   onSnapshot,
   Timestamp,
   getDocs,
+  doc,
+  updateDoc,
+  arrayUnion,
+  serverTimestamp,
 } from 'firebase/firestore';
+import { auth } from '@/lib/firebase/client';
+import { useToast } from '@/hooks/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format, startOfDay, endOfDay, subDays, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -84,6 +91,7 @@ type DeliveryReport = {
   routeName: string;
   driverName: string;
   stopIndex: number;
+  stopId: string; // ID único da parada para identificação
   customerName: string;
   address: string;
   orderNumber?: string;
@@ -97,6 +105,9 @@ type DeliveryReport = {
   payments?: any[];
   photoUrl?: string;
   signatureUrl?: string;
+  reconciled?: boolean;
+  reconciledAt?: Date;
+  reconciledBy?: string;
 };
 
 const formatCurrency = (value: number) => {
@@ -116,12 +127,18 @@ export default function ReportsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedDriver, setSelectedDriver] = React.useState<string>('all');
   const [selectedStatus, setSelectedStatus] = React.useState<string>('all');
+  const [selectedReconciliation, setSelectedReconciliation] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
 
   // Dialog
   const [selectedDelivery, setSelectedDelivery] = React.useState<DeliveryReport | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
+
+  // Seleção para conciliação
+  const [selectedDeliveryIds, setSelectedDeliveryIds] = React.useState<Set<string>>(new Set());
+  const [isReconciling, setIsReconciling] = React.useState(false);
+  const { toast } = useToast();
 
   // Estatísticas
   const stats = React.useMemo(() => {
@@ -135,7 +152,7 @@ export default function ReportsPage() {
     const totalRevenue = filteredDeliveries
       .filter(d => d.deliveryStatus === 'completed' && d.payments)
       .reduce((sum, d) => {
-        const deliveryTotal = d.payments?.reduce((s, p) => s + (p.amount || 0), 0) || 0;
+        const deliveryTotal = d.payments?.reduce((s, p) => s + (p.value || 0), 0) || 0;
         return sum + deliveryTotal;
       }, 0);
 
@@ -190,6 +207,7 @@ export default function ReportsPage() {
               routeName: route.name,
               driverName: route.driverInfo?.name || 'Sem motorista',
               stopIndex: index,
+              stopId: stop.id, // ID único da parada
               customerName: stop.customerName || 'Cliente não informado',
               address: stop.address,
               orderNumber: stop.orderNumber,
@@ -203,6 +221,9 @@ export default function ReportsPage() {
               payments: stop.payments,
               photoUrl: stop.photoUrl,
               signatureUrl: stop.signatureUrl,
+              reconciled: stop.reconciled || false,
+              reconciledAt: stop.reconciledAt ? (stop.reconciledAt instanceof Timestamp ? stop.reconciledAt.toDate() : stop.reconciledAt) : undefined,
+              reconciledBy: stop.reconciledBy,
             });
           });
         });
@@ -249,8 +270,215 @@ export default function ReportsPage() {
       }
     }
 
+    // Filtro por conciliação
+    if (selectedReconciliation !== 'all') {
+      if (selectedReconciliation === 'reconciled') {
+        filtered = filtered.filter(d => d.reconciled);
+      } else if (selectedReconciliation === 'not_reconciled') {
+        filtered = filtered.filter(d => !d.reconciled);
+      }
+    }
+
     setFilteredDeliveries(filtered);
-  }, [deliveries, searchTerm, selectedDriver, selectedStatus]);
+  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation]);
+
+  // Funções de seleção para conciliação
+  const handleToggleSelection = (stopId: string) => {
+    setSelectedDeliveryIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stopId)) {
+        newSet.delete(stopId);
+      } else {
+        newSet.add(stopId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedDeliveryIds.size === filteredDeliveries.length) {
+      setSelectedDeliveryIds(new Set());
+    } else {
+      setSelectedDeliveryIds(new Set(filteredDeliveries.map(d => d.stopId)));
+    }
+  };
+
+  const handleReconcileSelected = async () => {
+    if (selectedDeliveryIds.size === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Nenhuma entrega selecionada',
+        description: 'Selecione pelo menos uma entrega para conciliar.',
+      });
+      return;
+    }
+
+    setIsReconciling(true);
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      // Agrupar por routeId para otimizar as atualizações
+      const deliveriesByRoute = new Map<string, DeliveryReport[]>();
+      selectedDeliveryIds.forEach(stopId => {
+        const delivery = deliveries.find(d => d.stopId === stopId);
+        if (delivery) {
+          if (!deliveriesByRoute.has(delivery.routeId)) {
+            deliveriesByRoute.set(delivery.routeId, []);
+          }
+          deliveriesByRoute.get(delivery.routeId)!.push(delivery);
+        }
+      });
+
+      // Atualizar cada rota
+      const updatePromises: Promise<void>[] = [];
+      deliveriesByRoute.forEach((deliveriesToUpdate, routeId) => {
+        const routeRef = doc(db, 'routes', routeId);
+
+        // Buscar a rota atual para atualizar apenas os stops específicos
+        const updatePromise = (async () => {
+          const snapshot = await getDocs(query(collection(db, 'routes'), where('__name__', '==', routeId)));
+          if (!snapshot.empty) {
+            const routeData = snapshot.docs[0].data();
+            const now = Timestamp.now(); // Usar Timestamp.now() em vez de serverTimestamp() para arrays
+            const updatedStops = routeData.stops.map((stop: PlaceValue) => {
+              const shouldReconcile = deliveriesToUpdate.some(d => d.stopId === stop.id);
+              if (shouldReconcile) {
+                return {
+                  ...stop,
+                  reconciled: true,
+                  reconciledAt: now,
+                  reconciledBy: currentUser.uid,
+                };
+              }
+              return stop;
+            });
+
+            await updateDoc(routeRef, {
+              stops: updatedStops,
+            });
+          }
+        })();
+
+        updatePromises.push(updatePromise);
+      });
+
+      await Promise.all(updatePromises);
+
+      toast({
+        title: 'Entregas conciliadas!',
+        description: `${selectedDeliveryIds.size} ${selectedDeliveryIds.size === 1 ? 'entrega foi conciliada' : 'entregas foram conciliadas'} com sucesso.`,
+      });
+
+      setSelectedDeliveryIds(new Set());
+    } catch (error) {
+      console.error('Erro ao conciliar entregas:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao conciliar',
+        description: 'Não foi possível conciliar as entregas. Tente novamente.',
+      });
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
+  const handleToggleReconciliation = async (delivery: DeliveryReport) => {
+    setIsReconciling(true);
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const routeRef = doc(db, 'routes', delivery.routeId);
+
+      // Buscar a rota atual
+      const snapshot = await getDocs(query(collection(db, 'routes'), where('__name__', '==', delivery.routeId)));
+
+      if (!snapshot.empty) {
+        const routeData = snapshot.docs[0].data();
+        const updatedStops = routeData.stops.map((stop: PlaceValue) => {
+          if (stop.id === delivery.stopId) {
+            // Alternar o status de conciliação
+            if (delivery.reconciled) {
+              // Remover conciliação
+              const { reconciled, reconciledAt, reconciledBy, ...rest } = stop;
+              return rest;
+            } else {
+              // Adicionar conciliação
+              return {
+                ...stop,
+                reconciled: true,
+                reconciledAt: Timestamp.now(),
+                reconciledBy: currentUser.uid,
+              };
+            }
+          }
+          return stop;
+        });
+
+        await updateDoc(routeRef, {
+          stops: updatedStops,
+        });
+
+        // Atualizar o estado local
+        setDeliveries(prev => prev.map(d => {
+          if (d.stopId === delivery.stopId) {
+            if (delivery.reconciled) {
+              // Remover conciliação
+              const { reconciled, reconciledAt, reconciledBy, ...rest } = d;
+              return rest as DeliveryReport;
+            } else {
+              // Adicionar conciliação
+              return {
+                ...d,
+                reconciled: true,
+                reconciledAt: new Date(),
+                reconciledBy: currentUser.uid,
+              };
+            }
+          }
+          return d;
+        }));
+
+        // Atualizar selectedDelivery se ainda estiver aberto
+        if (selectedDelivery?.stopId === delivery.stopId) {
+          if (delivery.reconciled) {
+            const { reconciled, reconciledAt, reconciledBy, ...rest } = selectedDelivery;
+            setSelectedDelivery(rest as DeliveryReport);
+          } else {
+            setSelectedDelivery({
+              ...selectedDelivery,
+              reconciled: true,
+              reconciledAt: new Date(),
+              reconciledBy: currentUser.uid,
+            });
+          }
+        }
+
+        toast({
+          title: delivery.reconciled ? 'Conciliação removida!' : 'Entrega conciliada!',
+          description: delivery.reconciled
+            ? 'O status de conciliação foi removido com sucesso.'
+            : 'A entrega foi marcada como conciliada.',
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao alterar status de conciliação:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao alterar status',
+        description: 'Não foi possível alterar o status de conciliação. Tente novamente.',
+      });
+    } finally {
+      setIsReconciling(false);
+    }
+  };
 
   const handleExportCSV = () => {
     const headers = [
@@ -279,7 +507,7 @@ export default function ReportsPage() {
       d.deliveryStatus === 'completed' ? 'Entregue' : d.deliveryStatus === 'failed' ? 'Falhou' : 'Pendente',
       d.completedAt ? format(d.completedAt, 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
       d.phone || '',
-      d.payments ? formatCurrency(d.payments.reduce((s, p) => s + (p.amount || 0), 0)) : '',
+      d.payments ? formatCurrency(d.payments.reduce((s, p) => s + (p.value || 0), 0)) : '',
       d.failureReason || '',
     ]);
 
@@ -291,8 +519,19 @@ export default function ReportsPage() {
     link.click();
   };
 
-  const getStatusBadge = (status?: 'completed' | 'failed') => {
-    if (status === 'completed') {
+  const getStatusBadge = (delivery: DeliveryReport) => {
+    // Se conciliado, sempre mostra badge azul
+    if (delivery.reconciled) {
+      return (
+        <Badge className="bg-blue-600 hover:bg-blue-700">
+          <CheckCircle className="mr-1 h-3 w-3" />
+          Conciliado
+        </Badge>
+      );
+    }
+
+    // Senão, mostra o status normal
+    if (delivery.deliveryStatus === 'completed') {
       return (
         <Badge className="bg-green-600 hover:bg-green-700">
           <CheckCircle className="mr-1 h-3 w-3" />
@@ -300,7 +539,7 @@ export default function ReportsPage() {
         </Badge>
       );
     }
-    if (status === 'failed') {
+    if (delivery.deliveryStatus === 'failed') {
       return (
         <Badge variant="destructive">
           <XCircle className="mr-1 h-3 w-3" />
@@ -345,10 +584,31 @@ export default function ReportsPage() {
             Análise detalhada de entregas e rotas
           </p>
         </div>
-        <Button onClick={handleExportCSV} className="gap-2">
-          <Download className="h-4 w-4" />
-          Exportar CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedDeliveryIds.size > 0 && (
+            <Button
+              onClick={handleReconcileSelected}
+              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              disabled={isReconciling}
+            >
+              {isReconciling ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                  Conciliando...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4" />
+                  Conciliar Selecionados ({selectedDeliveryIds.size})
+                </>
+              )}
+            </Button>
+          )}
+          <Button onClick={handleExportCSV} className="gap-2">
+            <Download className="h-4 w-4" />
+            Exportar CSV
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -418,7 +678,7 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <label className="text-sm font-medium">Buscar</label>
               <div className="relative">
@@ -473,6 +733,20 @@ export default function ReportsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Conciliação</label>
+              <Select value={selectedReconciliation} onValueChange={setSelectedReconciliation}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="reconciled">Conciliados</SelectItem>
+                  <SelectItem value="not_reconciled">Não Conciliados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -492,6 +766,13 @@ export default function ReportsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={filteredDeliveries.length > 0 && selectedDeliveryIds.size === filteredDeliveries.length}
+                      onCheckedChange={handleToggleSelectAll}
+                      aria-label="Selecionar todos"
+                    />
+                  </TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Rota</TableHead>
                   <TableHead>Motorista</TableHead>
@@ -506,13 +787,21 @@ export default function ReportsPage() {
               <TableBody>
                 {filteredDeliveries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       Nenhuma entrega encontrada com os filtros selecionados
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredDeliveries.map((delivery, index) => (
                     <TableRow key={index}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedDeliveryIds.has(delivery.stopId)}
+                          onCheckedChange={() => handleToggleSelection(delivery.stopId)}
+                          aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
+                          disabled={delivery.reconciled}
+                        />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {format(delivery.plannedDate, 'dd/MM/yyyy', { locale: ptBR })}
                       </TableCell>
@@ -521,10 +810,10 @@ export default function ReportsPage() {
                       <TableCell>#{delivery.stopIndex + 1}</TableCell>
                       <TableCell>{delivery.customerName}</TableCell>
                       <TableCell>{delivery.orderNumber || '-'}</TableCell>
-                      <TableCell>{getStatusBadge(delivery.deliveryStatus)}</TableCell>
+                      <TableCell>{getStatusBadge(delivery)}</TableCell>
                       <TableCell>
                         {delivery.payments
-                          ? formatCurrency(delivery.payments.reduce((s, p) => s + (p.amount || 0), 0))
+                          ? formatCurrency(delivery.payments.reduce((s, p) => s + (p.value || 0), 0))
                           : '-'}
                       </TableCell>
                       <TableCell>
@@ -571,7 +860,7 @@ export default function ReportsPage() {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">Status</label>
-                    <div className="mt-1">{getStatusBadge(selectedDelivery.deliveryStatus)}</div>
+                    <div className="mt-1">{getStatusBadge(selectedDelivery)}</div>
                   </div>
                   <div className="col-span-2">
                     <label className="text-sm font-medium text-muted-foreground">Endereço</label>
@@ -613,6 +902,67 @@ export default function ReportsPage() {
                       <p className="text-sm">{selectedDelivery.notes}</p>
                     </div>
                   )}
+
+                  {/* Seção de Conciliação */}
+                  <div className="col-span-2 mt-4 pt-4 border-t">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Status de Conciliação</label>
+                        {selectedDelivery.reconciled ? (
+                          <div className="mt-2 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-blue-600 hover:bg-blue-700">
+                                <CheckCircle className="mr-1 h-3 w-3" />
+                                Conciliado
+                              </Badge>
+                            </div>
+                            {selectedDelivery.reconciledAt && (
+                              <p className="text-xs text-muted-foreground">
+                                Conciliado em {format(
+                                  selectedDelivery.reconciledAt instanceof Date
+                                    ? selectedDelivery.reconciledAt
+                                    : selectedDelivery.reconciledAt.toDate(),
+                                  "dd/MM/yyyy 'às' HH:mm",
+                                  { locale: ptBR }
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="mt-2">
+                            <Badge variant="secondary">
+                              <AlertCircle className="mr-1 h-3 w-3" />
+                              Não Conciliado
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant={selectedDelivery.reconciled ? "outline" : "default"}
+                        size="sm"
+                        onClick={() => handleToggleReconciliation(selectedDelivery)}
+                        disabled={isReconciling}
+                        className={selectedDelivery.reconciled ? "" : "bg-blue-600 hover:bg-blue-700"}
+                      >
+                        {isReconciling ? (
+                          <>
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent mr-2"></div>
+                            Processando...
+                          </>
+                        ) : selectedDelivery.reconciled ? (
+                          <>
+                            <XCircle className="mr-2 h-4 w-4" />
+                            Remover Conciliação
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="mr-2 h-4 w-4" />
+                            Marcar como Conciliado
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </TabsContent>
 
@@ -630,7 +980,7 @@ export default function ReportsPage() {
                             <div>
                               <label className="text-sm font-medium text-muted-foreground">Valor</label>
                               <p className="text-sm font-semibold text-green-600">
-                                {formatCurrency(payment.amount || 0)}
+                                {formatCurrency(payment.value || 0)}
                               </p>
                             </div>
                             {payment.installments && (
@@ -648,7 +998,7 @@ export default function ReportsPage() {
                         <span className="font-semibold">Total:</span>
                         <span className="text-xl font-bold text-green-600">
                           {formatCurrency(
-                            selectedDelivery.payments.reduce((s, p) => s + (p.amount || 0), 0)
+                            selectedDelivery.payments.reduce((s, p) => s + (p.value || 0), 0)
                           )}
                         </span>
                       </div>

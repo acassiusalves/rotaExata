@@ -55,5 +55,15 @@ service cloud.firestore {
       // Authenticated users can read settings (drivers need to check validation settings)
       allow read: if isAuthed();
     }
+
+    // RULES FOR LOCATION UPDATE REQUESTS
+    match /locationUpdateRequests/{driverId} {
+      // Admins can create location update requests
+      allow create, update: if isAppAdmin();
+      // Drivers can read their own location update requests
+      allow read: if isAuthed() && driverId == request.auth.uid;
+      // Drivers can delete their own processed requests
+      allow delete: if isAuthed() && driverId == request.auth.uid;
+    }
   }
 }

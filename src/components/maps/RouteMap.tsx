@@ -90,20 +90,70 @@ const createInfoWindowContent = (
 // Função para gerar o conteúdo HTML do InfoWindow do motorista
 const createDriverInfoWindowContent = (
   driverName: string,
-  timestamp: Date
+  timestamp: Date,
+  driverId: string
 ): string => {
   const formattedDate = format(timestamp, "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR });
+  const minutesAgo = Math.floor((Date.now() - timestamp.getTime()) / 1000 / 60);
+  const timeAgoText = minutesAgo < 1 ? 'agora mesmo' :
+                     minutesAgo === 1 ? 'há 1 minuto' :
+                     minutesAgo < 60 ? `há ${minutesAgo} minutos` :
+                     `há ${Math.floor(minutesAgo / 60)}h${minutesAgo % 60}min`;
+
+  // Warning indicator if location is stale (> 30 minutes)
+  const isStale = minutesAgo > 30;
+  const warningBadge = isStale ? `
+    <div style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 6px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+      <span style="font-weight: 500;">Localização desatualizada</span>
+    </div>
+  ` : '';
 
   return `
-    <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
+    <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 300px; padding: 4px;">
       <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 8px 0;">🚚 Motorista</h4>
-      <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px;">
+      ${warningBadge}
+      <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin-bottom: 12px;">
         <span style="color: #666;">Nome:</span>
         <strong style="color: #000;">${driverName}</strong>
 
         <span style="color: #666;">Última atualização:</span>
-        <span>${formattedDate}</span>
+        <div>
+          <div style="color: #000; font-weight: 500;">${timeAgoText}</div>
+          <div style="color: #999; font-size: 12px;">${formattedDate}</div>
+        </div>
       </div>
+      <button
+        data-action="refresh-location"
+        data-driver-id="${driverId}"
+        style="
+          width: 100%;
+          padding: 8px 12px;
+          background: #3b82f6;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          transition: background 0.2s;
+        "
+        onmouseover="this.style.background='#2563eb'"
+        onmouseout="this.style.background='#3b82f6'"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+        </svg>
+        <span>Atualizar Localização</span>
+      </button>
     </div>
   `;
 };
@@ -118,11 +168,12 @@ type Props = {
   driverLocations?: DriverLocationWithInfo[];
   onRemoveStop?: (stopId: string) => void;
   onEditStop?: (stopId: string) => void;
+  onRefreshDriverLocation?: (driverId: string) => void;
   highlightedStopIds?: string[];
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop, highlightedStopIds = [] }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop, onRefreshDriverLocation, highlightedStopIds = [] }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -419,6 +470,16 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   // Update driver location marker (single)
   React.useEffect(() => {
     const map = mapRef.current;
+
+    // Se houver driverLocations (múltiplos), remover o marcador único
+    if (driverLocations && driverLocations.length > 0) {
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.map = null;
+        driverMarkerRef.current = null;
+      }
+      return;
+    }
+
     if (!map || !driverLocation) {
       if (driverMarkerRef.current) {
         driverMarkerRef.current.map = null;
@@ -431,6 +492,8 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     if (!driverMarkerRef.current) {
       // Create pulse marker container
       const markerContainer = document.createElement('div');
+      markerContainer.style.cursor = 'pointer';
+      markerContainer.style.pointerEvents = 'auto';
       const root = createRoot(markerContainer);
       root.render(<DriverLocationPulse size={44.8} />);
 
@@ -444,21 +507,51 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       // Update position
       driverMarkerRef.current.position = driverLocation;
     }
-  }, [driverLocation]);
+  }, [driverLocation, driverLocations]);
 
     // Update multiple driver locations
   React.useEffect(() => {
     const map = mapRef.current;
-    if (!map || !driverLocations) {
+    if (!map || !driverLocations || driverLocations.length === 0) {
+      // Limpar todos os marcadores múltiplos se não houver dados
+      driverMarkersRef.current.forEach((marker) => {
+        marker.map = null;
+      });
+      driverMarkersRef.current.clear();
+      driverInfoWindowsRef.current.clear();
       return;
     }
 
     console.log('🗺️ RouteMap recebeu driverLocations:', driverLocations);
 
+    // Deduplicate driver locations by driverId (keep only the most recent)
+    const uniqueDriverLocations = new Map<string, DriverLocationWithInfo>();
+    driverLocations.forEach(loc => {
+      const existing = uniqueDriverLocations.get(loc.driverId);
+      if (!existing) {
+        uniqueDriverLocations.set(loc.driverId, loc);
+      } else {
+        console.warn(`⚠️ Motorista duplicado detectado: ${loc.driverId} (${loc.driverName})`);
+        // Keep the most recent timestamp
+        const existingTime = existing.timestamp instanceof Date ? existing.timestamp : existing.timestamp.toDate();
+        const locTime = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
+        if (locTime > existingTime) {
+          uniqueDriverLocations.set(loc.driverId, loc);
+          console.log(`  → Mantendo versão mais recente (${locTime.toLocaleTimeString()})`);
+        } else {
+          console.log(`  → Mantendo versão existente (${existingTime.toLocaleTimeString()})`);
+        }
+      }
+    });
+
+    if (uniqueDriverLocations.size !== driverLocations.length) {
+      console.warn(`⚠️ Duplicações removidas: ${driverLocations.length} localizações → ${uniqueDriverLocations.size} únicas`);
+    }
+
     const bounds = new google.maps.LatLngBounds();
     const currentMarkerIds = new Set<string>();
 
-    driverLocations.forEach((loc, index) => {
+    uniqueDriverLocations.forEach((loc) => {
         const markerId = `driver-${loc.driverId}`;
         currentMarkerIds.add(markerId);
 
@@ -484,11 +577,22 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             // Criar InfoWindow para o motorista
             const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
             infoWindow = new google.maps.InfoWindow({
-                content: createDriverInfoWindowContent(loc.driverName, timestamp),
+                content: createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId),
             });
             driverInfoWindowsRef.current.set(markerId, infoWindow);
 
-            // Adicionar listener de click
+            // Adicionar listener de domready para o botão de refresh
+            google.maps.event.addListener(infoWindow, 'domready', () => {
+              const refreshBtn = document.querySelector(`[data-action="refresh-location"][data-driver-id="${loc.driverId}"]`);
+              if (refreshBtn && onRefreshDriverLocation) {
+                refreshBtn.addEventListener('click', () => {
+                  console.log(`🔄 Solicitando atualização de localização para motorista: ${loc.driverId}`);
+                  onRefreshDriverLocation(loc.driverId);
+                });
+              }
+            });
+
+            // Adicionar listener de click no marcador
             marker.addListener("click", () => {
                 activeInfoWindowRef.current?.close();
                 infoWindow!.open(map, marker as any);
@@ -497,7 +601,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         } else {
             // Atualizar o conteúdo da InfoWindow existente
             const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
-            infoWindow!.setContent(createDriverInfoWindowContent(loc.driverName, timestamp));
+            infoWindow!.setContent(createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId));
         }
 
         marker.position = { lat: loc.lat, lng: loc.lng };

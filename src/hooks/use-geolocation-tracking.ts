@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import { doc, updateDoc, serverTimestamp, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase/client';
 
 interface GeolocationTrackingOptions {
   routeId: string;
@@ -252,6 +252,75 @@ export function useGeolocationTracking({
     setIsTracking(false);
     setTrackingHealth('healthy');
   };
+
+  // Função para forçar atualização imediata da localização
+  const forceLocationUpdate = () => {
+    console.log('🔄 Forçando atualização imediata de localização...');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        console.log('✅ Localização obtida via getCurrentPosition');
+        setLocation(position);
+        setError(null);
+        // Força atualização ignorando filtros de distância e tempo
+        const now = Date.now();
+        lastUpdateRef.current = 0; // Reset para forçar atualização
+        updateLocationInFirebase(position);
+      },
+      (err) => {
+        console.error('❌ Erro ao obter localização forçada:', err);
+        setError(err);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000,
+      }
+    );
+  };
+
+  // Listener para solicitações de atualização de localização
+  useEffect(() => {
+    if (!isTracking) return;
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('⚠️ Usuário não autenticado, não é possível escutar solicitações');
+      return;
+    }
+
+    console.log('👂 Iniciando listener para solicitações de atualização de localização');
+
+    const requestRef = doc(db, 'locationUpdateRequests', currentUser.uid);
+    const unsubscribe = onSnapshot(
+      requestRef,
+      async (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          console.log('🔔 Solicitação de atualização recebida:', data);
+
+          // Força atualização imediata
+          forceLocationUpdate();
+
+          // Deleta a solicitação após processar
+          try {
+            await deleteDoc(requestRef);
+            console.log('🗑️ Solicitação processada e removida');
+          } catch (err) {
+            console.error('❌ Erro ao deletar solicitação:', err);
+          }
+        }
+      },
+      (error) => {
+        console.error('❌ Erro no listener de solicitações:', error);
+      }
+    );
+
+    return () => {
+      console.log('👋 Parando listener de solicitações');
+      unsubscribe();
+    };
+  }, [isTracking]);
 
   // Reativar Wake Lock quando a página voltar a ser visível
   useEffect(() => {

@@ -45,6 +45,10 @@ export type PlaceValue = {
   signatureUrl?: string;
   failureReason?: string;
   payments?: Payment[]; // Substituído paymentMethod e creditCardInstallments
+  // Campos de conciliação
+  reconciled?: boolean; // Se a entrega foi conciliada/verificada
+  reconciledAt?: Timestamp | Date; // Data de conciliação
+  reconciledBy?: string; // ID do usuário que conciliou
   // Campos de alteração de rota
   wasModified?: boolean;
   modifiedAt?: Timestamp | Date;

@@ -8,6 +8,7 @@ export const DriverLocationPulse: React.FC<{ size?: number }> = ({ size = 44.8 }
         height: `${size}px`,
         position: 'relative',
         transform: 'rotate(45deg)',
+        pointerEvents: 'none', // Permitir que eventos passem através do container
       }}
     >
       <style>{`
@@ -26,6 +27,7 @@ export const DriverLocationPulse: React.FC<{ size?: number }> = ({ size = 44.8 }
           border-radius: 50% 50% 0 50%;
           background: transparent;
           background-image: radial-gradient(circle ${size * 0.25}px at 50% 50%, transparent 94%, #10b981);
+          pointer-events: none; /* Elementos visuais não bloqueiam cliques */
         }
 
         .driver-pulse-after {

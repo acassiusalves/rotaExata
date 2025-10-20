@@ -102,7 +102,7 @@ import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db, functions } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -515,7 +515,15 @@ export default function OrganizeRoutePage() {
 
   // Buscar localizações dos motoristas em tempo real a partir das rotas ativas
   React.useEffect(() => {
-    if (availableDrivers.length === 0) return;
+    console.log('🚦 Listener de localizações:', {
+      availableDriversCount: availableDrivers.length,
+      willStart: availableDrivers.length > 0
+    });
+
+    if (availableDrivers.length === 0) {
+      console.warn('⚠️ Listener de localizações NÃO iniciado - nenhum motorista disponível');
+      return;
+    }
 
     // Buscar rotas que estão em progresso ou despachadas
     const routesQuery = query(
@@ -524,7 +532,8 @@ export default function OrganizeRoutePage() {
     );
 
     const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
-      const locations: DriverLocationWithInfo[] = [];
+      const locationsMap = new Map<string, DriverLocationWithInfo>();
+      const now = new Date();
 
       console.log('🔍 Total de rotas ativas encontradas:', snapshot.size);
 
@@ -534,12 +543,13 @@ export default function OrganizeRoutePage() {
           hasCurrentLocation: !!routeData.currentLocation,
           hasDriverInfo: !!routeData.driverInfo,
           status: routeData.status,
+          driverId: routeData.driverId,
           currentLocation: routeData.currentLocation,
           driverInfo: routeData.driverInfo
         });
 
-        // Verificar se há localização atual e informações do motorista
-        if (routeData.currentLocation && routeData.driverInfo) {
+        // Verificar se há localização atual, informações do motorista e driverId
+        if (routeData.currentLocation && routeData.driverInfo && routeData.driverId) {
           const currentLoc = routeData.currentLocation;
 
           const timestamp = currentLoc.timestamp?.toDate?.() || new Date(0);
@@ -548,11 +558,23 @@ export default function OrganizeRoutePage() {
           console.log(`⏰ Timestamp da localização (rota ${routeDoc.id}):`, {
             timestamp: timestamp.toLocaleString('pt-BR'),
             minutesAgo: `${minutesAgo} minutos atrás`,
+            status: routeData.status
           });
 
-          // Adicionar localização (sem filtro de tempo para desenvolvimento)
-          locations.push({
-            driverId: routeDoc.id,
+          // Filtrar localizações muito antigas (mais de 4 horas para rotas em progresso, 30 min para despachadas)
+          const maxMinutes = routeData.status === 'in_progress' ? 240 : 30; // 4 horas ou 30 min
+          if (minutesAgo > maxMinutes) {
+            console.warn(`⚠️ Localização muito antiga ignorada: ${routeData.driverInfo.name} (${minutesAgo} minutos atrás, limite: ${maxMinutes}min)`);
+            return;
+          }
+
+          // Log de alerta se a localização estiver desatualizada (> 30 min), mas ainda dentro do limite
+          if (minutesAgo > 30) {
+            console.warn(`⚠️ Localização desatualizada: ${routeData.driverInfo.name} (${minutesAgo} minutos atrás)`);
+          }
+
+          const location: DriverLocationWithInfo = {
+            driverId: routeData.driverId, // Usar driverId real, não o ID da rota
             driverName: routeData.driverInfo.name,
             lat: currentLoc.lat,
             lng: currentLoc.lng,
@@ -560,11 +582,26 @@ export default function OrganizeRoutePage() {
             heading: currentLoc.heading,
             speed: currentLoc.speed,
             timestamp: timestamp,
-          });
+          };
+
+          // Manter apenas a localização mais recente de cada motorista
+          const existing = locationsMap.get(routeData.driverId);
+          if (!existing) {
+            locationsMap.set(routeData.driverId, location);
+          } else {
+            const existingTime = existing.timestamp instanceof Date
+              ? existing.timestamp
+              : existing.timestamp.toDate();
+            if (timestamp > existingTime) {
+              locationsMap.set(routeData.driverId, location);
+              console.log(`🔄 Atualizando localização mais recente de ${routeData.driverInfo.name}`);
+            }
+          }
         }
       });
 
-      console.log('🚚 Localizações de motoristas encontradas:', locations);
+      const locations = Array.from(locationsMap.values());
+      console.log('🚚 Localizações únicas de motoristas (após filtro):', locations);
       setDriverLocations(locations);
     });
 
@@ -662,6 +699,8 @@ export default function OrganizeRoutePage() {
   React.useEffect(() => {
     if (!routeData?.isExistingRoute || !routeData?.currentRouteId) {
       setDriverLocation(null);
+      // Also remove from driverLocations array
+      setDriverLocations(prev => prev.filter(loc => loc.driverId !== 'current-route'));
       return;
     }
 
@@ -669,14 +708,40 @@ export default function OrganizeRoutePage() {
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
-        if (data.currentLocation) {
+        if (data.currentLocation && data.driverInfo && data.driverId) {
           const location = data.currentLocation;
+          const timestamp = location.timestamp?.toDate?.() || new Date();
+
+          // Update singular driverLocation (for backward compatibility)
           setDriverLocation({
             lat: location.lat,
             lng: location.lng,
             heading: location.heading,
           });
-          console.log('📍 Localização do motorista atualizada:', location);
+
+          // Also add to driverLocations array so it has InfoWindow with refresh button
+          const driverLocationWithInfo: DriverLocationWithInfo = {
+            driverId: data.driverId,
+            driverName: data.driverInfo.name,
+            lat: location.lat,
+            lng: location.lng,
+            accuracy: location.accuracy || 0,
+            heading: location.heading,
+            speed: location.speed,
+            timestamp,
+          };
+
+          // Update or add current route's driver to array
+          setDriverLocations(prev => {
+            const filtered = prev.filter(loc => loc.driverId !== data.driverId);
+            return [...filtered, driverLocationWithInfo];
+          });
+
+          console.log('📍 Localização do motorista atualizada:', {
+            driverId: data.driverId,
+            driverName: data.driverInfo.name,
+            location
+          });
         }
       }
     }, (error) => {
@@ -2080,6 +2145,31 @@ export default function OrganizeRoutePage() {
       { key: 'B' as const, name: routeNames.B, data: routeB },
   ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0);
 
+  const handleRefreshDriverLocation = async (driverId: string) => {
+    try {
+      console.log(`🔄 Forçando atualização de localização para motorista: ${driverId}`);
+
+      // Criar documento de solicitação de atualização
+      const requestRef = doc(db, 'locationUpdateRequests', driverId);
+      await setDoc(requestRef, {
+        driverId,
+        requestedAt: serverTimestamp(),
+        status: 'pending',
+      });
+
+      toast({
+        title: 'Atualização solicitada',
+        description: 'A localização do motorista será atualizada em breve.',
+      });
+    } catch (error) {
+      console.error('Erro ao solicitar atualização de localização:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao atualizar',
+        description: 'Não foi possível solicitar a atualização da localização.',
+      });
+    }
+  };
 
   return (
     <>
@@ -2093,6 +2183,7 @@ export default function OrganizeRoutePage() {
           unassignedStops={unassignedStops}
           onRemoveStop={handleRemoveStop}
           onEditStop={handleEditStop}
+          onRefreshDriverLocation={handleRefreshDriverLocation}
           highlightedStopIds={highlightedStops}
           driverLocation={driverLocation || undefined}
           driverLocations={driverLocations}

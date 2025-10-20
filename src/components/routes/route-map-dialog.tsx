@@ -7,12 +7,13 @@ import { Button } from '@/components/ui/button';
 import { RouteMap } from '@/components/maps/RouteMap';
 import { doc, Timestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
-import type { PlaceValue, RouteInfo, DriverLocation } from '@/lib/types';
+import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type RouteDocument = RouteInfo & {
   id: string;
@@ -42,6 +43,7 @@ interface RouteMapDialogProps {
 
 export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
   const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
+  const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
   const [currentStopIndex, setCurrentStopIndex] = React.useState<number>(0);
   const [copied, setCopied] = React.useState(false);
   const [allRoutes, setAllRoutes] = React.useState<RouteDocument[]>([]);
@@ -96,7 +98,11 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
 
   // Subscribe to real-time updates for the main route
   React.useEffect(() => {
-    if (!route?.id || !isOpen) return;
+    if (!route?.id || !isOpen) {
+      setDriverLocation(null);
+      setDriverLocations([]);
+      return;
+    }
 
     console.log('🎯 Iniciando monitoramento da rota:', route.id);
 
@@ -111,11 +117,34 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
           status: data.status
         });
 
-        if (data.currentLocation) {
-          setDriverLocation(data.currentLocation as DriverLocation);
-          console.log('✅ Localização do motorista atualizada:', data.currentLocation);
+        if (data.currentLocation && data.driverInfo && data.driverId) {
+          const location = data.currentLocation;
+          const timestamp = location.timestamp?.toDate?.() || new Date();
+
+          // Update singular driverLocation (for backward compatibility)
+          setDriverLocation(location as DriverLocation);
+
+          // Also add to driverLocations array so it has InfoWindow with refresh button
+          const driverLocationWithInfo: DriverLocationWithInfo = {
+            driverId: data.driverId,
+            driverName: data.driverInfo.name,
+            lat: location.lat,
+            lng: location.lng,
+            accuracy: location.accuracy || 0,
+            heading: location.heading,
+            speed: location.speed,
+            timestamp,
+          };
+
+          setDriverLocations([driverLocationWithInfo]);
+          console.log('✅ Localização do motorista atualizada:', {
+            driverId: data.driverId,
+            driverName: data.driverInfo.name,
+            location
+          });
         } else {
           console.log('⚠️ Nenhuma localização disponível');
+          setDriverLocations([]);
         }
 
         if (data.currentStopIndex !== undefined) {
@@ -177,6 +206,28 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
       ...prev,
       [routeId]: !prev[routeId]
     }));
+  };
+
+  const handleRefreshDriverLocation = async (driverId: string) => {
+    try {
+      const requestRef = doc(db, 'locationUpdateRequests', driverId);
+      await setDoc(requestRef, {
+        driverId,
+        requestedAt: serverTimestamp(),
+        status: 'pending',
+      });
+      toast({
+        title: 'Atualização solicitada',
+        description: 'A localização do motorista será atualizada em breve.',
+      });
+    } catch (error) {
+      console.error('Erro ao solicitar atualização:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao atualizar',
+        description: 'Não foi possível solicitar a atualização da localização.',
+      });
+    }
   };
 
   if (!route) return null;
@@ -303,6 +354,8 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                     origin={route.origin}
                     routes={mapRoutes}
                     driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : undefined}
+                    driverLocations={driverLocations}
+                    onRefreshDriverLocation={handleRefreshDriverLocation}
                 />
             </div>
         </DialogContent>

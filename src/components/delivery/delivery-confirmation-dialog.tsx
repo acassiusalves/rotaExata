@@ -49,6 +49,7 @@ interface DeliveryConfirmationDialogProps {
   }) => Promise<void>;
   customerName?: string;
   address?: string;
+  complement?: string;
   stopLocation?: { lat: number; lng: number };
   currentLocation?: { lat: number; lng: number } | null;
 }
@@ -59,6 +60,7 @@ export function DeliveryConfirmationDialog({
   onConfirm,
   customerName,
   address,
+  complement,
   stopLocation,
   currentLocation,
 }: DeliveryConfirmationDialogProps) {
@@ -393,6 +395,7 @@ export function DeliveryConfirmationDialog({
           <DialogDescription>
             {customerName && <span className="font-semibold">{customerName}</span>}
             {address && <span className="block text-xs mt-1">{address}</span>}
+            {complement && <span className="block text-xs mt-0.5 text-muted-foreground">{complement}</span>}
           </DialogDescription>
         </DialogHeader>
 

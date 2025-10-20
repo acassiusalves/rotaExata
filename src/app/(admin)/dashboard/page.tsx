@@ -24,15 +24,17 @@ import {
 import { ActivityFeed } from '@/components/dashboard/activity-feed';
 import { RouteMap } from '@/components/maps/RouteMap';
 import { placeholderImages } from '@/lib/placeholder-images';
-import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Timestamp, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { Driver, RouteInfo, DriverLocationWithInfo } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
 
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
   status: 'dispatched' | 'in_progress' | 'completed';
   plannedDate: Timestamp;
+  driverId?: string;
   driverInfo?: {
     name: string;
     vehicle: {
@@ -47,26 +49,61 @@ export default function DashboardPage() {
   const [drivers, setDrivers] = React.useState<Driver[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
+  const { toast } = useToast();
 
   React.useEffect(() => {
     // Firestore listener for routes
     const routesQuery = query(collection(db, 'routes'), where('status', 'in', ['in_progress', 'dispatched']));
     const unsubscribeRoutes = onSnapshot(routesQuery, (snapshot) => {
       const routesData: RouteDocument[] = [];
-      const locations: DriverLocationWithInfo[] = [];
+      const locationsMap = new Map<string, DriverLocationWithInfo>();
+      const now = new Date();
+
       snapshot.forEach((doc) => {
         const route = { id: doc.id, ...doc.data() } as RouteDocument;
         routesData.push(route);
-        if (route.currentLocation && route.status === 'in_progress' && route.driverInfo) {
-          locations.push({
+
+        // Só adicionar localização se:
+        // 1. Tem currentLocation
+        // 2. Status é in_progress
+        // 3. Tem driverInfo com nome
+        // 4. Tem driverId válido
+        if (route.currentLocation && route.status === 'in_progress' && route.driverInfo && route.driverId) {
+          const timestamp = route.currentLocation.timestamp instanceof Date
+            ? route.currentLocation.timestamp
+            : route.currentLocation.timestamp.toDate();
+
+          // Filtrar localizações antigas (mais de 30 minutos)
+          const minutesAgo = (now.getTime() - timestamp.getTime()) / (1000 * 60);
+          if (minutesAgo > 30) {
+            console.warn(`⚠️ Localização antiga ignorada: ${route.driverInfo.name} (${minutesAgo.toFixed(1)} minutos atrás)`);
+            return;
+          }
+
+          const location: DriverLocationWithInfo = {
             ...route.currentLocation,
-            driverId: doc.id,
+            driverId: route.driverId, // Usar driverId correto da rota
             driverName: route.driverInfo.name,
-          });
+          };
+
+          // Manter apenas a localização mais recente de cada motorista
+          const existing = locationsMap.get(route.driverId);
+          if (!existing) {
+            locationsMap.set(route.driverId, location);
+          } else {
+            const existingTime = existing.timestamp instanceof Date
+              ? existing.timestamp
+              : existing.timestamp.toDate();
+            if (timestamp > existingTime) {
+              locationsMap.set(route.driverId, location);
+              console.log(`🔄 Atualizando localização mais recente de ${route.driverInfo.name}`);
+            }
+          }
         }
       });
+
       setRoutes(routesData);
-      setDriverLocations(locations);
+      setDriverLocations(Array.from(locationsMap.values()));
       setIsLoading(false);
     });
 
@@ -102,6 +139,32 @@ export default function DashboardPage() {
   
   const getActiveDrivers = () => {
     return drivers.filter(driver => driver.status === 'online' || driver.status === 'busy').length;
+  };
+
+  const handleRefreshDriverLocation = async (driverId: string) => {
+    try {
+      console.log(`🔄 Forçando atualização de localização para motorista: ${driverId}`);
+
+      // Criar documento de solicitação de atualização
+      const requestRef = doc(db, 'locationUpdateRequests', driverId);
+      await setDoc(requestRef, {
+        driverId,
+        requestedAt: serverTimestamp(),
+        status: 'pending',
+      });
+
+      toast({
+        title: 'Atualização solicitada',
+        description: 'A localização do motorista será atualizada em breve.',
+      });
+    } catch (error) {
+      console.error('Erro ao solicitar atualização de localização:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao atualizar',
+        description: 'Não foi possível solicitar a atualização da localização.',
+      });
+    }
   };
 
   if (isLoading) {
@@ -176,7 +239,10 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="relative aspect-[16/9] w-full overflow-hidden rounded-lg">
-                <RouteMap driverLocations={driverLocations} />
+                <RouteMap
+                  driverLocations={driverLocations}
+                  onRefreshDriverLocation={handleRefreshDriverLocation}
+                />
             </div>
           </CardContent>
         </Card>
