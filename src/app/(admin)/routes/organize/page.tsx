@@ -659,6 +659,12 @@ export default function OrganizeRoutePage() {
 
           const routeDoc = doc.data();
 
+          // Skip completed or finished routes
+          if (routeDoc.status === 'completed' || routeDoc.status === 'finished') {
+            console.log('🚫 Pulando rota finalizada:', doc.id, 'Status:', routeDoc.status);
+            return;
+          }
+
           // Find a color that's not already used by main routes
           let assignedColor = routeDoc.color;
           if (!assignedColor || usedColors.has(assignedColor.toLowerCase())) {
