@@ -65,6 +65,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -118,6 +121,7 @@ export default function ReportsPage() {
   const [dateRange, setDateRange] = React.useState<string>('7days');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
+  const [customDate, setCustomDate] = React.useState<Date | undefined>(undefined);
 
   // Dialog
   const [selectedDelivery, setSelectedDelivery] = React.useState<DeliveryReport | null>(null);
@@ -175,12 +179,18 @@ export default function ReportsPage() {
         setStartDate(startOfMonth(now));
         setEndDate(endOfMonth(now));
         break;
+      case 'custom':
+        if (customDate) {
+          setStartDate(startOfDay(customDate));
+          setEndDate(endOfDay(customDate));
+        }
+        break;
       case 'all':
         setStartDate(new Date(2020, 0, 1));
         setEndDate(endOfDay(now));
         break;
     }
-  }, [dateRange]);
+  }, [dateRange, customDate]);
 
   React.useEffect(() => {
     const q = query(
@@ -440,67 +450,107 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Buscar</label>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cliente, endereço, pedido..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8"
-                />
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Buscar</label>
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Cliente, endereço, pedido..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Período</label>
+                <Select
+                  value={dateRange}
+                  onValueChange={(value) => {
+                    setDateRange(value);
+                    if (value !== 'custom') {
+                      setCustomDate(undefined);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Hoje</SelectItem>
+                    <SelectItem value="7days">Últimos 7 dias</SelectItem>
+                    <SelectItem value="30days">Últimos 30 dias</SelectItem>
+                    <SelectItem value="thisMonth">Este mês</SelectItem>
+                    <SelectItem value="custom">Data específica</SelectItem>
+                    <SelectItem value="all">Todos os períodos</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Motorista</label>
+                <Select value={selectedDriver} onValueChange={setSelectedDriver}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {drivers.map(driver => (
+                      <SelectItem key={driver} value={driver}>
+                        {driver}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Status</label>
+                <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="completed">Entregues</SelectItem>
+                    <SelectItem value="failed">Falhadas</SelectItem>
+                    <SelectItem value="pending">Pendentes</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Período</label>
-              <Select value={dateRange} onValueChange={setDateRange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="today">Hoje</SelectItem>
-                  <SelectItem value="7days">Últimos 7 dias</SelectItem>
-                  <SelectItem value="30days">Últimos 30 dias</SelectItem>
-                  <SelectItem value="thisMonth">Este mês</SelectItem>
-                  <SelectItem value="all">Todos os períodos</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Motorista</label>
-              <Select value={selectedDriver} onValueChange={setSelectedDriver}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {drivers.map(driver => (
-                    <SelectItem key={driver} value={driver}>
-                      {driver}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Status</label>
-              <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="completed">Entregues</SelectItem>
-                  <SelectItem value="failed">Falhadas</SelectItem>
-                  <SelectItem value="pending">Pendentes</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {dateRange === 'custom' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Selecione a data específica</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full md:w-[280px] justify-start text-left font-normal',
+                        !customDate && 'text-muted-foreground'
+                      )}
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {customDate ? format(customDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione uma data'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={customDate}
+                      onSelect={setCustomDate}
+                      locale={ptBR}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
