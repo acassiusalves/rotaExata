@@ -41,20 +41,13 @@ export function NotificationPermissionPrompt({
     }
   }, [token, userId]);
 
-  // Não mostrar para roles que não precisam (admin, gestor, socio)
-  if (userRole !== 'driver') {
-    return null;
-  }
-
-  // Não mostrar se já tem permissão ou foi dispensado
-  if (notificationPermission === 'granted' || isDismissed) {
-    return null;
-  }
-
-  // Não mostrar se foi negado permanentemente
-  if (notificationPermission === 'denied') {
-    return null;
-  }
+  // Verificar se foi dispensado anteriormente
+  React.useEffect(() => {
+    const dismissed = localStorage.getItem('notification-prompt-dismissed');
+    if (dismissed === 'true') {
+      setIsDismissed(true);
+    }
+  }, []);
 
   const handleRequestPermission = async () => {
     setIsRequesting(true);
@@ -71,13 +64,20 @@ export function NotificationPermissionPrompt({
     localStorage.setItem('notification-prompt-dismissed', 'true');
   };
 
-  // Verificar se foi dispensado anteriormente
-  React.useEffect(() => {
-    const dismissed = localStorage.getItem('notification-prompt-dismissed');
-    if (dismissed === 'true') {
-      setIsDismissed(true);
-    }
-  }, []);
+  // Não mostrar para roles que não precisam (admin, gestor, socio)
+  if (userRole !== 'driver') {
+    return null;
+  }
+
+  // Não mostrar se já tem permissão ou foi dispensado
+  if (notificationPermission === 'granted' || isDismissed) {
+    return null;
+  }
+
+  // Não mostrar se foi negado permanentemente
+  if (notificationPermission === 'denied') {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-md animate-in slide-in-from-bottom-4">
