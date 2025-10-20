@@ -20,9 +20,15 @@ export function useGeolocationTracking({
   const [location, setLocation] = useState<GeolocationPosition | null>(null);
   const [error, setError] = useState<GeolocationPositionError | null>(null);
   const [isTracking, setIsTracking] = useState(false);
+  const [trackingHealth, setTrackingHealth] = useState<'healthy' | 'warning' | 'error'>('healthy');
   const watchIdRef = useRef<number | null>(null);
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastUpdateRef = useRef<number>(0);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryCountRef = useRef<number>(0);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const lastSuccessfulUpdateRef = useRef<number>(Date.now());
 
   const calculateDistance = (
     lat1: number,
@@ -89,8 +95,79 @@ export function useGeolocationTracking({
       console.log('✅ Localização atualizada com sucesso!');
       lastLocationRef.current = { lat: latitude, lng: longitude };
       lastUpdateRef.current = now;
+      lastSuccessfulUpdateRef.current = now;
+      retryCountRef.current = 0;
+      setTrackingHealth('healthy');
     } catch (err) {
       console.error('❌ Erro ao atualizar localização:', err);
+      setTrackingHealth('warning');
+
+      // Retry após falha de conexão
+      if (retryCountRef.current < 3) {
+        retryCountRef.current++;
+        console.log(`🔄 Tentando novamente em 5 segundos (tentativa ${retryCountRef.current}/3)...`);
+        retryTimeoutRef.current = setTimeout(() => {
+          updateLocationInFirebase(position);
+        }, 5000);
+      }
+    }
+  };
+
+  // Função para tentar adquirir Wake Lock
+  const requestWakeLock = async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        console.log('🔒 Wake Lock ativado');
+
+        wakeLockRef.current.addEventListener('release', () => {
+          console.log('🔓 Wake Lock liberado');
+        });
+      } catch (err) {
+        console.error('❌ Erro ao ativar Wake Lock:', err);
+      }
+    }
+  };
+
+  // Função para liberar Wake Lock
+  const releaseWakeLock = async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      } catch (err) {
+        console.error('❌ Erro ao liberar Wake Lock:', err);
+      }
+    }
+  };
+
+  // Watchdog: verifica se há atualizações recentes
+  const startWatchdog = () => {
+    heartbeatIntervalRef.current = setInterval(() => {
+      const timeSinceLastUpdate = Date.now() - lastSuccessfulUpdateRef.current;
+
+      // Se passou mais de 2 minutos sem atualização
+      if (timeSinceLastUpdate > 120000) {
+        console.warn('⚠️ Sem atualizações há mais de 2 minutos. Reiniciando tracking...');
+        setTrackingHealth('error');
+
+        // Reinicia o tracking
+        stopTracking();
+        setTimeout(() => {
+          startTracking();
+        }, 1000);
+      } else if (timeSinceLastUpdate > 60000) {
+        // Alerta se passou mais de 1 minuto
+        console.warn('⚠️ Sem atualizações há mais de 1 minuto');
+        setTrackingHealth('warning');
+      }
+    }, 30000); // Verifica a cada 30 segundos
+  };
+
+  const stopWatchdog = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
     }
   };
 
@@ -104,7 +181,16 @@ export function useGeolocationTracking({
     }
 
     setIsTracking(true);
+    setTrackingHealth('healthy');
+    lastSuccessfulUpdateRef.current = Date.now();
 
+    // Ativa Wake Lock para manter tela ativa
+    requestWakeLock();
+
+    // Inicia watchdog
+    startWatchdog();
+
+    // Tenta primeiro com alta precisão
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         setLocation(position);
@@ -113,12 +199,41 @@ export function useGeolocationTracking({
       },
       (err) => {
         setError(err);
-        console.error('Erro de geolocalização:', err);
+        console.error('❌ Erro de geolocalização:', err);
+        setTrackingHealth('warning');
+
+        // Se timeout ou erro, tenta novamente com baixa precisão após 5 segundos
+        if (err.code === err.TIMEOUT) {
+          console.log('⏱️ Timeout detectado. Tentando com baixa precisão...');
+          setTimeout(() => {
+            if (watchIdRef.current !== null) {
+              navigator.geolocation.clearWatch(watchIdRef.current);
+            }
+
+            // Reinicia com baixa precisão como fallback
+            watchIdRef.current = navigator.geolocation.watchPosition(
+              (position) => {
+                setLocation(position);
+                setError(null);
+                updateLocationInFirebase(position);
+              },
+              (fallbackErr) => {
+                console.error('❌ Erro no fallback de geolocalização:', fallbackErr);
+                setTrackingHealth('error');
+              },
+              {
+                enableHighAccuracy: false, // Baixa precisão
+                maximumAge: 10000,
+                timeout: 30000, // Timeout maior
+              }
+            );
+          }, 5000);
+        }
       },
       {
         enableHighAccuracy,
         maximumAge: 0,
-        timeout: 10000,
+        timeout: 30000, // Aumentado de 10s para 30s
       }
     );
   };
@@ -128,8 +243,31 @@ export function useGeolocationTracking({
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+    stopWatchdog();
+    releaseWakeLock();
     setIsTracking(false);
+    setTrackingHealth('healthy');
   };
+
+  // Reativar Wake Lock quando a página voltar a ser visível
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isTracking && !wakeLockRef.current) {
+        console.log('🔄 Página visível novamente. Reativando Wake Lock...');
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isTracking]);
 
   useEffect(() => {
     return () => {
@@ -141,6 +279,7 @@ export function useGeolocationTracking({
     location,
     error,
     isTracking,
+    trackingHealth,
     startTracking,
     stopTracking,
   };

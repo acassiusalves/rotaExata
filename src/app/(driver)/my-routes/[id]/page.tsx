@@ -83,7 +83,7 @@ export default function RouteDetailsPage() {
   const { toast } = useToast();
 
   // GPS Tracking
-  const { location, isTracking, startTracking, stopTracking, error } = useGeolocationTracking({
+  const { location, isTracking, trackingHealth, startTracking, stopTracking, error } = useGeolocationTracking({
     routeId,
     enableHighAccuracy: true,
     updateInterval: 5000, // 5 segundos
@@ -113,6 +113,25 @@ export default function RouteDetailsPage() {
 
     return () => unsubscribe();
   }, [routeId]);
+
+  // Monitor tracking health and show alerts
+  React.useEffect(() => {
+    if (!isTracking) return;
+
+    if (trackingHealth === 'error') {
+      toast({
+        variant: 'destructive',
+        title: 'GPS com problemas',
+        description: 'Tentando reconectar automaticamente. Verifique se o GPS está ativado.',
+      });
+    } else if (trackingHealth === 'warning') {
+      toast({
+        variant: 'default',
+        title: 'GPS instável',
+        description: 'Sinal de GPS fraco. A localização pode não estar sendo atualizada.',
+      });
+    }
+  }, [trackingHealth, isTracking, toast]);
 
   // Listen for route change notifications
   React.useEffect(() => {
@@ -471,9 +490,16 @@ export default function RouteDetailsPage() {
             <div className="flex-1">
                 <h1 className="text-lg font-semibold">{route.name}</h1>
                 {isTracking && (
-                    <Badge variant="default" className="flex items-center gap-1 w-fit">
-                        <RadioTower className="h-3 w-3 animate-pulse" />
-                        <span className="text-xs">Rastreando</span>
+                    <Badge
+                        variant={trackingHealth === 'error' ? 'destructive' : trackingHealth === 'warning' ? 'secondary' : 'default'}
+                        className="flex items-center gap-1 w-fit"
+                    >
+                        <RadioTower className={`h-3 w-3 ${trackingHealth === 'healthy' ? 'animate-pulse' : ''}`} />
+                        <span className="text-xs">
+                            {trackingHealth === 'error' ? 'GPS com problemas' :
+                             trackingHealth === 'warning' ? 'GPS instável' :
+                             'Rastreando'}
+                        </span>
                     </Badge>
                 )}
             </div>
