@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { PlusCircle, Loader2 } from 'lucide-react';
+import { PlusCircle, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -18,6 +18,8 @@ import { collection, onSnapshot, Timestamp, query } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 // Helper to convert Firestore Timestamps to a serializable format with formatted date string
 const formatUsersForTable = (users: User[]) => {
@@ -40,10 +42,13 @@ const formatUsersForTable = (users: User[]) => {
 
 
 export default function UsersPage() {
+  const { userRole, loading: authLoading } = useAuth();
   const [users, setUsers] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = React.useState(false);
 
+  // Verificar se o usuário tem permissão (apenas sócios podem acessar)
+  const hasPermission = userRole === 'socio' || userRole === 'admin';
 
   React.useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -67,6 +72,36 @@ export default function UsersPage() {
     return () => unsubscribe();
   }, []);
   
+  // Mostrar loading enquanto verifica autenticação
+  if (authLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Mostrar alerta se não tiver permissão
+  if (!hasPermission) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">Usuários</h2>
+          <p className="text-muted-foreground">
+            Gerencie os usuários e suas permissões no sistema.
+          </p>
+        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Acesso Negado</AlertTitle>
+          <AlertDescription>
+            Você não tem permissão para acessar esta página. Apenas usuários com a função "Sócio" ou "Admin" podem gerenciar usuários do sistema.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="space-y-4">
