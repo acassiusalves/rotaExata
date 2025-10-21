@@ -490,26 +490,38 @@ export default function ReportsPage() {
       'Endereço',
       'Pedido',
       'Status',
-      'Entregue em',
+      'Horário Chegada',
+      'Horário Conclusão',
+      'Período Execução',
       'Telefone',
       'Valor Total',
       'Motivo Falha',
     ];
 
-    const rows = filteredDeliveries.map(d => [
-      format(d.plannedDate, 'dd/MM/yyyy', { locale: ptBR }),
-      d.routeName,
-      d.driverName,
-      d.stopIndex + 1,
-      d.customerName,
-      d.address,
-      d.orderNumber || '',
-      d.deliveryStatus === 'completed' ? 'Entregue' : d.deliveryStatus === 'failed' ? 'Falhou' : 'Pendente',
-      d.completedAt ? format(d.completedAt, 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
-      d.phone || '',
-      d.payments ? formatCurrency(d.payments.reduce((s, p) => s + (p.value || 0), 0)) : '',
-      d.failureReason || '',
-    ]);
+    const rows = filteredDeliveries.map(d => {
+      const periodoExecucao = d.arrivedAt && d.completedAt
+        ? `${format(d.arrivedAt, 'HH:mm', { locale: ptBR })} → ${format(d.completedAt, 'HH:mm', { locale: ptBR })}`
+        : d.completedAt
+        ? format(d.completedAt, 'HH:mm', { locale: ptBR })
+        : '';
+
+      return [
+        format(d.plannedDate, 'dd/MM/yyyy', { locale: ptBR }),
+        d.routeName,
+        d.driverName,
+        d.stopIndex + 1,
+        d.customerName,
+        d.address,
+        d.orderNumber || '',
+        d.deliveryStatus === 'completed' ? 'Entregue' : d.deliveryStatus === 'failed' ? 'Falhou' : 'Pendente',
+        d.arrivedAt ? format(d.arrivedAt, 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+        d.completedAt ? format(d.completedAt, 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+        periodoExecucao,
+        d.phone || '',
+        d.payments ? formatCurrency(d.payments.reduce((s, p) => s + (p.value || 0), 0)) : '',
+        d.failureReason || '',
+      ];
+    });
 
     const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -780,6 +792,7 @@ export default function ReportsPage() {
                   <TableHead>Cliente</TableHead>
                   <TableHead>Pedido</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Período de Execução</TableHead>
                   <TableHead>Valor</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
@@ -787,7 +800,7 @@ export default function ReportsPage() {
               <TableBody>
                 {filteredDeliveries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       Nenhuma entrega encontrada com os filtros selecionados
                     </TableCell>
                   </TableRow>
@@ -811,6 +824,27 @@ export default function ReportsPage() {
                       <TableCell>{delivery.customerName}</TableCell>
                       <TableCell>{delivery.orderNumber || '-'}</TableCell>
                       <TableCell>{getStatusBadge(delivery)}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {delivery.arrivedAt && delivery.completedAt ? (
+                          <div className="text-sm">
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {format(delivery.arrivedAt, 'HH:mm', { locale: ptBR })}
+                              {' → '}
+                              {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
+                            </div>
+                          </div>
+                        ) : delivery.completedAt ? (
+                          <div className="text-sm">
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {delivery.payments
                           ? formatCurrency(delivery.payments.reduce((s, p) => s + (p.value || 0), 0))
