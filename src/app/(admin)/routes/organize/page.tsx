@@ -377,6 +377,14 @@ export default function OrganizeRoutePage() {
   const [additionalRoutes, setAdditionalRoutes] = React.useState<RouteInfo[]>([]);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
 
+  // State for dynamic routes (C, D, E, etc.)
+  const [dynamicRoutes, setDynamicRoutes] = React.useState<Array<{
+    key: string;
+    name: string;
+    data: RouteInfo;
+    color: string;
+  }>>([]);
+
   // State for pending edits (reordering within same route)
   const [pendingEdits, setPendingEdits] = React.useState<{
     A: PlaceValue[] | null;
@@ -1327,15 +1335,14 @@ export default function OrganizeRoutePage() {
       return;
     }
 
-    const activeRouteKey = active.data.current?.routeKey as 'A' | 'B' | 'unassigned';
-    const overRouteKey = over.data.current?.routeKey as 'A' | 'B';
+    const activeRouteKey = active.data.current?.routeKey as string | 'unassigned';
+    const overRouteKey = over.data.current?.routeKey as string;
 
     // Case: Moving from unassigned to a route
-    if (activeRouteKey === 'unassigned' && (overRouteKey === 'A' || overRouteKey === 'B')) {
+    if (activeRouteKey === 'unassigned' && overRouteKey && overRouteKey !== 'unassigned') {
       if (!routeData) return;
 
-      const targetRoute = overRouteKey === 'A' ? routeA : routeB;
-      const setter = overRouteKey === 'A' ? setRouteA : setRouteB;
+      const targetRoute = getRoute(overRouteKey);
       const stopToMove = active.data.current?.stop as PlaceValue;
 
       if (!stopToMove) return;
@@ -1347,28 +1354,29 @@ export default function OrganizeRoutePage() {
       // Add to target route
       const newTargetStops = targetRoute ? [...targetRoute.stops, stopToMove] : [stopToMove];
 
-      setter(prev => prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null);
+      setRoute(overRouteKey, prev => prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null);
 
       // Recalculate route
       const newRouteInfo = await computeRoute(routeData.origin, newTargetStops);
       if (newRouteInfo) {
-        setter(prev => prev ? {
+        setRoute(overRouteKey, prev => prev ? {
           ...prev,
           ...newRouteInfo,
           stops: newTargetStops,
-          color: targetRoute?.color || (overRouteKey === 'A' ? '#F44336' : '#FF9800'),
+          color: targetRoute?.color || (overRouteKey === 'A' ? '#F44336' : overRouteKey === 'B' ? '#FF9800' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#4CAF50'),
           visible: targetRoute?.visible ?? true
         } : {
           ...newRouteInfo,
           stops: newTargetStops,
-          color: overRouteKey === 'A' ? '#F44336' : '#FF9800',
+          color: overRouteKey === 'A' ? '#F44336' : overRouteKey === 'B' ? '#FF9800' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#4CAF50',
           visible: true
         });
       }
 
+      const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
       toast({
         title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeNames[overRouteKey]}.`,
+        description: `O serviço foi adicionado à ${routeName}.`,
       });
 
       return;
@@ -1380,7 +1388,7 @@ export default function OrganizeRoutePage() {
 
     // Case 1: Moving within the same route - save as pending edit
     if (activeRouteKey === overRouteKey) {
-      const currentRoute = activeRouteKey === 'A' ? routeA : routeB;
+      const currentRoute = getRoute(activeRouteKey);
       if (!currentRoute || !routeData) return;
 
       const oldIndex = active.data.current?.index as number;
@@ -1413,8 +1421,8 @@ export default function OrganizeRoutePage() {
     }
     // Case 2: Moving between different routes - save as pending edit
     else {
-      const sourceRoute = activeRouteKey === 'A' ? routeA : routeB;
-      const targetRoute = overRouteKey === 'A' ? routeA : routeB;
+      const sourceRoute = getRoute(activeRouteKey);
+      const targetRoute = getRoute(overRouteKey);
 
       if (!sourceRoute || !targetRoute || !routeData) return;
 
@@ -1481,6 +1489,56 @@ export default function OrganizeRoutePage() {
         [overRouteKey]: newTargetStops
       }));
     }
+  };
+
+  // Helper functions to manage routes dynamically
+  const getRoute = (routeKey: string) => {
+    if (routeKey === 'A') return routeA;
+    if (routeKey === 'B') return routeB;
+    const dynamicRoute = dynamicRoutes.find(r => r.key === routeKey);
+    return dynamicRoute?.data || null;
+  };
+
+  const setRoute = (routeKey: string, updater: (prev: RouteInfo | null) => RouteInfo | null) => {
+    if (routeKey === 'A') {
+      setRouteA(updater);
+    } else if (routeKey === 'B') {
+      setRouteB(updater);
+    } else {
+      setDynamicRoutes(prev => prev.map(r =>
+        r.key === routeKey
+          ? { ...r, data: updater(r.data) || r.data }
+          : r
+      ));
+    }
+  };
+
+  // Function to add a new dynamic route
+  const handleAddNewRoute = () => {
+    const routeColors = ['#4CAF50', '#9C27B0', '#FF5722', '#00BCD4', '#FFC107', '#E91E63'];
+    const nextRouteIndex = dynamicRoutes.length;
+    const nextRouteLetter = String.fromCharCode(67 + nextRouteIndex); // C, D, E, F, etc.
+    const color = routeColors[nextRouteIndex % routeColors.length];
+
+    const newRoute = {
+      key: nextRouteLetter,
+      name: `Rota ${nextRouteIndex + 3}`, // Rota 3, Rota 4, etc. (A=1, B=2)
+      data: {
+        stops: [],
+        distanceMeters: 0,
+        duration: '0s',
+        encodedPolyline: '',
+        color: color,
+        visible: true,
+      },
+      color: color,
+    };
+
+    setDynamicRoutes(prev => [...prev, newRoute]);
+    toast({
+      title: 'Nova rota criada!',
+      description: `${newRoute.name} foi adicionada. Arraste serviços para ela.`
+    });
   };
 
   const handleOptimizeSingleRoute = async (routeKey: 'A' | 'B') => {
@@ -2119,7 +2177,7 @@ export default function OrganizeRoutePage() {
   }
 
   const { origin } = routeData;
-  // Combine main routes with additional routes based on visibility
+  // Combine main routes with additional routes and dynamic routes based on visibility
   const combinedRoutes = [
     routeA,
     routeB,
@@ -2128,7 +2186,8 @@ export default function OrganizeRoutePage() {
         ...route,
         visible: routeVisibility[`additional-${idx}`] === true
       }))
-      .filter(route => route.visible)
+      .filter(route => route.visible),
+    ...dynamicRoutes.map(r => r.data)
   ].filter((r): r is RouteInfo => !!r);
 
   const toggleAdditionalRoute = (routeIdx: number) => {
@@ -2149,7 +2208,10 @@ export default function OrganizeRoutePage() {
   const routesForTable = [
       { key: 'A' as const, name: routeNames.A, data: routeA },
       { key: 'B' as const, name: routeNames.B, data: routeB },
-  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0);
+  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0)
+   .concat(
+     dynamicRoutes.filter(r => r.data.stops.length > 0) as any[]
+   );
 
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
@@ -2300,6 +2362,10 @@ export default function OrganizeRoutePage() {
                         <DropdownMenuItem onSelect={() => { requestAnimationFrame(() => setIsAddServiceDialogOpen(true)) }}>
                             <PackagePlus className="mr-2 h-4 w-4" />
                             Adicionar um serviço
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { handleAddNewRoute() }}>
+                            <Truck className="mr-2 h-4 w-4" />
+                            Adicionar uma rota
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
