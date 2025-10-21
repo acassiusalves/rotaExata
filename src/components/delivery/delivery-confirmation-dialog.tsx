@@ -45,6 +45,8 @@ interface DeliveryConfirmationDialogProps {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
+    wentToLocation?: boolean;
+    attemptPhoto?: string;
     payments?: Payment[];
   }) => Promise<void>;
   customerName?: string;
@@ -68,7 +70,9 @@ export function DeliveryConfirmationDialog({
   const [notes, setNotes] = React.useState('');
   const [deliveryStatus, setDeliveryStatus] = React.useState<'completed' | 'failed'>('completed');
   const [failureReason, setFailureReason] = React.useState('');
-  
+  const [wentToLocation, setWentToLocation] = React.useState<boolean | null>(null);
+  const [attemptPhoto, setAttemptPhoto] = React.useState<string | null>(null);
+
   // Alterado para suportar múltiplos pagamentos
   const [payments, setPayments] = React.useState<Payment[]>([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
 
@@ -277,6 +281,8 @@ export function DeliveryConfirmationDialog({
     setNotes('');
     setDeliveryStatus('completed');
     setFailureReason('');
+    setWentToLocation(null);
+    setAttemptPhoto(null);
     setPayments([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
   };
 
@@ -289,7 +295,12 @@ export function DeliveryConfirmationDialog({
     if (field === 'method' && value !== 'cartao_credito') {
       delete newPayments[index].installments;
     }
-    
+
+    // Reset pixType if method is not pix
+    if (field === 'method' && value !== 'pix') {
+      delete newPayments[index].pixType;
+    }
+
     setPayments(newPayments);
   };
 
@@ -358,6 +369,16 @@ export function DeliveryConfirmationDialog({
       return;
     }
 
+    if (deliveryStatus === 'failed' && wentToLocation === null) {
+      setError('Por favor, informe se você foi até o local.');
+      return;
+    }
+
+    if (deliveryStatus === 'failed' && wentToLocation === true && !attemptPhoto) {
+      setError('Por favor, tire uma foto do local para comprovar a tentativa de entrega.');
+      return;
+    }
+
     setIsSubmitting(true);
     
     try {
@@ -366,6 +387,8 @@ export function DeliveryConfirmationDialog({
         notes: notes || undefined,
         status: deliveryStatus,
         failureReason: deliveryStatus === 'failed' ? failureReason : undefined,
+        wentToLocation: deliveryStatus === 'failed' ? wentToLocation || undefined : undefined,
+        attemptPhoto: deliveryStatus === 'failed' && wentToLocation ? attemptPhoto || undefined : undefined,
         payments: deliveryStatus === 'completed' ? payments : undefined,
       });
 
@@ -422,15 +445,117 @@ export function DeliveryConfirmationDialog({
           </div>
 
           {deliveryStatus === 'failed' && (
-            <div className="space-y-2">
-              <Label>Motivo da Falha</Label>
-              <RadioGroup value={failureReason} onValueChange={setFailureReason}>
-                <div className="flex items-center space-x-2"> <RadioGroupItem value="ausente" id="ausente" /> <Label htmlFor="ausente" className="cursor-pointer">Cliente ausente</Label> </div>
-                <div className="flex items-center space-x-2"> <RadioGroupItem value="recusou" id="recusou" /> <Label htmlFor="recusou" className="cursor-pointer">Cliente recusou</Label> </div>
-                <div className="flex items-center space-x-2"> <RadioGroupItem value="endereco_incorreto" id="endereco_incorreto" /> <Label htmlFor="endereco_incorreto" className="cursor-pointer">Endereço incorreto</Label> </div>
-                <div className="flex items-center space-x-2"> <RadioGroupItem value="outro" id="outro" /> <Label htmlFor="outro" className="cursor-pointer">Outro motivo</Label> </div>
-              </RadioGroup>
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label>Motivo da Falha</Label>
+                <RadioGroup value={failureReason} onValueChange={setFailureReason}>
+                  <div className="flex items-center space-x-2"> <RadioGroupItem value="ausente" id="ausente" /> <Label htmlFor="ausente" className="cursor-pointer">Cliente ausente</Label> </div>
+                  <div className="flex items-center space-x-2"> <RadioGroupItem value="recusou" id="recusou" /> <Label htmlFor="recusou" className="cursor-pointer">Cliente recusou</Label> </div>
+                  <div className="flex items-center space-x-2"> <RadioGroupItem value="endereco_incorreto" id="endereco_incorreto" /> <Label htmlFor="endereco_incorreto" className="cursor-pointer">Endereço incorreto</Label> </div>
+                  <div className="flex items-center space-x-2"> <RadioGroupItem value="outro" id="outro" /> <Label htmlFor="outro" className="cursor-pointer">Outro motivo</Label> </div>
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Foi até o local?</Label>
+                <RadioGroup
+                  value={wentToLocation === null ? '' : wentToLocation ? 'sim' : 'nao'}
+                  onValueChange={(value) => {
+                    setWentToLocation(value === 'sim');
+                    if (value === 'nao') {
+                      setAttemptPhoto(null);
+                    }
+                  }}
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="sim" id="went-sim" />
+                    <Label htmlFor="went-sim" className="cursor-pointer">Sim</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="nao" id="went-nao" />
+                    <Label htmlFor="went-nao" className="cursor-pointer">Não</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {wentToLocation === true && (
+                <div className="space-y-2">
+                  <Label>Foto do Local (Comprovante de Tentativa)</Label>
+                  <p className="text-xs text-muted-foreground">Tire uma foto da porta ou fachada para comprovar que esteve no local.</p>
+                  <Tabs defaultValue="camera" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="camera"> <Camera className="mr-2 h-4 w-4" /> Câmera </TabsTrigger>
+                      <TabsTrigger value="upload"> <Upload className="mr-2 h-4 w-4" /> Upload </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="camera" className="space-y-2">
+                      {!attemptPhoto ? (
+                        <>
+                          {isCameraActive ? (
+                            <div className="relative">
+                              <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg bg-black" style={{ maxHeight: '400px' }} />
+                              <div className="flex gap-2 mt-2">
+                                <Button onClick={async () => {
+                                  if (!videoRef.current || !canvasRef.current) return;
+                                  const video = videoRef.current;
+                                  const canvas = canvasRef.current;
+                                  const context = canvas.getContext('2d');
+                                  if (!context) return;
+                                  canvas.width = video.videoWidth;
+                                  canvas.height = video.videoHeight;
+                                  context.drawImage(video, 0, 0);
+                                  const photoData = canvas.toDataURL('image/jpeg', 0.8);
+                                  const compressedPhoto = await compressImage(photoData, 800, 0.6);
+                                  setAttemptPhoto(compressedPhoto);
+                                  stopCamera();
+                                }} className="flex-1"> Capturar Foto </Button>
+                                <Button onClick={stopCamera} variant="outline"> Cancelar </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <Button onClick={startCamera} variant="outline" className="w-full"> <Camera className="mr-2 h-4 w-4" /> Abrir Câmera </Button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="relative">
+                          <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                          <Button onClick={() => setAttemptPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="upload" className="space-y-2">
+                      {!attemptPhoto ? (
+                        <div>
+                          <Label htmlFor="attempt-photo-upload" className="cursor-pointer">
+                            <div className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary transition-colors">
+                              <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
+                              <p className="mt-2 text-sm text-muted-foreground"> Clique para selecionar uma foto </p>
+                            </div>
+                          </Label>
+                          <input id="attempt-photo-upload" type="file" accept="image/*" className="hidden" onChange={async (event) => {
+                            const file = event.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = async (e) => {
+                              const photoData = e.target?.result as string;
+                              const compressedPhoto = await compressImage(photoData, 800, 0.6);
+                              setAttemptPhoto(compressedPhoto);
+                            };
+                            reader.readAsDataURL(file);
+                          }} />
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                          <Button onClick={() => setAttemptPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                        </div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              )}
+            </>
           )}
 
           {deliveryStatus === 'completed' && (
@@ -539,6 +664,29 @@ export function DeliveryConfirmationDialog({
                           min="1"
                           className="mt-1"
                         />
+                      </div>
+                    )}
+                    {payment.method === 'pix' && (
+                      <div className="pl-1 pt-2">
+                        <Label>Tipo de PIX</Label>
+                        <RadioGroup
+                          value={payment.pixType || ''}
+                          onValueChange={(value) => handlePaymentChange(index, 'pixType', value as 'qrcode' | 'cnpj')}
+                          className="mt-2"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="qrcode" id={`pix-qrcode-${index}`} />
+                            <Label htmlFor={`pix-qrcode-${index}`} className="font-normal cursor-pointer">
+                              QR Code
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="cnpj" id={`pix-cnpj-${index}`} />
+                            <Label htmlFor={`pix-cnpj-${index}`} className="font-normal cursor-pointer">
+                              CNPJ
+                            </Label>
+                          </div>
+                        </RadioGroup>
                       </div>
                     )}
                   </div>

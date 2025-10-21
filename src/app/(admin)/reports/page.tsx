@@ -107,6 +107,8 @@ type DeliveryReport = {
   completedAt?: Date;
   arrivedAt?: Date;
   failureReason?: string;
+  wentToLocation?: boolean;
+  attemptPhotoUrl?: string;
   phone?: string;
   notes?: string;
   plannedDate: Date;
@@ -251,6 +253,8 @@ export default function ReportsPage() {
               completedAt: stop.completedAt ? (stop.completedAt instanceof Timestamp ? stop.completedAt.toDate() : stop.completedAt) : undefined,
               arrivedAt: stop.arrivedAt ? (stop.arrivedAt instanceof Timestamp ? stop.arrivedAt.toDate() : stop.arrivedAt) : undefined,
               failureReason: stop.failureReason,
+              wentToLocation: stop.wentToLocation,
+              attemptPhotoUrl: stop.attemptPhotoUrl,
               phone: stop.phone,
               notes: stop.notes,
               plannedDate: route.plannedDate.toDate(),
@@ -1021,10 +1025,38 @@ export default function ReportsPage() {
                     </div>
                   )}
                   {selectedDelivery.failureReason && (
-                    <div className="col-span-2">
-                      <label className="text-sm font-medium text-muted-foreground">Motivo da Falha</label>
-                      <p className="text-sm text-red-600">{selectedDelivery.failureReason}</p>
-                    </div>
+                    <>
+                      <div className="col-span-2">
+                        <label className="text-sm font-medium text-muted-foreground">Motivo da Falha</label>
+                        <p className="text-sm text-red-600">{selectedDelivery.failureReason}</p>
+                      </div>
+                      {selectedDelivery.wentToLocation !== undefined && (
+                        <div className="col-span-2">
+                          <label className="text-sm font-medium text-muted-foreground">Foi até o local?</label>
+                          <p className="text-sm">
+                            {selectedDelivery.wentToLocation ? (
+                              <span className="text-green-600 font-medium">✓ Sim, foi até o local</span>
+                            ) : (
+                              <span className="text-red-600 font-medium">✗ Não foi até o local</span>
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      {selectedDelivery.attemptPhotoUrl && (
+                        <div className="col-span-2">
+                          <label className="text-sm font-medium text-muted-foreground">Foto do Local (Comprovante de Tentativa)</label>
+                          <div className="mt-2">
+                            <img
+                              src={selectedDelivery.attemptPhotoUrl}
+                              alt="Foto da tentativa de entrega"
+                              className="rounded-lg border max-w-md cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(selectedDelivery.attemptPhotoUrl, '_blank')}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">Clique para ampliar</p>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                   {selectedDelivery.notes && (
                     <div className="col-span-2">
@@ -1105,7 +1137,14 @@ export default function ReportsPage() {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className="text-sm font-medium text-muted-foreground">Método</label>
-                              <p className="text-sm font-semibold capitalize">{payment.method}</p>
+                              <p className="text-sm font-semibold capitalize">
+                                {payment.method}
+                                {payment.method === 'pix' && payment.pixType && (
+                                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                    ({payment.pixType === 'qrcode' ? 'QR Code' : 'CNPJ'})
+                                  </span>
+                                )}
+                              </p>
                             </div>
                             <div>
                               <label className="text-sm font-medium text-muted-foreground">Valor</label>

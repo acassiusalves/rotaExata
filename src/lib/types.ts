@@ -15,6 +15,7 @@ export type Payment = {
   method: string;
   value: number;
   installments?: number;
+  pixType?: 'qrcode' | 'cnpj'; // Tipo de PIX: QR Code ou CNPJ
 };
 
 
@@ -44,6 +45,8 @@ export type PlaceValue = {
   photoUrl?: string;
   signatureUrl?: string;
   failureReason?: string;
+  wentToLocation?: boolean; // Se o motorista foi até o local em caso de falha
+  attemptPhotoUrl?: string; // URL da foto do local em caso de tentativa de entrega
   payments?: Payment[]; // Substituído paymentMethod e creditCardInstallments
   // Campos de conciliação
   reconciled?: boolean; // Se a entrega foi conciliada/verificada

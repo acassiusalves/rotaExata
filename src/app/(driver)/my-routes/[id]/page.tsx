@@ -357,6 +357,8 @@ export default function RouteDetailsPage() {
     notes?: string;
     status: 'completed' | 'failed';
     failureReason?: string;
+    wentToLocation?: boolean;
+    attemptPhoto?: string;
     payments?: Payment[];
   }) => {
     if (!route || selectedStopIndex === null) {
@@ -421,9 +423,35 @@ export default function RouteDetailsPage() {
         updatedStop.failureReason = data.failureReason;
         console.log('⚠️ Motivo da falha:', data.failureReason);
       }
+      if (data.wentToLocation !== undefined) {
+        updatedStop.wentToLocation = data.wentToLocation;
+        console.log('📍 Foi até o local:', data.wentToLocation);
+      }
       if (data.payments) {
         updatedStop.payments = data.payments;
         console.log('💰 Pagamentos:', data.payments);
+      }
+
+      // Upload da foto da tentativa de entrega se houver
+      if (data.attemptPhoto && data.wentToLocation) {
+        try {
+          console.log('📸 Iniciando upload da foto de tentativa...');
+          const attemptPhotoRef = ref(
+            storage,
+            `delivery-attempt-photos/${routeId}/${selectedStopIndex}-${Date.now()}.jpg`
+          );
+          await uploadString(attemptPhotoRef, data.attemptPhoto, 'data_url');
+          const attemptPhotoURL = await getDownloadURL(attemptPhotoRef);
+          updatedStop.attemptPhotoUrl = attemptPhotoURL;
+          console.log('✅ Foto de tentativa enviada para Storage:', attemptPhotoURL);
+        } catch (photoError) {
+          console.error('❌ Erro ao fazer upload da foto de tentativa:', photoError);
+          toast({
+            variant: 'destructive',
+            title: 'Aviso',
+            description: 'Não foi possível salvar a foto de tentativa, mas a entrega foi registrada.',
+          });
+        }
       }
 
       updatedStops[selectedStopIndex] = updatedStop;
