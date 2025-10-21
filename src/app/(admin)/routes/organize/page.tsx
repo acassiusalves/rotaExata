@@ -861,120 +861,118 @@ export default function OrganizeRoutePage() {
 
         loadRouteFromFirestore();
       } else {
-        // Rota nova - aplicar K-means para dividir
+        // Rota nova - dividir geograficamente usando origem como referência
         const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
-
-        // Google Routes API limit: 25 intermediate waypoints (+ 1 destination = 26 stops max per route)
         const MAX_STOPS_PER_ROUTE = 25;
-        const numClusters = Math.max(2, Math.ceil(allStops.length / MAX_STOPS_PER_ROUTE));
 
-        if (numClusters > 2) {
-          console.warn(`⚠️ Rota com ${allStops.length} paradas requer ${numClusters} grupos (limite: ${MAX_STOPS_PER_ROUTE} paradas/rota)`);
-          toast({
-            title: "Muitas paradas",
-            description: `Esta rota tem ${allStops.length} paradas e será dividida em ${numClusters} grupos. O sistema suporta apenas 2 rotas simultâneas.`,
-            variant: "destructive",
-          });
-        }
+        console.log(`📍 Origem: lat=${parsedData.origin.lat}, lng=${parsedData.origin.lng}`);
+        console.log(`📦 Total de paradas: ${allStops.length}`);
 
-        let clusters = kMeansCluster(allStops, numClusters);
+        // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
+        const stopsNorte = allStops.filter(stop => stop.lat >= parsedData.origin.lat);
+        const stopsSul = allStops.filter(stop => stop.lat < parsedData.origin.lat);
 
-        // Ensure no cluster exceeds MAX_STOPS_PER_ROUTE
-        // If any cluster is too large, redistribute stops
-        let needsRebalancing = clusters.some(cluster => cluster.length > MAX_STOPS_PER_ROUTE);
+        console.log(`🧭 Divisão geográfica: Norte (${stopsNorte.length}), Sul (${stopsSul.length})`);
 
-        if (needsRebalancing) {
-          console.warn(`⚠️ Clusters desbalanceados detectados. Redistribuindo...`);
-          // Sort clusters by size (largest first)
-          clusters.sort((a, b) => b.length - a.length);
+        // Função para ordenar paradas por proximidade (nearest neighbor)
+        const sortByProximity = (stops: PlaceValue[], origin: PlaceValue): PlaceValue[] => {
+          if (stops.length === 0) return [];
 
-          // Redistribute stops from oversized clusters
-          const rebalancedClusters: PlaceValue[][] = [];
-          for (const cluster of clusters) {
-            if (cluster.length <= MAX_STOPS_PER_ROUTE) {
-              rebalancedClusters.push(cluster);
-            } else {
-              // Split the oversized cluster into multiple smaller clusters
-              const numSubClusters = Math.ceil(cluster.length / MAX_STOPS_PER_ROUTE);
-              for (let i = 0; i < numSubClusters; i++) {
-                const start = i * MAX_STOPS_PER_ROUTE;
-                const end = Math.min(start + MAX_STOPS_PER_ROUTE, cluster.length);
-                rebalancedClusters.push(cluster.slice(start, end));
+          const sorted: PlaceValue[] = [];
+          const remaining = [...stops];
+          let current = origin;
+
+          while (remaining.length > 0) {
+            // Encontrar a parada mais próxima da posição atual
+            let nearestIndex = 0;
+            let minDistance = getDistance(current, remaining[0]);
+
+            for (let i = 1; i < remaining.length; i++) {
+              const distance = getDistance(current, remaining[i]);
+              if (distance < minDistance) {
+                minDistance = distance;
+                nearestIndex = i;
               }
             }
-          }
-          clusters = rebalancedClusters;
-          console.log(`✅ Clusters rebalanceados: ${clusters.map(c => c.length).join(', ')} paradas`);
-        }
 
-        // Sistema suporta apenas 2 rotas - consolidar todos os clusters em 2 rotas
+            // Adicionar a parada mais próxima ao resultado
+            const nearest = remaining.splice(nearestIndex, 1)[0];
+            sorted.push(nearest);
+            current = nearest;
+          }
+
+          return sorted;
+        };
+
+        // Ordenar cada região por proximidade
+        const stopsNorteOrdenadas = sortByProximity(stopsNorte, parsedData.origin);
+        const stopsSulOrdenadas = sortByProximity(stopsSul, parsedData.origin);
+
+        // Verificar se alguma região excede o limite
         let stopsA: PlaceValue[] = [];
         let stopsB: PlaceValue[] = [];
 
-        if (clusters.length <= 2) {
-          stopsA = clusters[0] || [];
-          stopsB = clusters[1] || [];
+        if (stopsNorteOrdenadas.length <= MAX_STOPS_PER_ROUTE && stopsSulOrdenadas.length <= MAX_STOPS_PER_ROUTE) {
+          // Divisão perfeita - Norte na Rota A, Sul na Rota B
+          stopsA = stopsNorteOrdenadas;
+          stopsB = stopsSulOrdenadas;
+          console.log(`✅ Divisão perfeita: Rota A (Norte: ${stopsA.length}), Rota B (Sul: ${stopsB.length})`);
         } else {
-          // Distribuir clusters alternadamente entre Rota A e B
-          console.warn(`⚠️ ${clusters.length} clusters criados. Consolidando em 2 rotas...`);
+          // Alguma região excede o limite - precisamos redistribuir
+          console.warn(`⚠️ Região excede limite: Norte=${stopsNorteOrdenadas.length}, Sul=${stopsSulOrdenadas.length}`);
 
-          clusters.forEach((cluster, index) => {
-            if (index % 2 === 0) {
-              // Verificar se não excederá o limite ao adicionar
-              if (stopsA.length + cluster.length <= MAX_STOPS_PER_ROUTE) {
-                stopsA.push(...cluster);
-              } else {
-                // Se não couber todo o cluster na Rota A, tentar na Rota B
-                if (stopsB.length + cluster.length <= MAX_STOPS_PER_ROUTE) {
-                  stopsB.push(...cluster);
-                } else {
-                  // Se não couber em nenhuma, dividir o cluster
-                  const availableInA = MAX_STOPS_PER_ROUTE - stopsA.length;
-                  const availableInB = MAX_STOPS_PER_ROUTE - stopsB.length;
+          if (stopsNorteOrdenadas.length > MAX_STOPS_PER_ROUTE) {
+            // Norte tem muitas paradas - dividir
+            const excess = stopsNorteOrdenadas.length - MAX_STOPS_PER_ROUTE;
+            stopsA = stopsNorteOrdenadas.slice(0, MAX_STOPS_PER_ROUTE);
 
-                  if (availableInA > 0) {
-                    stopsA.push(...cluster.slice(0, availableInA));
-                  }
-                  if (availableInB > 0) {
-                    stopsB.push(...cluster.slice(availableInA, availableInA + availableInB));
-                  }
-                }
+            // Mover excesso para Rota B se houver espaço
+            const excessStops = stopsNorteOrdenadas.slice(MAX_STOPS_PER_ROUTE);
+            const availableInB = MAX_STOPS_PER_ROUTE - stopsSulOrdenadas.length;
+
+            if (availableInB > 0) {
+              stopsB = [...stopsSulOrdenadas, ...excessStops.slice(0, availableInB)];
+              const remaining = excessStops.slice(availableInB);
+              if (remaining.length > 0) {
+                console.error(`❌ ${remaining.length} paradas do Norte não puderam ser atribuídas`);
               }
             } else {
-              // Verificar se não excederá o limite ao adicionar
-              if (stopsB.length + cluster.length <= MAX_STOPS_PER_ROUTE) {
-                stopsB.push(...cluster);
-              } else {
-                // Se não couber todo o cluster na Rota B, tentar na Rota A
-                if (stopsA.length + cluster.length <= MAX_STOPS_PER_ROUTE) {
-                  stopsA.push(...cluster);
-                } else {
-                  // Se não couber em nenhuma, dividir o cluster
-                  const availableInB = MAX_STOPS_PER_ROUTE - stopsB.length;
-                  const availableInA = MAX_STOPS_PER_ROUTE - stopsA.length;
-
-                  if (availableInB > 0) {
-                    stopsB.push(...cluster.slice(0, availableInB));
-                  }
-                  if (availableInA > 0) {
-                    stopsA.push(...cluster.slice(availableInB, availableInB + availableInA));
-                  }
-                }
-              }
+              stopsB = stopsSulOrdenadas;
+              console.error(`❌ ${excess} paradas do Norte não puderam ser atribuídas`);
             }
-          });
+          } else if (stopsSulOrdenadas.length > MAX_STOPS_PER_ROUTE) {
+            // Sul tem muitas paradas - dividir
+            const excess = stopsSulOrdenadas.length - MAX_STOPS_PER_ROUTE;
+            stopsB = stopsSulOrdenadas.slice(0, MAX_STOPS_PER_ROUTE);
 
-          console.log(`✅ Clusters consolidados: Rota A (${stopsA.length} paradas), Rota B (${stopsB.length} paradas)`);
+            // Mover excesso para Rota A se houver espaço
+            const excessStops = stopsSulOrdenadas.slice(MAX_STOPS_PER_ROUTE);
+            const availableInA = MAX_STOPS_PER_ROUTE - stopsNorteOrdenadas.length;
 
-          const totalAssigned = stopsA.length + stopsB.length;
-          if (totalAssigned < allStops.length) {
-            console.error(`❌ ${allStops.length - totalAssigned} paradas não puderam ser atribuídas (excede limite de ${MAX_STOPS_PER_ROUTE * 2} paradas totais)`);
-            toast({
-              title: "Limite excedido",
-              description: `${allStops.length - totalAssigned} paradas não puderam ser atribuídas. Máximo: ${MAX_STOPS_PER_ROUTE * 2} paradas.`,
-              variant: "destructive",
-            });
+            if (availableInA > 0) {
+              stopsA = [...stopsNorteOrdenadas, ...excessStops.slice(0, availableInA)];
+              const remaining = excessStops.slice(availableInA);
+              if (remaining.length > 0) {
+                console.error(`❌ ${remaining.length} paradas do Sul não puderam ser atribuídas`);
+              }
+            } else {
+              stopsA = stopsNorteOrdenadas;
+              console.error(`❌ ${excess} paradas do Sul não puderam ser atribuídas`);
+            }
           }
+
+          console.log(`✅ Divisão ajustada: Rota A (${stopsA.length} paradas), Rota B (${stopsB.length} paradas)`);
+        }
+
+        // Avisar se alguma parada não foi atribuída
+        const totalAssigned = stopsA.length + stopsB.length;
+        if (totalAssigned < allStops.length) {
+          const unassigned = allStops.length - totalAssigned;
+          toast({
+            title: "Limite excedido",
+            description: `${unassigned} paradas não puderam ser atribuídas. Máximo: ${MAX_STOPS_PER_ROUTE * 2} paradas totais.`,
+            variant: "destructive",
+          });
         }
 
         const calculateRoutes = async () => {
