@@ -163,6 +163,7 @@ export default function ReportsPage() {
   const [selectedDriver, setSelectedDriver] = React.useState<string>('all');
   const [selectedStatus, setSelectedStatus] = React.useState<string>('all');
   const [selectedReconciliation, setSelectedReconciliation] = React.useState<string>('all');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
 
@@ -314,8 +315,16 @@ export default function ReportsPage() {
       }
     }
 
+    // Filtro por forma de pagamento
+    if (selectedPaymentMethod !== 'all') {
+      filtered = filtered.filter(d => {
+        // Verifica se a entrega tem pagamentos e se algum deles corresponde ao método selecionado
+        return d.payments && d.payments.some(payment => payment.method === selectedPaymentMethod);
+      });
+    }
+
     setFilteredDeliveries(filtered);
-  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation]);
+  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod]);
 
   // Funções de seleção para conciliação
   const handleToggleSelection = (stopId: string) => {
@@ -796,6 +805,23 @@ export default function ReportsPage() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="reconciled">Conciliados</SelectItem>
                   <SelectItem value="not_reconciled">Não Conciliados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Forma de Pagamento</label>
+              <Select value={selectedPaymentMethod} onValueChange={setSelectedPaymentMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="dinheiro">Dinheiro</SelectItem>
+                  <SelectItem value="pix">PIX</SelectItem>
+                  <SelectItem value="cartao_credito">Cartão de Crédito</SelectItem>
+                  <SelectItem value="cartao_debito">Cartão de Débito</SelectItem>
+                  <SelectItem value="boleto">Boleto</SelectItem>
                 </SelectContent>
               </Select>
             </div>
