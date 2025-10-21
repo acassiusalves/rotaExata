@@ -236,7 +236,10 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
   React.useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !(map instanceof google.maps.Map)) {
+      console.warn('⚠️ Map not ready or invalid instance');
+      return;
+    }
 
     // Only clear and redraw when data actually changes
     const currentRoutesDataCheck = JSON.stringify({
@@ -295,7 +298,8 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     const bounds = new google.maps.LatLngBounds();
 
     // Add origin marker
-    if (origin) {
+    if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number' &&
+        isFinite(origin.lat) && isFinite(origin.lng)) {
       const originMarker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: origin,
@@ -309,11 +313,19 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       });
       markersRef.current.push(originMarker as any); // cast because of type mismatch
       bounds.extend(origin);
+    } else if (origin) {
+      console.warn('⚠️ Invalid origin coordinates:', origin);
     }
     
     // helper para criar marker+info e indexar por id
     const addStop = (stop: PlaceValue, index?: number, color?: string, isUnassigned = false) => {
-      if (!stop.lat || !stop.lng) return;
+      // Validate coordinates
+      if (!stop.lat || !stop.lng ||
+          typeof stop.lat !== 'number' || typeof stop.lng !== 'number' ||
+          !isFinite(stop.lat) || !isFinite(stop.lng)) {
+        console.warn(`⚠️ Invalid coordinates for stop:`, stop);
+        return;
+      }
       const sid = String(stop.id ?? stop.placeId ?? index);
       const isHighlighted = highlightedStopIds.includes(sid);
       const isCompleted = stop.deliveryStatus === 'completed';
@@ -412,10 +424,32 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
                 });
             }
             if (isVisible && route.encodedPolyline) {
-                 const path = google.maps.geometry.encoding.decodePath(route.encodedPolyline);
-                 const poly = new google.maps.Polyline({ map, path, strokeColor: route.color, strokeWeight: 5, strokeOpacity: 0.8 });
-                 polylinesRef.current.push(poly);
-                 path.forEach(p => bounds.extend(p));
+                 try {
+                   const path = google.maps.geometry.encoding.decodePath(route.encodedPolyline);
+                   // Validate path coordinates
+                   const validPath = path.filter(p => {
+                     const lat = typeof p.lat === 'function' ? p.lat() : p.lat;
+                     const lng = typeof p.lng === 'function' ? p.lng() : p.lng;
+                     return typeof lat === 'number' && typeof lng === 'number' &&
+                            isFinite(lat) && isFinite(lng);
+                   });
+
+                   if (validPath.length > 0) {
+                     const poly = new google.maps.Polyline({
+                       map,
+                       path: validPath,
+                       strokeColor: route.color,
+                       strokeWeight: 5,
+                       strokeOpacity: 0.8
+                     });
+                     polylinesRef.current.push(poly);
+                     validPath.forEach(p => bounds.extend(p));
+                   } else {
+                     console.warn(`⚠️ Route ${route.name} has no valid coordinates in polyline`);
+                   }
+                 } catch (error) {
+                   console.error(`Error creating polyline for route ${route.name}:`, error);
+                 }
             }
         });
     } else if (stops) { // Fallback for single list of stops
@@ -628,9 +662,21 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     const shouldFitBounds = currentDriverLocationsData !== previousDriverLocationsRef.current;
 
+    // Validate bounds before calling fitBounds
     if (!bounds.isEmpty() && shouldFitBounds) {
-      map.fitBounds(bounds, 100);
-      previousDriverLocationsRef.current = currentDriverLocationsData;
+      try {
+        const boundsObj = bounds.toJSON();
+        // Ensure bounds has valid north, south, east, west properties
+        if (boundsObj && typeof boundsObj.north === 'number' && typeof boundsObj.south === 'number' &&
+            typeof boundsObj.east === 'number' && typeof boundsObj.west === 'number') {
+          map.fitBounds(bounds, 100);
+          previousDriverLocationsRef.current = currentDriverLocationsData;
+        } else {
+          console.error('Invalid bounds object:', boundsObj);
+        }
+      } catch (error) {
+        console.error('Error fitting bounds for driver locations:', error);
+      }
     }
 
   }, [driverLocations]);
