@@ -459,8 +459,6 @@ export default function OrganizeRoutePage() {
   });
   const [showEditMap, setShowEditMap] = React.useState(false);
   const [editMapType, setEditMapType] = React.useState<'hybrid' | 'roadmap'>('hybrid');
-  const [pendingCoordinates, setPendingCoordinates] = React.useState<{lat: number; lng: number} | null>(null);
-  const [showCoordinateUpdateDialog, setShowCoordinateUpdateDialog] = React.useState(false);
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
@@ -1136,33 +1134,6 @@ export default function OrganizeRoutePage() {
     const lat = parseFloat(match[1]);
     const lng = parseFloat(match[2]);
 
-    // Armazenar coordenadas e mostrar diálogo de escolha
-    setPendingCoordinates({ lat, lng });
-    setShowCoordinateUpdateDialog(true);
-  };
-
-  const handleUpdateCoordinatesOnly = () => {
-    if (!pendingCoordinates) return;
-
-    setEditService(prev => ({
-      ...prev,
-      lat: pendingCoordinates.lat,
-      lng: pendingCoordinates.lng,
-    }));
-    setShowEditMap(true);
-    setShowCoordinateUpdateDialog(false);
-    setPendingCoordinates(null);
-    toast({
-      title: "Coordenadas atualizadas!",
-      description: "Apenas a posição do alfinete foi atualizada. O endereço permanece o mesmo."
-    });
-  };
-
-  const handleUpdateFullAddress = async () => {
-    if (!pendingCoordinates) return;
-
-    const { lat, lng } = pendingCoordinates;
-
     toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
 
     const addressDetails = await reverseGeocode(lat, lng);
@@ -1173,21 +1144,10 @@ export default function OrganizeRoutePage() {
         lat,
         lng,
       }));
-      setShowEditMap(true);
-      setShowCoordinateUpdateDialog(false);
-      setPendingCoordinates(null);
-      toast({
-        title: "Endereço atualizado!",
-        description: "Os campos foram preenchidos automaticamente. Você pode ajustar a posição do alfinete no mapa."
-      });
+      setShowEditMap(true); // Mostrar o mapa para permitir ajuste
+      toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente. Você pode ajustar a posição do alfinete no mapa." });
     } else {
-      toast({
-        variant: 'destructive',
-        title: "Falha na busca",
-        description: "Não foi possível encontrar o endereço para este link."
-      });
-      setShowCoordinateUpdateDialog(false);
-      setPendingCoordinates(null);
+      toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
     }
   };
 
@@ -2448,11 +2408,10 @@ export default function OrganizeRoutePage() {
           unassignedStops={unassignedStops}
           onRemoveStop={handleRemoveStop}
           onEditStop={handleEditStop}
+          onRefreshDriverLocation={handleRefreshDriverLocation}
           highlightedStopIds={highlightedStops}
-          // Não mostrar motoristas na página de organização (foco exclusivo na organização)
-          // driverLocation={driverLocation || undefined}
-          // driverLocations={driverLocations}
-          // onRefreshDriverLocation={handleRefreshDriverLocation}
+          driverLocation={driverLocation || undefined}
+          driverLocations={driverLocations}
         />
       </div>
 
@@ -3229,66 +3188,6 @@ export default function OrganizeRoutePage() {
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
             <Button onClick={handleSaveEditedService}>Salvar Alterações</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para escolher tipo de atualização de coordenadas */}
-      <Dialog open={showCoordinateUpdateDialog} onOpenChange={setShowCoordinateUpdateDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Atualizar Localização</DialogTitle>
-            <DialogDescription>
-              Como você deseja atualizar a localização deste ponto?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 py-4">
-            <Button
-              onClick={handleUpdateCoordinatesOnly}
-              variant="outline"
-              className="w-full justify-start text-left h-auto py-2"
-            >
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                    <circle cx="12" cy="10" r="3"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm">Atualizar apenas o alfinete</div>
-                  <div className="text-xs text-muted-foreground">Manter o endereço atual</div>
-                </div>
-              </div>
-            </Button>
-
-            <Button
-              onClick={handleUpdateFullAddress}
-              variant="outline"
-              className="w-full justify-start text-left h-auto py-2"
-            >
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                    <circle cx="12" cy="10" r="3"/>
-                    <path d="M12 2v8"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm">Atualizar endereço completo</div>
-                  <div className="text-xs text-muted-foreground">Buscar novo endereço</div>
-                </div>
-              </div>
-            </Button>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => {
-              setShowCoordinateUpdateDialog(false);
-              setPendingCoordinates(null);
-            }}>
-              Cancelar
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

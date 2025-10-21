@@ -356,7 +356,7 @@ export default function RoutesPage() {
       }
     };
     sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
-    router.push('/routes/organize');
+    router.push('/routes/organize/acompanhar'); // Redirecionar para página de acompanhamento
   };
   
   // Filter routes based on search query
