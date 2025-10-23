@@ -135,8 +135,8 @@ export function DatePickerWithPresets({
             className
           )}
         >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {getDisplayText()}
+          <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+          <span className="truncate text-xs">{getDisplayText()}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0 max-w-[90vw]" align="start" side="bottom">

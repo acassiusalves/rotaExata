@@ -166,6 +166,7 @@ export default function ReportsPage() {
   const [selectedStatus, setSelectedStatus] = React.useState<string>('all');
   const [selectedReconciliation, setSelectedReconciliation] = React.useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = React.useState<string>('all');
+  const [selectedPeriod, setSelectedPeriod] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
 
@@ -327,8 +328,17 @@ export default function ReportsPage() {
       });
     }
 
+    // Filtro por período do dia (Matutino/Vespertino)
+    if (selectedPeriod !== 'all') {
+      filtered = filtered.filter(d => {
+        if (!d.completedAt) return false;
+        const periodInfo = getPeriodInfo(d.completedAt);
+        return periodInfo.period.toLowerCase() === selectedPeriod.toLowerCase();
+      });
+    }
+
     setFilteredDeliveries(filtered);
-  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod]);
+  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod, selectedPeriod]);
 
   // Funções de seleção para conciliação
   const handleToggleSelection = (stopId: string) => {
@@ -743,7 +753,7 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-2">
               <label className="text-sm font-medium">Buscar</label>
               <div className="relative">
@@ -758,13 +768,27 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Período</label>
+              <label className="text-sm font-medium">Data</label>
               <DatePickerWithPresets
                 startDate={startDate}
                 endDate={endDate}
                 onDateRangeChange={handleDateRangeChange}
                 placeholder="Selecione o período"
               />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Período do Dia</label>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="matutino">Matutino</SelectItem>
+                  <SelectItem value="vespertino">Vespertino</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
