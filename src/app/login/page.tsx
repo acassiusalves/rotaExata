@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { BotMessageSquare, Loader2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
+import { Logo } from "@/components/ui/logo"
 import { useAuth } from '@/hooks/use-auth';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
@@ -68,9 +69,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
             <div className="flex justify-center items-center mb-4">
-                 <BotMessageSquare className="h-8 w-8 text-primary" />
+                 <Logo size={48} showText={false} />
             </div>
-          <CardTitle className="text-2xl">RotaExata</CardTitle>
+          <CardTitle className="text-2xl">Rota Exata</CardTitle>
           <CardDescription>
             Acesse o painel para gerenciar suas entregas.
           </CardDescription>

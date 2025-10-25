@@ -9,7 +9,6 @@ import {
   LineChart,
   Settings,
   Code,
-  BotMessageSquare,
   ChevronDown,
   Monitor,
   Plus,
@@ -17,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { Logo } from '@/components/ui/logo';
 import {
   Tooltip,
   TooltipContent,
@@ -107,9 +107,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
         "flex h-16 items-center border-b border-border px-6 animate-fade-in",
         !isOpen && "justify-center px-2"
       )}>
-        <Link href="/" className="flex items-center gap-2 font-semibold whitespace-nowrap transition-all duration-300 hover:scale-105">
-          <BotMessageSquare className="h-6 w-6 text-primary" />
-          {isOpen && <span className="text-foreground">RotaExata</span>}
+        <Link href="/" className="transition-all duration-300 hover:scale-105">
+          <Logo size={32} showText={isOpen} />
         </Link>
       </div>
 

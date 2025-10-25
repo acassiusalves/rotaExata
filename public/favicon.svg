@@ -1,0 +1,13 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fundo branco -->
+  <rect width="32" height="32" rx="6" fill="white"/>
+
+  <!-- R em preto -->
+  <text x="1" y="24" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="26" font-weight="700" fill="#09090B">R</text>
+
+  <!-- Pin de localização roxo -->
+  <g transform="translate(20, 14)">
+    <path d="M5 0C2.239 0 0 2.239 0 5C0 8.75 5 15 5 15C5 15 10 8.75 10 5C10 2.239 7.761 0 5 0Z" fill="#7B61FF"/>
+    <circle cx="5" cy="5" r="2.5" fill="white"/>
+  </g>
+</svg>
