@@ -17,6 +17,7 @@ export default {
     },
     extend: {
       fontFamily: {
+        sans: ['Inter', 'sans-serif'],
         body: ['Inter', 'sans-serif'],
       },
       colors: {
@@ -65,6 +66,17 @@ export default {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+        xl: '1rem',
+        '2xl': '1.5rem',
+      },
+      boxShadow: {
+        card: '0 4px 20px rgba(0, 0, 0, 0.3)',
+        'card-hover': '0 6px 24px rgba(123, 97, 255, 0.2)',
+        'button-primary': '0 4px 12px rgba(123, 97, 255, 0.3)',
+        'uber': '0 8px 32px rgba(0, 0, 0, 0.4)',
+      },
+      backdropBlur: {
+        xs: '2px',
       },
       keyframes: {
         'accordion-down': {
@@ -83,10 +95,47 @@ export default {
             height: '0',
           },
         },
+        shimmer: {
+          '100%': {
+            transform: 'translateX(100%)',
+          },
+        },
+        fadeIn: {
+          from: {
+            opacity: '0',
+          },
+          to: {
+            opacity: '1',
+          },
+        },
+        slideUp: {
+          from: {
+            opacity: '0',
+            transform: 'translateY(10px)',
+          },
+          to: {
+            opacity: '1',
+            transform: 'translateY(0)',
+          },
+        },
+        slideInRight: {
+          from: {
+            opacity: '0',
+            transform: 'translateX(20px)',
+          },
+          to: {
+            opacity: '1',
+            transform: 'translateX(0)',
+          },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'shimmer': 'shimmer 2s infinite',
+        'fade-in': 'fadeIn 0.3s ease-out',
+        'slide-up': 'slideUp 0.3s ease-out',
+        'slide-in-right': 'slideInRight 0.3s ease-out',
       },
     },
   },

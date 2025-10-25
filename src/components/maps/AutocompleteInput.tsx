@@ -19,6 +19,12 @@ export function AutocompleteInput({
 }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const acRef = React.useRef<google.maps.places.Autocomplete | null>(null);
+  const onChangeRef = React.useRef(onChange);
+
+  // Mantém a referência do onChange sempre atualizada
+  React.useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   React.useEffect(() => {
     if (inputRef.current && value && value.address) {
@@ -47,34 +53,35 @@ export function AutocompleteInput({
       acRef.current.addListener("place_changed", () => {
         const p = acRef.current!.getPlace();
         if (!p || !p.geometry) {
-            // User entered the name of a Place that was not suggested and
-            // pressed the Enter key, or the Place Details request failed.
             return;
         }
         const loc = p.geometry?.location;
-        if (!loc || !p.place_id) return;
-        onChange({
+        if (!loc || !p.place_id) {
+            return;
+        }
+        const placeValue = {
           id: p.place_id,
           placeId: p.place_id,
           address: p.formatted_address ?? "",
           lat: loc.lat(),
           lng: loc.lng(),
-        });
+        };
+        onChangeRef.current(placeValue);
       });
     });
 
     return () => { mounted = false; };
-  }, [onChange]);
+  }, []);
 
   return (
     <div className="w-full">
-      {label && <label htmlFor={id} className="block text-sm font-medium mb-1">{label}</label>}
+      {label && <label htmlFor={id} className="block text-sm font-medium mb-1 text-foreground">{label}</label>}
       <input
         id={id}
         ref={inputRef}
         defaultValue={value?.address}
         placeholder={placeholder}
-        className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring"
+        className="w-full rounded-xl border border-border bg-card text-foreground px-4 py-2.5 text-sm outline-none transition-all duration-300 focus:ring-2 focus:ring-primary focus:border-primary placeholder:text-muted-foreground"
       />
     </div>
   );

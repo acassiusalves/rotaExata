@@ -221,12 +221,96 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     loader.load().then(() => {
       if (canceled || !divRef.current) return;
+
+      // Uber-style light map theme - minimalista e clean
+      const uberLightStyles = [
+        { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+        { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
+        { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+        {
+          featureType: "administrative.locality",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#424242" }]
+        },
+        {
+          featureType: "poi",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#757575" }]
+        },
+        {
+          featureType: "poi.park",
+          elementType: "geometry",
+          stylers: [{ color: "#e5f5e0" }]
+        },
+        {
+          featureType: "poi.park",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#4caf50" }]
+        },
+        {
+          featureType: "road",
+          elementType: "geometry",
+          stylers: [{ color: "#ffffff" }]
+        },
+        {
+          featureType: "road",
+          elementType: "geometry.stroke",
+          stylers: [{ color: "#e0e0e0" }]
+        },
+        {
+          featureType: "road",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#9e9e9e" }]
+        },
+        {
+          featureType: "road.highway",
+          elementType: "geometry",
+          stylers: [{ color: "#ffffff" }]
+        },
+        {
+          featureType: "road.highway",
+          elementType: "geometry.stroke",
+          stylers: [{ color: "#bdbdbd" }]
+        },
+        {
+          featureType: "road.highway",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#616161" }]
+        },
+        {
+          featureType: "transit",
+          elementType: "geometry",
+          stylers: [{ color: "#e0e0e0" }]
+        },
+        {
+          featureType: "transit.station",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#757575" }]
+        },
+        {
+          featureType: "water",
+          elementType: "geometry",
+          stylers: [{ color: "#c9e8fb" }]
+        },
+        {
+          featureType: "water",
+          elementType: "labels.text.fill",
+          stylers: [{ color: "#2196f3" }]
+        },
+        {
+          featureType: "water",
+          elementType: "labels.text.stroke",
+          stylers: [{ color: "#ffffff" }]
+        }
+      ];
+
       mapRef.current = new google.maps.Map(divRef.current, {
         center: { lat: -16.6869, lng: -49.2648 },
         zoom: 12,
         mapTypeControl: false,
         fullscreenControl: false,
         streetViewControl: false,
+        styles: uberLightStyles,
         mapId: '4a356a5009a25b81' // A custom map ID with no POIs
       });
     });

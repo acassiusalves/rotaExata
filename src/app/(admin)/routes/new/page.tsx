@@ -916,28 +916,28 @@ export default function NewRoutePage() {
         onConfirm={handleImportConfirm}
       />
 
-      <div className="grid h-[calc(100vh-140px)] w-full grid-cols-1 overflow-hidden lg:grid-cols-[480px_1fr]">
+      <div className="grid h-screen w-full grid-cols-1 overflow-hidden lg:grid-cols-[480px_1fr]">
         {/* Left Panel */}
-        <div className="relative z-10 flex h-full flex-col overflow-hidden border-r bg-background">
+        <div className="relative z-10 flex h-full flex-col overflow-hidden border-r border-border bg-background">
           {/* Header */}
-          <div className="flex-shrink-0 border-b px-6 py-4">
-            <h1 className="text-xl font-semibold">Nova Rota</h1>
+          <div className="flex-shrink-0 border-b border-border px-6 py-4">
+            <h1 className="text-xl font-semibold text-foreground">Nova Rota</h1>
           </div>
 
           {/* Scrollable Content Area */}
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
               <div className="p-6 space-y-6">
 
-                <div className="space-y-2">
+                <div className="space-y-2 animate-fade-in">
                     <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <MapPin className="h-5 w-5 text-muted-foreground" />
-                        <h3 className="font-semibold">Origem da Rota</h3>
+                        <MapPin className="h-5 w-5 text-primary" />
+                        <h3 className="font-semibold text-foreground">Origem da Rota</h3>
                     </div>
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="text-xs h-7"
+                        className="text-xs h-7 transition-all duration-300"
                         onClick={() => setIsOriginDialogOpen(true)}
                     >
                         <Wand2 className="mr-1 h-3 w-3" />
@@ -949,11 +949,11 @@ export default function NewRoutePage() {
                     </p>
                 </div>
 
-                <Separator />
+                <Separator className="bg-border" />
 
-                <div className="flex items-center gap-3">
-                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-                  <h3 className="font-semibold">Início da Rota</h3>
+                <div className="flex items-center gap-3 animate-fade-in">
+                  <CalendarIcon className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold text-foreground">Início da Rota</h3>
                   <div className="flex items-center text-sm text-muted-foreground">
                       <Popover
                       open={isDatePopoverOpen}
@@ -1085,9 +1085,9 @@ export default function NewRoutePage() {
 
 
             {/* Footer */}
-            <div className="flex-shrink-0 border-t bg-background p-3 space-y-2">
+            <div className="flex-shrink-0 border-t border-border bg-card p-3 space-y-2">
                 <div className="space-y-1.5">
-                    <Button variant="ghost" size="sm" className="w-full justify-start gap-2 h-8 text-sm" onClick={() => {
+                    <Button variant="ghost" size="sm" className="w-full justify-start gap-2 h-8 text-sm transition-all duration-300" onClick={() => {
                       setStopToEdit(null);
                       setManualService(initialManualServiceState);
                       setIsAddServiceDialogOpen(true);
@@ -1098,7 +1098,7 @@ export default function NewRoutePage() {
                     <Button
                         variant="outline"
                         size="sm"
-                        className="w-full justify-start gap-2 h-8 text-sm"
+                        className="w-full justify-start gap-2 h-8 text-sm transition-all duration-300"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isImporting}
                     >
@@ -1110,7 +1110,7 @@ export default function NewRoutePage() {
                         {isImporting ? 'Importando...' : 'Importar planilha CSV'}
                     </Button>
                 </div>
-                <Button size="sm" className="w-full h-9" onClick={handleNextStep}>
+                <Button size="sm" className="w-full h-9 transition-all duration-300 hover:shadow-button-primary" onClick={handleNextStep}>
                     Avançar para Organização
                     <ArrowRight className='ml-2 h-4 w-4' />
                 </Button>

@@ -399,7 +399,7 @@ export default function OrganizeRoutePage() {
   const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
 
   // State for additional routes from same period
-  const [additionalRoutes, setAdditionalRoutes] = React.useState<RouteInfo[]>([]);
+  const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; data: RouteInfo; driverId?: string; driverInfo?: any }>>([]);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
 
   // State for dynamic routes (C, D, E, etc.)
@@ -415,6 +415,14 @@ export default function OrganizeRoutePage() {
     A: PlaceValue[] | null;
     B: PlaceValue[] | null;
   }>({ A: null, B: null });
+
+  // State for transfer dialog
+  const [transferDialogOpen, setTransferDialogOpen] = React.useState(false);
+  const [transferData, setTransferData] = React.useState<{
+    stop: PlaceValue;
+    stopIndex: number;
+    sourceRouteId: string;
+  } | null>(null);
 
 
   // State for Add Service Dialog
@@ -664,7 +672,7 @@ export default function OrganizeRoutePage() {
         );
 
         const querySnapshot = await getDocs(q);
-        const routes: RouteInfo[] = [];
+        const routes: Array<{ id: string; data: RouteInfo; driverId?: string; driverInfo?: any }> = [];
         const visibility: Record<string, boolean> = {};
 
         // Array of distinct colors for routes
@@ -723,7 +731,12 @@ export default function OrganizeRoutePage() {
             visible: false, // All hidden by default
           };
 
-          routes.push(routeInfo);
+          routes.push({
+            id: doc.id,
+            data: routeInfo,
+            driverId: routeDoc.driverId,
+            driverInfo: routeDoc.driverInfo
+          });
           visibility[doc.id] = false; // Hidden by default
         });
 
@@ -2190,6 +2203,178 @@ export default function OrganizeRoutePage() {
     }
   };
 
+  // Handler to transfer stops between routes with dialog selection
+  const handleTransferStopToAnotherRoute = (stop: PlaceValue, stopIndex: number, sourceRouteId: string) => {
+    setTransferData({ stop, stopIndex, sourceRouteId });
+    setTransferDialogOpen(true);
+  };
+
+  const executeTransferStop = async (targetRouteId: string) => {
+    if (!transferData || !routeData) return;
+
+    const { stop, stopIndex, sourceRouteId } = transferData;
+
+    try {
+      // Find source route
+      const sourceRoute = additionalRoutes.find(r => r.id === sourceRouteId);
+      if (!sourceRoute) {
+        toast({
+          variant: 'destructive',
+          title: 'Erro!',
+          description: 'Rota de origem não encontrada.'
+        });
+        return;
+      }
+
+      // Find target route
+      const targetRoute = additionalRoutes.find(r => r.id === targetRouteId);
+      if (!targetRoute) {
+        toast({
+          variant: 'destructive',
+          title: 'Erro!',
+          description: 'Rota de destino não encontrada.'
+        });
+        return;
+      }
+
+      // Remove from source
+      const newSourceStops = sourceRoute.data.stops.filter((_, i) => i !== stopIndex);
+
+      // Add to target
+      const newTargetStops = [...targetRoute.data.stops, stop];
+
+      // Recalculate both routes
+      const [newSourceRouteInfo, newTargetRouteInfo] = await Promise.all([
+        newSourceStops.length > 0 ? computeRoute(routeData.origin, newSourceStops) : Promise.resolve(null),
+        computeRoute(routeData.origin, newTargetStops)
+      ]);
+
+      if (!newTargetRouteInfo) {
+        toast({
+          variant: 'destructive',
+          title: 'Erro!',
+          description: 'Não foi possível calcular a rota de destino.'
+        });
+        return;
+      }
+
+      // Update Firestore for both routes
+      const batch = [];
+
+      // Update source route
+      const sourceRouteRef = doc(db, 'routes', sourceRouteId);
+      if (newSourceStops.length === 0) {
+        batch.push(updateDoc(sourceRouteRef, {
+          stops: [],
+          encodedPolyline: '',
+          distanceMeters: 0,
+          duration: '0s',
+        }));
+      } else if (newSourceRouteInfo) {
+        batch.push(updateDoc(sourceRouteRef, {
+          stops: newSourceStops,
+          encodedPolyline: newSourceRouteInfo.encodedPolyline,
+          distanceMeters: newSourceRouteInfo.distanceMeters,
+          duration: newSourceRouteInfo.duration,
+        }));
+      }
+
+      // Update target route
+      const targetRouteRef = doc(db, 'routes', targetRouteId);
+      batch.push(updateDoc(targetRouteRef, {
+        stops: newTargetStops,
+        encodedPolyline: newTargetRouteInfo.encodedPolyline,
+        distanceMeters: newTargetRouteInfo.distanceMeters,
+        duration: newTargetRouteInfo.duration,
+      }));
+
+      await Promise.all(batch);
+
+      // Send notifications to both drivers
+      const notificationPromises = [];
+
+      if (sourceRoute.driverId && sourceRoute.driverInfo) {
+        const sourceNotifRef = collection(db, 'notifications');
+        notificationPromises.push(
+          addDoc(sourceNotifRef, {
+            userId: sourceRoute.driverId,
+            title: 'Parada removida da sua rota',
+            message: `A parada "${stop.customerName || stop.address}" foi transferida para outra rota.`,
+            type: 'route_update',
+            routeId: sourceRouteId,
+            createdAt: serverTimestamp(),
+            read: false,
+          })
+        );
+      }
+
+      if (targetRoute.driverId && targetRoute.driverInfo) {
+        const targetNotifRef = collection(db, 'notifications');
+        notificationPromises.push(
+          addDoc(targetNotifRef, {
+            userId: targetRoute.driverId,
+            title: 'Nova parada adicionada à sua rota',
+            message: `A parada "${stop.customerName || stop.address}" foi adicionada à sua rota.`,
+            type: 'route_update',
+            routeId: targetRouteId,
+            createdAt: serverTimestamp(),
+            read: false,
+          })
+        );
+      }
+
+      await Promise.all(notificationPromises);
+
+      // Update local state
+      setAdditionalRoutes(prev => prev.map(route => {
+        if (route.id === sourceRouteId) {
+          return {
+            ...route,
+            data: newSourceRouteInfo ? {
+              ...newSourceRouteInfo,
+              stops: newSourceStops,
+              color: route.data.color,
+              visible: route.data.visible
+            } : {
+              ...route.data,
+              stops: [],
+              encodedPolyline: '',
+              distanceMeters: 0,
+              duration: '0s'
+            }
+          };
+        } else if (route.id === targetRouteId) {
+          return {
+            ...route,
+            data: {
+              ...newTargetRouteInfo,
+              stops: newTargetStops,
+              color: route.data.color,
+              visible: route.data.visible
+            }
+          };
+        }
+        return route;
+      }));
+
+      toast({
+        title: 'Parada transferida!',
+        description: `A parada foi movida com sucesso. Motoristas foram notificados.`
+      });
+
+      setTransferDialogOpen(false);
+      setTransferData(null);
+
+    } catch (error) {
+      console.error('Erro ao transferir parada:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro!',
+        description: 'Não foi possível transferir a parada. Tente novamente.'
+      });
+    }
+  };
+
   const handleShowStopInfo = (stop: PlaceValue, index: number) => {
     setSelectedStopInfo(stop);
     setIsStopInfoDialogOpen(true);
@@ -2339,21 +2524,21 @@ export default function OrganizeRoutePage() {
     routeA,
     routeB,
     ...additionalRoutes
-      .map((route, idx) => ({
-        ...route,
-        visible: routeVisibility[`additional-${idx}`] === true
+      .map((route) => ({
+        ...route.data,
+        visible: routeVisibility[route.id] === true
       }))
       .filter(route => route.visible),
     ...dynamicRoutes.map(r => r.data)
   ].filter((r): r is RouteInfo => !!r);
 
-  const toggleAdditionalRoute = (routeIdx: number) => {
+  const toggleAdditionalRoute = (routeId: string) => {
     setRouteVisibility(prev => {
       const newVisibility = {
         ...prev,
-        [`additional-${routeIdx}`]: !prev[`additional-${routeIdx}`]
+        [routeId]: !prev[routeId]
       };
-      console.log('🔄 Toggle rota', routeIdx, '- Nova visibilidade:', newVisibility);
+      console.log('🔄 Toggle rota', routeId, '- Nova visibilidade:', newVisibility);
       return newVisibility;
     });
   };
@@ -2669,15 +2854,15 @@ export default function OrganizeRoutePage() {
                       </TableHeader>
                       <TableBody>
                         {additionalRoutes.map((route, idx) => (
-                          <TableRow key={`additional-${idx}`} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <TableRow key={route.id} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                             <TableCell className="py-4 px-4 align-middle">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => toggleAdditionalRoute(idx)}
+                                onClick={() => toggleAdditionalRoute(route.id)}
                               >
-                                {routeVisibility[`additional-${idx}`] ? (
+                                {routeVisibility[route.id] ? (
                                   <Eye className="h-4 w-4" />
                                 ) : (
                                   <EyeOff className="h-4 w-4" />
@@ -2690,20 +2875,21 @@ export default function OrganizeRoutePage() {
                                 <span>Rota {idx + 2}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{route.stops.length}</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.distanceMeters)} km</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(route.duration)}</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(route.distanceMeters)}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{route.data.stops.length}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.data.distanceMeters)} km</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(route.data.duration)}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(route.data.distanceMeters)}</TableCell>
                             <TableCell className="py-4 px-4">
                               <RouteTimeline
-                                routeKey={`additional-${idx}` as any}
-                                stops={route.stops}
-                                color={route.color}
+                                routeKey={route.id}
+                                stops={route.data.stops}
+                                color={route.data.color}
                                 dragDelay={DRAG_DELAY}
                                 onStopClick={(stop) => {
                                   const id = String(stop.id ?? stop.placeId ?? "");
                                   if (id) mapApiRef.current?.openStopInfo(id);
                                 }}
+                                onRemoveFromRoute={(stop, index) => handleTransferStopToAnotherRoute(stop, index, route.id)}
                               />
                             </TableCell>
                             <TableCell className="py-4 px-4 text-right">
@@ -3188,6 +3374,61 @@ export default function OrganizeRoutePage() {
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
             <Button onClick={handleSaveEditedService}>Salvar Alterações</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Stop Dialog */}
+      <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Transferir Parada para Outra Rota</DialogTitle>
+            <DialogDescription>
+              Escolha para qual rota você deseja transferir a parada "{transferData?.stop.customerName || transferData?.stop.address}".
+              Os motoristas de ambas as rotas serão notificados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Rotas Disponíveis</Label>
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {additionalRoutes
+                  .filter(route => route.id !== transferData?.sourceRouteId)
+                  .map((route, idx) => (
+                    <Button
+                      key={route.id}
+                      variant="outline"
+                      className="w-full justify-start text-left h-auto py-3"
+                      onClick={() => executeTransferStop(route.id)}
+                    >
+                      <div className="flex flex-col gap-1 w-full">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold">Rota {additionalRoutes.findIndex(r => r.id === route.id) + 2}</span>
+                          <Badge variant="secondary">{route.data.stops.length} paradas</Badge>
+                        </div>
+                        {route.driverInfo && (
+                          <span className="text-sm text-muted-foreground">
+                            Motorista: {route.driverInfo.name}
+                          </span>
+                        )}
+                        <span className="text-sm text-muted-foreground">
+                          {formatDistance(route.data.distanceMeters)} km • {formatDuration(route.data.duration)}
+                        </span>
+                      </div>
+                    </Button>
+                  ))}
+                {additionalRoutes.filter(route => route.id !== transferData?.sourceRouteId).length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Nenhuma outra rota disponível no período
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancelar</Button>
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>

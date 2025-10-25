@@ -100,20 +100,20 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
   return (
     <aside className={cn(
-      "hidden md:flex flex-col border-r bg-background transition-all duration-300",
+      "hidden md:flex flex-col border-r border-border transition-all duration-300 uber-sidebar uber-scrollbar",
       isOpen ? "w-64" : "w-14"
     )}>
       <div className={cn(
-        "flex h-16 items-center border-b px-6",
+        "flex h-16 items-center border-b border-border px-6 animate-fade-in",
         !isOpen && "justify-center px-2"
       )}>
-        <Link href="/" className="flex items-center gap-2 font-semibold whitespace-nowrap">
+        <Link href="/" className="flex items-center gap-2 font-semibold whitespace-nowrap transition-all duration-300 hover:scale-105">
           <BotMessageSquare className="h-6 w-6 text-primary" />
-          {isOpen && <span>RotaExata</span>}
+          {isOpen && <span className="text-foreground">RotaExata</span>}
         </Link>
       </div>
 
-      <div className="flex flex-1 flex-col overflow-y-auto p-2">
+      <div className="flex flex-1 flex-col overflow-y-auto p-2 uber-scrollbar">
         <nav className="flex-1 space-y-1">
           {navItems.map((item) => (
             <TooltipProvider key={item.href} delayDuration={0}>
@@ -122,15 +122,15 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                   <Link
                     href={item.href}
                     className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                      'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300',
                       isActive(item.href)
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-muted',
+                        ? 'bg-primary text-primary-foreground shadow-button-primary'
+                        : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
                       !isOpen && "justify-center"
                     )}
                   >
                     <item.icon className="h-5 w-5" />
-                    {isOpen && item.label}
+                    {isOpen && <span className="animate-fade-in">{item.label}</span>}
                   </Link>
                 </TooltipTrigger>
                 {!isOpen && (
@@ -149,19 +149,19 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                       <Button
                         variant="ghost"
                         className={cn(
-                          'w-full justify-start gap-3 px-3 py-2 text-sm font-medium',
+                          'w-full justify-start gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300',
                           pathname.startsWith('/routes')
-                            ? 'text-primary'
-                            : 'text-muted-foreground',
+                            ? 'text-primary bg-primary/10'
+                            : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
                           !isOpen && 'justify-center'
                         )}
                       >
                         <Route className="h-5 w-5" />
                         {isOpen && (
                           <>
-                            <span className="flex-1 text-left">Rotas</span>
+                            <span className="flex-1 text-left animate-fade-in">Rotas</span>
                             <ChevronDown
-                              className={cn('h-4 w-4 transition-transform', routesOpen && 'rotate-180')}
+                              className={cn('h-4 w-4 transition-transform duration-300', routesOpen && 'rotate-180')}
                             />
                           </>
                         )}
@@ -177,20 +177,20 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
             </TooltipProvider>
             
             {isOpen && (
-               <CollapsibleContent className="ml-4 space-y-1 border-l pl-4">
+               <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
                   {routeItems.map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-300',
                         isActive(item.href)
-                          ? 'bg-muted text-foreground'
-                          : 'text-muted-foreground hover:bg-muted/50'
+                          ? 'bg-white/10 text-foreground'
+                          : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
                       )}
                     >
                       <item.icon className="h-4 w-4" />
-                      {item.label}
+                      <span className="animate-fade-in">{item.label}</span>
                     </Link>
                   ))}
                </CollapsibleContent>
@@ -210,15 +210,15 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                     <Link
                       href={item.href}
                       className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300',
                         isActive(item.href)
-                          ? 'bg-muted'
-                          : 'text-muted-foreground hover:bg-muted',
+                          ? 'bg-white/10 text-foreground'
+                          : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
                         !isOpen && "justify-center"
                       )}
                     >
                       <item.icon className="h-5 w-5" />
-                      {isOpen && item.label}
+                      {isOpen && <span className="animate-fade-in">{item.label}</span>}
                     </Link>
                   </TooltipTrigger>
                   {!isOpen && (
@@ -236,12 +236,12 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                       <button
                           onClick={onToggleSidebar}
                           className={cn(
-                              'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted',
+                              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-white/5 hover:text-foreground',
                               !isOpen && "justify-center"
                           )}
                       >
                           {isOpen ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                          {isOpen && (isOpen ? 'Minimizar Menu' : 'Expandir Menu')}
+                          {isOpen && <span className="animate-fade-in">{isOpen ? 'Minimizar Menu' : 'Expandir Menu'}</span>}
                       </button>
                   </TooltipTrigger>
                   {!isOpen && (
@@ -259,15 +259,15 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
                       <div className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-muted cursor-pointer',
+                        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-white/5 hover:text-foreground cursor-pointer',
                         !isOpen && "justify-center"
                       )}>
-                        <Avatar className="h-8 w-8">
+                        <Avatar className="h-8 w-8 ring-2 ring-primary/20 transition-all duration-300 hover:ring-primary/50">
                           <AvatarImage src={user.photoURL ?? undefined} />
-                          <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
+                          <AvatarFallback className="bg-primary/20 text-primary">{getInitials(user.displayName || user.email)}</AvatarFallback>
                         </Avatar>
                         {isOpen && (
-                          <div className="flex-1 truncate">
+                          <div className="flex-1 truncate animate-fade-in">
                             <p className="font-semibold text-foreground truncate">{user.displayName || user.email}</p>
                           </div>
                         )}

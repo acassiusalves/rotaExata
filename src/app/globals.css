@@ -4,54 +4,57 @@
 
 @layer base {
   :root {
-    --background: 220 17% 95%; /* #F0F2F5 */
-    --foreground: 222 84% 5%;
-    --card: 0 0% 100%;
+    /* Uber Style - Light Mode */
+    --background: 0 0% 100%; /* #FFFFFF - Fundo branco */
+    --foreground: 222 84% 5%; /* #09090B - Texto escuro */
+    --card: 0 0% 100%; /* #FFFFFF */
     --card-foreground: 222 84% 5%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 84% 5%;
-    --primary: 224 100% 58%; /* #2962FF */
+    --primary: 254 91% 69%; /* #7B61FF - Uber Purple */
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 91%;
+    --secondary: 220 14% 96%; /* #F4F4F5 - Cinza bem claro */
     --secondary-foreground: 222 84% 5%;
-    --muted: 220 14% 91%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 174 63% 37%; /* #26A69A */
+    --muted: 220 14% 96%; /* #F4F4F5 */
+    --muted-foreground: 220 9% 46%; /* #71717A - Cinza médio */
+    --accent: 145 80% 42%; /* #00D26A - Success Green */
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 4 90% 58%; /* #FF3B30 - Error Red */
     --destructive-foreground: 0 0% 98%;
-    --border: 220 13% 88%;
-    --input: 220 13% 88%;
-    --ring: 224 100% 58%;
-    --chart-1: 224 100% 58%;
-    --chart-2: 174 63% 37%;
+    --border: 220 13% 91%; /* #E4E4E7 - Borda clara */
+    --input: 220 13% 91%;
+    --ring: 254 91% 69%;
+    --chart-1: 254 91% 69%;
+    --chart-2: 145 80% 42%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    --radius: 0.5rem;
+    --radius: 1rem;
   }
+
   .dark {
-    --background: 222 84% 5%;
-    --foreground: 210 40% 98%;
-    --card: 222 84% 5%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 84% 5%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 224 100% 58%;
+    /* Uber Style - Dark Mode */
+    --background: 240 11% 4%; /* #0B0B0C */
+    --foreground: 0 0% 100%; /* #FFFFFF */
+    --card: 240 6% 11%; /* #1C1C1E */
+    --card-foreground: 0 0% 100%;
+    --popover: 240 6% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 254 91% 69%; /* #7B61FF - Uber Purple */
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 174 63% 37%;
+    --secondary: 240 5% 17%; /* #2C2C2E */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 5% 17%;
+    --muted-foreground: 240 5% 67%; /* #A1A1AA */
+    --accent: 145 80% 42%; /* #00D26A - Success Green */
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 224 100% 58%;
-    --chart-1: 224 100% 58%;
-    --chart-2: 174 63% 37%;
+    --destructive: 4 90% 58%; /* #FF3B30 - Error Red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 5% 17%; /* #2C2C2E */
+    --input: 240 5% 17%;
+    --ring: 254 91% 69%;
+    --chart-1: 254 91% 69%;
+    --chart-2: 145 80% 42%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
@@ -67,9 +70,178 @@
     min-height: 0;
   }
   body {
-    @apply bg-background text-foreground font-body;
+    @apply bg-background text-foreground;
+    font-family: "Inter", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold text-foreground;
+  }
+
+  p, span, label {
+    @apply text-muted-foreground;
+  }
+}
+
+/* Uber Style Components */
+@layer components {
+  /* Cards with Uber style */
+  .uber-card {
+    @apply bg-card rounded-xl shadow-lg border border-border p-6;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+  }
+
+  .uber-card:hover {
+    box-shadow: 0 4px 12px rgba(123, 97, 255, 0.15);
+  }
+
+  /* Buttons with Uber style */
+  .uber-button-primary {
+    @apply bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-4 py-2 font-medium;
+    transition: all 0.3s ease;
+  }
+
+  .uber-button-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(123, 97, 255, 0.3);
+  }
+
+  .uber-button-secondary {
+    @apply bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-xl px-4 py-2 font-medium;
+    transition: all 0.3s ease;
+  }
+
+  /* Sidebar with glassmorphism */
+  .uber-sidebar {
+    @apply border-r border-border bg-card;
+  }
+
+  /* Table rows with smooth hover */
+  .uber-table-row {
+    @apply transition-all duration-300;
+  }
+
+  .uber-table-row:hover {
+    @apply bg-muted/50;
+  }
+
+  .uber-table-row:nth-child(even) {
+    @apply bg-muted/20;
+  }
+
+  /* Input fields */
+  .uber-input {
+    @apply bg-card border border-border rounded-xl px-4 py-2.5 text-foreground placeholder:text-muted-foreground;
+    transition: all 0.3s ease;
+  }
+
+  .uber-input:focus {
+    @apply ring-2 ring-primary border-primary;
+    box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.1);
+  }
+
+  /* Toast/Notification style */
+  .uber-toast {
+    @apply rounded-xl border border-border p-4 bg-card;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  /* Shimmer effect for loaders */
+  .uber-shimmer {
+    @apply relative overflow-hidden bg-muted/50 rounded-xl;
+  }
+
+  .uber-shimmer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0) 0,
+      rgba(0, 0, 0, 0.03) 20%,
+      rgba(0, 0, 0, 0.05) 60%,
+      rgba(0, 0, 0, 0)
+    );
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Scrollbar styling */
+  .uber-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .uber-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .uber-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+    transition: background-color 0.3s ease;
+  }
+
+  .uber-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+/* Animations */
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 }
 
