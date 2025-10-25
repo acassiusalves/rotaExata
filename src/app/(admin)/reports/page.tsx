@@ -127,29 +127,42 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-// Função para determinar o período (Matutino ou Vespertino)
+// Função para determinar o período (Matutino, Vespertino ou Noturno)
+// Usa a mesma lógica da página de Rotas Ativas - baseado no horário planejado da rota
 const getPeriodInfo = (date: Date | Timestamp) => {
   const hour = date instanceof Date ? date.getHours() : date.toDate().getHours();
 
-  // Matutino: 00:00 - 11:59 (Azul como Rota 1)
-  // Vespertino: 12:00 - 23:59 (Laranja como Rota 2)
-  if (hour < 12) {
+  // Matutino: 8h - 11h59 (Azul)
+  if (hour >= 8 && hour < 12) {
     return {
       period: 'Matutino',
       icon: Sunrise,
-      color: '#2196F3', // Azul
+      color: '#3B82F6', // Azul (bg-blue-500)
       bgColor: 'bg-blue-100',
       textColor: 'text-blue-800',
       borderColor: 'border-blue-300',
     };
-  } else {
+  }
+  // Vespertino: 12h - 18h59 (Laranja)
+  else if (hour >= 12 && hour < 19) {
     return {
       period: 'Vespertino',
       icon: Sunset,
-      color: '#FF9800', // Laranja (mesma cor da Rota 2)
+      color: '#F97316', // Laranja (bg-orange-500)
       bgColor: 'bg-orange-100',
       textColor: 'text-orange-800',
       borderColor: 'border-orange-300',
+    };
+  }
+  // Noturno: 19h+ ou antes das 8h (Roxo)
+  else {
+    return {
+      period: 'Noturno',
+      icon: Sunset,
+      color: '#A855F7', // Roxo (bg-purple-500)
+      bgColor: 'bg-purple-100',
+      textColor: 'text-purple-800',
+      borderColor: 'border-purple-300',
     };
   }
 };
@@ -328,11 +341,11 @@ export default function ReportsPage() {
       });
     }
 
-    // Filtro por período do dia (Matutino/Vespertino)
+    // Filtro por período do dia (Matutino/Vespertino/Noturno)
+    // Baseado no horário planejado da rota, não no horário de conclusão
     if (selectedPeriod !== 'all') {
       filtered = filtered.filter(d => {
-        if (!d.completedAt) return false;
-        const periodInfo = getPeriodInfo(d.completedAt);
+        const periodInfo = getPeriodInfo(d.plannedDate);
         return periodInfo.period.toLowerCase() === selectedPeriod.toLowerCase();
       });
     }
@@ -564,8 +577,8 @@ export default function ReportsPage() {
         ? format(d.completedAt, 'HH:mm', { locale: ptBR })
         : '';
 
-      // Determinar período (Matutino/Vespertino)
-      const periodo = d.completedAt ? getPeriodInfo(d.completedAt).period : '';
+      // Determinar período (Matutino/Vespertino/Noturno) baseado no horário planejado
+      const periodo = getPeriodInfo(d.plannedDate).period;
 
       return [
         format(d.plannedDate, 'dd/MM/yyyy', { locale: ptBR }),
@@ -785,8 +798,9 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  <SelectItem value="matutino">Matutino</SelectItem>
-                  <SelectItem value="vespertino">Vespertino</SelectItem>
+                  <SelectItem value="matutino">Matutino (8h-11h)</SelectItem>
+                  <SelectItem value="vespertino">Vespertino (12h-18h)</SelectItem>
+                  <SelectItem value="noturno">Noturno (19h+)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -919,55 +933,37 @@ export default function ReportsPage() {
                       <TableCell>{delivery.orderNumber || '-'}</TableCell>
                       <TableCell>{getStatusBadge(delivery)}</TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {delivery.arrivedAt && delivery.completedAt ? (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors cursor-help ${getPeriodInfo(delivery.completedAt).bgColor} ${getPeriodInfo(delivery.completedAt).textColor} ${getPeriodInfo(delivery.completedAt).borderColor}`}>
-                                  {React.createElement(getPeriodInfo(delivery.completedAt).icon, { className: 'h-3 w-3 mr-1' })}
-                                  {getPeriodInfo(delivery.completedAt).period}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors cursor-help ${getPeriodInfo(delivery.plannedDate).bgColor} ${getPeriodInfo(delivery.plannedDate).textColor} ${getPeriodInfo(delivery.plannedDate).borderColor}`}>
+                                {React.createElement(getPeriodInfo(delivery.plannedDate).icon, { className: 'h-3 w-3 mr-1' })}
+                                {getPeriodInfo(delivery.plannedDate).period}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="text-sm">
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  <span className="font-medium">Período da rota:</span>
                                 </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <div className="text-sm">
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="h-3 w-3" />
-                                    <span className="font-medium">Horário de execução:</span>
-                                  </div>
-                                  <div className="mt-1 text-muted-foreground">
-                                    {format(delivery.arrivedAt, 'HH:mm', { locale: ptBR })}
-                                    {' → '}
-                                    {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
-                                  </div>
+                                <div className="mt-1 text-muted-foreground">
+                                  Planejado para {format(delivery.plannedDate, 'HH:mm', { locale: ptBR })}
                                 </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : delivery.completedAt ? (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors cursor-help ${getPeriodInfo(delivery.completedAt).bgColor} ${getPeriodInfo(delivery.completedAt).textColor} ${getPeriodInfo(delivery.completedAt).borderColor}`}>
-                                  {React.createElement(getPeriodInfo(delivery.completedAt).icon, { className: 'h-3 w-3 mr-1' })}
-                                  {getPeriodInfo(delivery.completedAt).period}
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <div className="text-sm">
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="h-3 w-3" />
-                                    <span className="font-medium">Horário de conclusão:</span>
+                                {delivery.arrivedAt && delivery.completedAt && (
+                                  <div className="mt-2 pt-2 border-t">
+                                    <div className="font-medium">Execução real:</div>
+                                    <div className="text-muted-foreground">
+                                      {format(delivery.arrivedAt, 'HH:mm', { locale: ptBR })}
+                                      {' → '}
+                                      {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
+                                    </div>
                                   </div>
-                                  <div className="mt-1 text-muted-foreground">
-                                    {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
-                                  </div>
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">-</span>
-                        )}
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </TableCell>
                       <TableCell>
                         {delivery.payments
