@@ -123,8 +123,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                     className={cn(
                       'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300',
                       isActive(item.href)
-                        ? 'bg-primary text-primary-foreground shadow-button-primary'
-                        : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                        ? 'sidebar-link-active shadow-button-primary'
+                        : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                       !isOpen && "justify-center"
                     )}
                   >
@@ -150,8 +150,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                         className={cn(
                           'w-full justify-start gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300',
                           pathname.startsWith('/routes')
-                            ? 'text-primary bg-primary/10'
-                            : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                            ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                           !isOpen && 'justify-center'
                         )}
                       >
@@ -184,8 +184,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                       className={cn(
                         'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-300',
                         isActive(item.href)
-                          ? 'bg-white/10 text-foreground'
-                          : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+                          ? 'sidebar-link-active shadow-button-primary'
+                          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                       )}
                     >
                       <item.icon className="h-4 w-4" />
@@ -211,8 +211,8 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                       className={cn(
                         'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300',
                         isActive(item.href)
-                          ? 'bg-white/10 text-foreground'
-                          : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                          ? 'sidebar-link-active shadow-button-primary'
+                          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                         !isOpen && "justify-center"
                       )}
                     >
@@ -235,7 +235,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                       <button
                           onClick={onToggleSidebar}
                           className={cn(
-                              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                               !isOpen && "justify-center"
                           )}
                       >
@@ -258,7 +258,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
                       <div className={cn(
-                        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-white/5 hover:text-foreground cursor-pointer',
+                        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer',
                         !isOpen && "justify-center"
                       )}>
                         <Avatar className="h-8 w-8 ring-2 ring-primary/20 transition-all duration-300 hover:ring-primary/50">
