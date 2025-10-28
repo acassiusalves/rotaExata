@@ -710,6 +710,17 @@ export default function RouteDetailsPage() {
                                         Confirmar
                                     </Button>
                                 )}
+                                {(route.status === 'in_progress' || route.status === 'dispatched') &&
+                                 stop.deliveryStatus && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="ml-auto"
+                                        onClick={() => handleOpenConfirmDialog(index)}
+                                    >
+                                        Reabrir
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -740,6 +751,19 @@ export default function RouteDetailsPage() {
           }
           currentLocation={
             location ? { lat: location.coords.latitude, lng: location.coords.longitude } : null
+          }
+          existingData={
+            route.stops[selectedStopIndex]?.deliveryStatus
+              ? {
+                  photoUrl: route.stops[selectedStopIndex].photoUrl,
+                  notes: route.stops[selectedStopIndex].notes,
+                  deliveryStatus: route.stops[selectedStopIndex].deliveryStatus,
+                  failureReason: route.stops[selectedStopIndex].failureReason,
+                  wentToLocation: route.stops[selectedStopIndex].wentToLocation,
+                  attemptPhotoUrl: route.stops[selectedStopIndex].attemptPhotoUrl,
+                  payments: route.stops[selectedStopIndex].payments,
+                }
+              : undefined
           }
         />
       )}

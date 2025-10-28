@@ -35,16 +35,23 @@ export default function LoginPage() {
       // state management solution could handle this. For now, we rely on the
       // redirect logic within the layouts.
     } catch (error: any) {
-      console.error("Login Error:", error, "Code:", error.code);
+      let title = 'Erro no Login';
       let description = 'Ocorreu um erro desconhecido. Tente novamente.';
+
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        description = 'Email ou senha inválidos. Verifique suas credenciais.';
+        title = 'Credenciais Incorretas';
+        description = 'Email ou senha incorretos. Por favor, revise suas informações e tente novamente.';
       } else if (error.code === 'auth/invalid-email') {
-        description = 'O formato do email é inválido.';
+        title = 'Email Inválido';
+        description = 'O formato do email é inválido. Por favor, verifique e tente novamente.';
+      } else if (error.code === 'auth/too-many-requests') {
+        title = 'Muitas Tentativas';
+        description = 'Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.';
       }
+
       toast({
         variant: 'destructive',
-        title: 'Falha no Login',
+        title,
         description,
       });
     } finally {

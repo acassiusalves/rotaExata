@@ -54,6 +54,16 @@ interface DeliveryConfirmationDialogProps {
   complement?: string;
   stopLocation?: { lat: number; lng: number };
   currentLocation?: { lat: number; lng: number } | null;
+  // Dados existentes para edição (quando reabrir)
+  existingData?: {
+    photoUrl?: string;
+    notes?: string;
+    deliveryStatus?: 'completed' | 'failed';
+    failureReason?: string;
+    wentToLocation?: boolean;
+    attemptPhotoUrl?: string;
+    payments?: Payment[];
+  };
 }
 
 export function DeliveryConfirmationDialog({
@@ -65,6 +75,7 @@ export function DeliveryConfirmationDialog({
   complement,
   stopLocation,
   currentLocation,
+  existingData,
 }: DeliveryConfirmationDialogProps) {
   const [photo, setPhoto] = React.useState<string | null>(null);
   const [notes, setNotes] = React.useState('');
@@ -107,6 +118,48 @@ export function DeliveryConfirmationDialog({
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c; // Distância em km
   };
+
+  // Load existing data when reopening a completed delivery
+  React.useEffect(() => {
+    if (isOpen && existingData) {
+      console.log('📝 Carregando dados existentes para edição:', existingData);
+
+      // Carregar foto existente (URL do Firebase Storage)
+      if (existingData.photoUrl) {
+        setPhoto(existingData.photoUrl);
+      }
+
+      // Carregar notas
+      if (existingData.notes) {
+        setNotes(existingData.notes);
+      }
+
+      // Carregar status
+      if (existingData.deliveryStatus) {
+        setDeliveryStatus(existingData.deliveryStatus);
+      }
+
+      // Carregar motivo da falha
+      if (existingData.failureReason) {
+        setFailureReason(existingData.failureReason);
+      }
+
+      // Carregar se foi até o local
+      if (existingData.wentToLocation !== undefined) {
+        setWentToLocation(existingData.wentToLocation);
+      }
+
+      // Carregar foto de tentativa
+      if (existingData.attemptPhotoUrl) {
+        setAttemptPhoto(existingData.attemptPhotoUrl);
+      }
+
+      // Carregar pagamentos
+      if (existingData.payments && existingData.payments.length > 0) {
+        setPayments(existingData.payments);
+      }
+    }
+  }, [isOpen, existingData]);
 
   // Load validation settings
   React.useEffect(() => {
@@ -419,7 +472,7 @@ export function DeliveryConfirmationDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Confirmar Entrega</DialogTitle>
+          <DialogTitle>{existingData ? 'Editar Informações da Entrega' : 'Confirmar Entrega'}</DialogTitle>
           <DialogDescription>
             {customerName && <span className="font-semibold">{customerName}</span>}
             {address && <span className="block text-xs mt-1">{address}</span>}
