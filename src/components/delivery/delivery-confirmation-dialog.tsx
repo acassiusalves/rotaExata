@@ -357,8 +357,13 @@ export function DeliveryConfirmationDialog({
 
     if (deliveryStatus === 'completed') {
       for (const payment of payments) {
-        if (!payment.method || payment.value <= 0) {
-          setError('Preencha todas as formas de pagamento e valores (maior que zero).');
+        if (!payment.method) {
+          setError('Selecione a forma de pagamento.');
+          return;
+        }
+        // Para "Pago na Loja", o valor é opcional
+        if (payment.method !== 'pago_na_loja' && payment.value <= 0) {
+          setError('Preencha o valor do pagamento (maior que zero).');
           return;
         }
       }
@@ -637,6 +642,7 @@ export function DeliveryConfirmationDialog({
                               <SelectItem value="cartao_credito">Cartão de Crédito</SelectItem>
                               <SelectItem value="cartao_debito">Cartão de Débito</SelectItem>
                               <SelectItem value="boleto">Boleto</SelectItem>
+                              <SelectItem value="pago_na_loja">Pago na Loja</SelectItem>
                               <SelectItem value="outro">Outro</SelectItem>
                             </SelectContent>
                           </Select>
@@ -644,12 +650,15 @@ export function DeliveryConfirmationDialog({
                         <div className="space-y-1">
                            <Input
                              type="number"
-                             placeholder="Valor R$"
+                             placeholder={payment.method === 'pago_na_loja' ? 'Valor R$ (opcional)' : 'Valor R$'}
                              value={payment.value || ''}
                              onChange={(e) => handlePaymentChange(index, 'value', parseFloat(e.target.value))}
                              min="0.01"
                              step="0.01"
                            />
+                           {payment.method === 'pago_na_loja' && (
+                             <p className="text-xs text-muted-foreground">O valor é opcional para pagamentos feitos na loja</p>
+                           )}
                         </div>
                     </div>
                     {payment.method === 'cartao_credito' && (

@@ -67,11 +67,17 @@ function SortableStop({
   const wasMoved = (stop as any)._wasMoved === true;
   const movedFromRoute = (stop as any)._movedFromRoute;
   const originalRouteColor = (stop as any)._originalRouteColor;
+  const isRecentlyInserted = (stop as any)._recentlyInserted === true;
 
   // Apply different styles based on status
   let buttonBgColor, buttonTextColor, buttonBorderColor;
 
-  if (wasMoved) {
+  if (isRecentlyInserted) {
+    // Black highlight for recently inserted stops from unassigned
+    buttonBgColor = 'bg-slate-900 dark:bg-slate-800';
+    buttonTextColor = 'text-white';
+    buttonBorderColor = 'border-slate-700 border-2';
+  } else if (wasMoved) {
     // Yellow/amber highlight for moved stops
     buttonBgColor = 'bg-amber-100';
     buttonTextColor = 'text-amber-900';
@@ -113,9 +119,9 @@ function SortableStop({
               e.stopPropagation();
               setContextMenuOpen(true);
             }}
-            className={`relative flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs ${wasMoved ? 'font-extrabold' : 'font-semibold'} active:cursor-grabbing`}
+            className={`relative flex h-6 w-6 cursor-grab items-center justify-center rounded-md border ${buttonBgColor} ${buttonTextColor} ${buttonBorderColor} text-xs ${wasMoved || isRecentlyInserted ? 'font-extrabold' : 'font-semibold'} active:cursor-grabbing`}
             style={{ touchAction: "none" }}
-            title={`Parada ${(originalIndex ?? index) + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}${wasMoved ? " (Posição alterada)" : ""}${movedFromRoute ? ` (Veio da rota ${movedFromRoute})` : ""}`}
+            title={`Parada ${(originalIndex ?? index) + 1}: ${stop.customerName ?? ""}${isManual ? " (Adicionado manualmente)" : ""}${isRecentlyInserted ? " (Recém-inserido)" : ""}${wasMoved ? " (Posição alterada)" : ""}${movedFromRoute ? ` (Veio da rota ${movedFromRoute})` : ""}`}
           >
             {(originalIndex ?? index) + 1}
             {/* Show original route color indicator if moved from another route */}

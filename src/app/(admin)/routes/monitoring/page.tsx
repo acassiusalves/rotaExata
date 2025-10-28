@@ -31,7 +31,10 @@ import {
   onSnapshot,
   query,
   orderBy,
+  where,
   Timestamp,
+  doc,
+  updateDoc,
 } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
@@ -54,13 +57,43 @@ import {
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
+  status: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   driverInfo: {
     name: string;
     vehicle: { type: string, plate: string };
   } | null;
   plannedDate: Timestamp;
   origin: PlaceValue;
+};
+
+// Função para traduzir status da rota
+const getStatusLabel = (status: RouteDocument['status']): string => {
+  const statusMap: Record<RouteDocument['status'], string> = {
+    'dispatched': 'Despachada',
+    'in_progress': 'Em Andamento',
+    'completed': 'Concluída',
+    'completed_auto': 'Concluída A'
+  };
+  return statusMap[status] || status;
+};
+
+// Componente de Badge de Status
+const StatusBadge: React.FC<{ status: RouteDocument['status'] }> = ({ status }) => {
+  if (status === 'completed_auto') {
+    return (
+      <Badge variant="secondary" className="flex items-center gap-1.5">
+        <img
+          src="/icons/automatic-svgrepo-com.svg"
+          alt="Automático"
+          className="w-4 h-4"
+          title="Concluída Automaticamente"
+        />
+        <span>Concluída</span>
+      </Badge>
+    );
+  }
+
+  return <Badge variant="secondary">{getStatusLabel(status)}</Badge>;
 };
 
 const DateBadge: React.FC<{ date: Date }> = ({ date }) => (
@@ -126,7 +159,12 @@ export default function MonitoringPage() {
   const [isStopInfoOpen, setIsStopInfoOpen] = React.useState(false);
 
   React.useEffect(() => {
-    const q = query(collection(db, 'routes'), orderBy('plannedDate', 'desc'));
+    // Busca apenas rotas ativas (despachadas ou em andamento)
+    const q = query(
+      collection(db, 'routes'),
+      where('status', 'in', ['dispatched', 'in_progress']),
+      orderBy('plannedDate', 'desc')
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -149,6 +187,48 @@ export default function MonitoringPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Verifica e auto-completa rotas após 48h
+  React.useEffect(() => {
+    const checkAndAutoCompleteRoutes = async () => {
+      const now = new Date();
+      const routesToAutoComplete = routes.filter((route) => {
+        // Verifica se a rota não está concluída
+        if (route.status === 'completed' || route.status === 'completed_auto') {
+          return false;
+        }
+
+        // Calcula a diferença em horas entre agora e a data planejada
+        const plannedDate = route.plannedDate.toDate();
+        const hoursDiff = (now.getTime() - plannedDate.getTime()) / (1000 * 60 * 60);
+
+        // Se passou mais de 48h, marca para auto-conclusão
+        return hoursDiff > 48;
+      });
+
+      // Atualiza as rotas que passaram de 48h
+      for (const route of routesToAutoComplete) {
+        try {
+          const routeRef = doc(db, 'routes', route.id);
+          await updateDoc(routeRef, {
+            status: 'completed_auto',
+            autoCompletedAt: Timestamp.now(),
+          });
+          console.log(`Rota ${route.name} auto-concluída após 48h`);
+        } catch (error) {
+          console.error(`Erro ao auto-concluir rota ${route.name}:`, error);
+        }
+      }
+    };
+
+    // Verifica a cada 5 minutos
+    const interval = setInterval(checkAndAutoCompleteRoutes, 5 * 60 * 1000);
+
+    // Verifica imediatamente ao carregar
+    checkAndAutoCompleteRoutes();
+
+    return () => clearInterval(interval);
+  }, [routes]);
 
   const getInitials = (name: string) => {
     if (!name) return 'N/A';
@@ -244,7 +324,7 @@ export default function MonitoringPage() {
                     </div>
                   </div>
                   <div className="col-span-1">
-                    <Badge variant="secondary">{route.status}</Badge>
+                    <StatusBadge status={route.status} />
                   </div>
                   <div className="col-span-1 text-center font-medium">{stats.occurrences}/{stats.total}</div>
                   <div className="col-span-1 text-center font-medium">{stats.completed + stats.failed}/{stats.total}</div>

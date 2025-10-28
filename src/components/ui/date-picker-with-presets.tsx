@@ -66,7 +66,10 @@ export function DatePickerWithPresets({
   className,
 }: DatePickerWithPresetsProps) {
   const [recentRanges, setRecentRanges] = React.useState<Array<{ start: Date; end: Date; label: string }>>([]);
-  const [selectedDate, setSelectedDate] = React.useState<Date | undefined>(undefined);
+  const [selectedRange, setSelectedRange] = React.useState<{ from: Date | undefined; to: Date | undefined }>({
+    from: startDate,
+    to: endDate
+  });
 
   // Carregar ranges recentes do localStorage
   React.useEffect(() => {
@@ -84,6 +87,14 @@ export function DatePickerWithPresets({
       }
     }
   }, []);
+
+  // Atualizar o selectedRange quando startDate ou endDate mudarem
+  React.useEffect(() => {
+    setSelectedRange({
+      from: startDate,
+      to: endDate
+    });
+  }, [startDate, endDate]);
 
   // Salvar range selecionado como recente
   const handlePresetSelect = (preset: PresetOption) => {
@@ -104,13 +115,23 @@ export function DatePickerWithPresets({
     onDateRangeChange?.(range.start, range.end);
   };
 
-  const handleDateSelect = (date: Date | undefined) => {
-    if (date) {
-      setSelectedDate(date);
-      const start = startOfDay(date);
-      const end = new Date(date);
-      end.setHours(23, 59, 59, 999);
-      onDateRangeChange?.(start, end);
+  const handleDateSelect = (range: { from: Date | undefined; to: Date | undefined } | undefined) => {
+    if (range?.from) {
+      setSelectedRange(range);
+
+      // Se apenas uma data foi selecionada (from sem to), usar o dia inteiro
+      if (!range.to) {
+        const start = startOfDay(range.from);
+        const end = new Date(range.from);
+        end.setHours(23, 59, 59, 999);
+        onDateRangeChange?.(start, end);
+      } else {
+        // Se um período foi selecionado, usar ambas as datas
+        const start = startOfDay(range.from);
+        const end = new Date(range.to);
+        end.setHours(23, 59, 59, 999);
+        onDateRangeChange?.(start, end);
+      }
     }
   };
 
@@ -185,8 +206,8 @@ export function DatePickerWithPresets({
           <div className="p-2">
             <div className="hidden lg:block">
               <Calendar
-                mode="single"
-                selected={selectedDate}
+                mode="range"
+                selected={selectedRange}
                 onSelect={handleDateSelect}
                 locale={ptBR}
                 numberOfMonths={2}
@@ -195,8 +216,8 @@ export function DatePickerWithPresets({
             </div>
             <div className="block lg:hidden">
               <Calendar
-                mode="single"
-                selected={selectedDate}
+                mode="range"
+                selected={selectedRange}
                 onSelect={handleDateSelect}
                 locale={ptBR}
                 numberOfMonths={1}

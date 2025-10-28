@@ -8,6 +8,42 @@ import {getMessaging} from "firebase-admin/messaging";
 
 initializeApp();
 
+/**
+ * Gera o próximo código sequencial único para uma rota
+ * Formato: RT-0001, RT-0002, RT-0003, etc.
+ */
+async function generateRouteCode(): Promise<string> {
+  const db = getFirestore();
+  const counterRef = db.collection("counters").doc("routeCode");
+
+  try {
+    const newCount = await db.runTransaction(async (transaction) => {
+      const counterDoc = await transaction.get(counterRef);
+
+      let currentCount = 0;
+      if (counterDoc.exists) {
+        const data = counterDoc.data();
+        currentCount = data?.count || 0;
+      }
+
+      const nextCount = currentCount + 1;
+
+      // Atualizar o contador
+      transaction.set(counterRef, { count: nextCount }, { merge: true });
+
+      return nextCount;
+    });
+
+    // Formatar o código com padding de zeros (ex: RT-0001)
+    const code = `RT-${String(newCount).padStart(4, "0")}`;
+
+    return code;
+  } catch (error) {
+    console.error("Erro ao gerar código da rota:", error);
+    throw new HttpsError("internal", "Não foi possível gerar o código da rota");
+  }
+}
+
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
 // COMMENTED OUT: Requires Realtime Database to be configured
@@ -237,9 +273,13 @@ export const duplicateRoute = onCall(
         throw new HttpsError("internal", "Dados da rota não encontrados");
       }
 
-      // Criar uma cópia da rota com um novo nome
+      // Gerar novo código sequencial para a rota duplicada
+      const newCode = await generateRouteCode();
+
+      // Criar uma cópia da rota com um novo nome e código
       const newRouteData = {
         ...routeData,
+        code: newCode,
         name: `${routeData.name} (Cópia)`,
         createdAt: FieldValue.serverTimestamp(),
       };

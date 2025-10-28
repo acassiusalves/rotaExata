@@ -313,6 +313,14 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         styles: uberLightStyles,
         mapId: '4a356a5009a25b81' // A custom map ID with no POIs
       });
+
+      // Adicionar listener para fechar InfoWindow ao clicar no mapa
+      mapRef.current.addListener('click', () => {
+        if (activeInfoWindowRef.current) {
+          activeInfoWindowRef.current.close();
+          activeInfoWindowRef.current = null;
+        }
+      });
     });
 
     return () => { canceled = true; };
@@ -414,6 +422,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       const isHighlighted = highlightedStopIds.includes(sid);
       const isCompleted = stop.deliveryStatus === 'completed';
       const isFailed = stop.deliveryStatus === 'failed';
+      const isNewlyAdded = stop.isNewlyAdded === true;
 
       // Determinar cor e ícone baseado no status
       let markerBackground = color;
@@ -426,6 +435,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         markerBorder = '#FF6B00';
         markerGlyph = '★';
         markerScale = 1.5;
+      } else if (isNewlyAdded) {
+        markerBackground = '#FF6B00'; // Laranja brilhante para recém-adicionados
+        markerBorder = '#FFD700';
+        markerGlyph = '✨';
+        markerScale = 1.3;
       } else if (isCompleted) {
         markerBackground = '#22c55e'; // Verde para concluído
         markerBorder = '#16a34a';
@@ -438,11 +452,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
       const pinElement = isUnassigned
         ? new google.maps.marker.PinElement({
-            background: isHighlighted ? '#FFD700' : '#000000',
-            borderColor: isHighlighted ? '#FF6B00' : '#FFFFFF',
-            glyphColor: '#000000',
-            scale: isHighlighted ? 1.5 : 1,
-            glyph: isHighlighted ? '★' : ''
+            background: isHighlighted ? '#FFD700' : (isNewlyAdded ? '#FF6B00' : '#000000'),
+            borderColor: isHighlighted ? '#FF6B00' : (isNewlyAdded ? '#FFD700' : '#FFFFFF'),
+            glyphColor: isNewlyAdded ? '#FFFFFF' : '#000000',
+            scale: isHighlighted ? 1.5 : (isNewlyAdded ? 1.3 : 1),
+            glyph: isHighlighted ? '★' : (isNewlyAdded ? '✨' : '')
           })
         : new google.maps.marker.PinElement({
             background: markerBackground,
@@ -457,7 +471,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         position: stop,
         content: pinElement.element,
         title: `Parada ${index !== undefined ? index + 1 : 'Avulsa'}: ${stop.customerName ?? ""}`,
-        zIndex: isHighlighted ? 1000 : undefined,
+        zIndex: isHighlighted ? 1000 : (isNewlyAdded ? 900 : undefined),
       });
       const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
 
@@ -544,7 +558,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     // Handle unassigned stops with black pins
     if (unassignedStops) {
-      unassignedStops.forEach(stop => addStop(stop, undefined, '#000000', true));
+      console.log('🔵 Rendering unassignedStops:', unassignedStops.length, unassignedStops);
+      unassignedStops.forEach(stop => {
+        console.log('  🔹 Unassigned stop:', { id: stop.id, isNewlyAdded: stop.isNewlyAdded, address: stop.address });
+        addStop(stop, undefined, '#000000', true);
+      });
     }
 
     // Fit bounds to show all routes and stops (only on first load or when count changes)

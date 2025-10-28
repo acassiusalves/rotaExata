@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Info,
   Pencil,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -56,6 +57,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
+import { saveRouteInProgress, hasRouteInProgress, clearRouteInProgress } from '@/lib/route-persistence';
 
 const initialSavedOrigins = [
   {
@@ -156,6 +158,7 @@ export default function NewRoutePage() {
   const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isImporting, setIsImporting] = React.useState(false);
+  const [showRouteInProgressDialog, setShowRouteInProgressDialog] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
@@ -189,6 +192,13 @@ export default function NewRoutePage() {
   React.useEffect(() => {
     // This runs only on the client, after hydration, preventing hydration mismatch
     setRouteDate(new Date());
+  }, []);
+
+  // Verificar se há rota em progresso quando o componente carregar
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && hasRouteInProgress()) {
+      setShowRouteInProgressDialog(true);
+    }
   }, []);
 
   // Salvar origens no localStorage sempre que mudar
@@ -865,6 +875,20 @@ export default function NewRoutePage() {
     }
   };
   
+  const handleContinueExistingRoute = () => {
+    setShowRouteInProgressDialog(false);
+    router.push('/routes/organize');
+  };
+
+  const handleDiscardExistingRoute = () => {
+    clearRouteInProgress();
+    setShowRouteInProgressDialog(false);
+    toast({
+      title: 'Rota Descartada',
+      description: 'A rota em progresso foi descartada. Você pode criar uma nova rota.',
+    });
+  };
+
   const handleNextStep = () => {
     if (!origin) {
       toast({
@@ -886,10 +910,14 @@ export default function NewRoutePage() {
     const routeData = {
       origin,
       stops: stops.filter(s => s.placeId), // Ensure we only pass to valid stops
-      routeDate: routeDate?.toISOString(),
+      routeDate: routeDate?.toISOString() || '',
       routeTime,
     };
     sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+
+    // Salvar também no localStorage para persistência
+    saveRouteInProgress(routeData);
+
     router.push('/routes/organize');
   };
 
@@ -1517,6 +1545,29 @@ export default function NewRoutePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: Rota em Progresso */}
+      <AlertDialog open={showRouteInProgressDialog} onOpenChange={setShowRouteInProgressDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-orange-500" />
+              Rota em Progresso Detectada
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Você possui uma rota que foi iniciada mas não foi finalizada. Deseja continuar de onde parou ou descartar e criar uma nova rota?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleDiscardExistingRoute}>
+              Descartar Rota
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleContinueExistingRoute}>
+              Continuar Rota
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

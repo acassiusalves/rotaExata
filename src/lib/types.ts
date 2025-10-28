@@ -90,13 +90,14 @@ export type RouteChangeNotification = {
 };
 
 export type RouteInfo = {
+  code?: string; // Código sequencial único (ex: RT-0001)
   stops: PlaceValue[];
   encodedPolyline: string;
   distanceMeters: number;
   duration: string;
   color?: string; // Optional color for rendering
   visible?: boolean;
-  status?: 'dispatched' | 'in_progress' | 'completed';
+  status?: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   // Rastreamento em tempo real
   currentLocation?: DriverLocation;
   currentStopIndex?: number;

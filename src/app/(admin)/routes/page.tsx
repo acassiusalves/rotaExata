@@ -69,7 +69,7 @@ import { useRouteSearch } from './layout';
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
+  status: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   driverId: string;
   driverInfo: {
     name: string;
@@ -125,10 +125,14 @@ export default function RoutesPage() {
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const routesData: RouteDocument[] = [];
       querySnapshot.forEach((doc) => {
-        routesData.push({
-          id: doc.id,
-          ...doc.data(),
-        } as RouteDocument);
+        const data = doc.data() as RouteDocument;
+        // Filtrar apenas rotas não concluídas (excluir completed e completed_auto)
+        if (data.status !== 'completed' && data.status !== 'completed_auto') {
+          routesData.push({
+            id: doc.id,
+            ...data,
+          } as RouteDocument);
+        }
       });
       setRoutes(routesData);
       setIsLoading(false);

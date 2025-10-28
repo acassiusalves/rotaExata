@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import { GoogleMap, Marker } from '@react-google-maps/api';
+import { ResizableDivider } from '@/components/ui/resizable-divider';
 import {
   Select,
   SelectContent,
@@ -482,45 +483,47 @@ export default function OrganizeRoutePage() {
   const [activeRouteKey, setActiveRouteKey] = React.useState<'A' | 'B' | null>(null);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
 
-  // Map resize state
-  const [mapHeight, setMapHeight] = React.useState(50); // percentage
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startYRef = React.useRef<number>(0);
-  const startHeightRef = React.useRef<number>(50);
+  // Timeline column resize state
+  const [timelineWidth, setTimelineWidth] = React.useState(35); // percentage
+  const [isResizingTimeline, setIsResizingTimeline] = React.useState(false);
+  const startXTimelineRef = React.useRef<number>(0);
+  const startWidthTimelineRef = React.useRef<number>(35);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsResizing(true);
-    startYRef.current = e.clientY;
-    startHeightRef.current = mapHeight;
+  const handleTimelineResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingTimeline(true);
+    startXTimelineRef.current = e.clientX;
+    startWidthTimelineRef.current = timelineWidth;
   };
 
   React.useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
+      if (!isResizingTimeline) return;
 
-      const deltaY = e.clientY - startYRef.current;
-      const windowHeight = window.innerHeight - 64; // subtract header height
-      const deltaPercentage = (deltaY / windowHeight) * 100;
-      const newHeight = startHeightRef.current + deltaPercentage;
+      const deltaX = e.clientX - startXTimelineRef.current;
+      // Assuming a rough table width for calculation
+      // Inverted: dragging right should increase width
+      const deltaPercentage = (deltaX / window.innerWidth) * 100;
+      const newWidth = startWidthTimelineRef.current - deltaPercentage;
 
-      // Limit between 20% and 80%
-      if (newHeight >= 20 && newHeight <= 80) {
-        setMapHeight(newHeight);
-      } else if (newHeight < 20) {
-        setMapHeight(20);
-      } else if (newHeight > 80) {
-        setMapHeight(80);
+      // Limit between 20% and 60%
+      if (newWidth >= 20 && newWidth <= 60) {
+        setTimelineWidth(newWidth);
+      } else if (newWidth < 20) {
+        setTimelineWidth(20);
+      } else if (newWidth > 60) {
+        setTimelineWidth(60);
       }
     };
 
     const handleMouseUp = () => {
-      setIsResizing(false);
+      setIsResizingTimeline(false);
     };
 
-    if (isResizing) {
+    if (isResizingTimeline) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'ns-resize';
+      document.body.style.cursor = 'ew-resize';
       document.body.style.userSelect = 'none';
     }
 
@@ -530,7 +533,7 @@ export default function OrganizeRoutePage() {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isResizing, mapHeight]);
+  }, [isResizingTimeline, timelineWidth]);
 
   React.useEffect(() => {
     // Fetch available drivers from Firestore
@@ -705,7 +708,7 @@ export default function OrganizeRoutePage() {
           const routeDoc = doc.data();
 
           // Skip completed or finished routes
-          if (routeDoc.status === 'completed' || routeDoc.status === 'finished') {
+          if (routeDoc.status === 'completed' || routeDoc.status === 'completed_auto' || routeDoc.status === 'finished') {
             console.log('🚫 Pulando rota finalizada:', doc.id, 'Status:', routeDoc.status);
             return;
           }
@@ -2584,36 +2587,28 @@ export default function OrganizeRoutePage() {
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col overflow-hidden">
-      <div className="shrink-0 bg-muted relative" style={{ height: `${mapHeight}%` }}>
-        <RouteMap
-          ref={mapApiRef}
-          height={-1}
-          routes={combinedRoutes}
-          origin={origin}
-          unassignedStops={unassignedStops}
-          onRemoveStop={handleRemoveStop}
-          onEditStop={handleEditStop}
-          onRefreshDriverLocation={handleRefreshDriverLocation}
-          highlightedStopIds={highlightedStops}
-          driverLocation={driverLocation || undefined}
-          driverLocations={driverLocations}
-        />
-      </div>
-
-      {/* Resize Handle */}
-      <div
-        className="h-1 bg-border hover:bg-primary hover:h-1.5 transition-all cursor-ns-resize flex items-center justify-center group relative z-10"
-        onMouseDown={handleMouseDown}
+      <ResizableDivider
+        defaultTopHeight={50}
+        minTopHeight={20}
+        minBottomHeight={20}
       >
-        <div className="absolute inset-x-0 -top-2 -bottom-2" />
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-          <svg width="24" height="8" viewBox="0 0 24 8" fill="none" className="text-muted-foreground">
-            <path d="M3 2h18M3 6h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
+        <div className="h-full bg-muted relative">
+          <RouteMap
+            ref={mapApiRef}
+            height={-1}
+            routes={combinedRoutes}
+            origin={origin}
+            unassignedStops={unassignedStops}
+            onRemoveStop={handleRemoveStop}
+            onEditStop={handleEditStop}
+            onRefreshDriverLocation={handleRefreshDriverLocation}
+            highlightedStopIds={highlightedStops}
+            driverLocation={driverLocation || undefined}
+            driverLocations={driverLocations}
+          />
         </div>
-      </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950">
+        <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <Tabs defaultValue="organize" className="w-full">
           <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4">
@@ -2713,7 +2708,7 @@ export default function OrganizeRoutePage() {
                 </DropdownMenu>
                 <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
                   <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
+                    <TabsTrigger value="organize" disabled className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">
                       <Wand2 className="mr-2 h-4 w-4" />
                       Organizar
                     </TabsTrigger>
@@ -2749,7 +2744,22 @@ export default function OrganizeRoutePage() {
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
-                                    <TableHead className='w-[35%] py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                                    <TableHead style={{ width: `${timelineWidth}%` }} className='py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400 relative'>
+                                      <div className="flex items-center justify-between">
+                                        <div
+                                          className="absolute left-0 top-0 bottom-0 w-1 bg-border hover:bg-primary hover:w-1.5 transition-all cursor-ew-resize flex items-center justify-center group z-10"
+                                          onMouseDown={handleTimelineResizeStart}
+                                        >
+                                          <div className="absolute inset-y-0 -left-2 -right-2" />
+                                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <svg width="8" height="24" viewBox="0 0 8 24" fill="none" className="text-muted-foreground">
+                                              <path d="M2 3v18M6 3v18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                            </svg>
+                                          </div>
+                                        </div>
+                                        <span>Linha do Tempo</span>
+                                      </div>
+                                    </TableHead>
                                     <TableHead className='w-32 py-3 px-4 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -2803,8 +2813,8 @@ export default function OrganizeRoutePage() {
                                                 variant="ghost"
                                                 size="sm"
                                                 onClick={() => handleOptimizeSingleRoute(routeItem.key)}
-                                                disabled={isOptimizing[routeItem.key]}
-                                                className="bg-primary/10 text-primary hover:bg-primary/20 font-medium"
+                                                disabled={true}
+                                                className="bg-primary/10 text-primary hover:bg-primary/20 font-medium opacity-50 cursor-not-allowed"
                                             >
                                                 {isOptimizing[routeItem.key] ? (
                                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2848,7 +2858,22 @@ export default function OrganizeRoutePage() {
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
-                          <TableHead className='w-[35%] py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400'>Linha do Tempo</TableHead>
+                          <TableHead style={{ width: `${timelineWidth}%` }} className='py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400 relative'>
+                            <div className="flex items-center justify-between">
+                              <div
+                                className="absolute left-0 top-0 bottom-0 w-1 bg-border hover:bg-primary hover:w-1.5 transition-all cursor-ew-resize flex items-center justify-center group z-10"
+                                onMouseDown={handleTimelineResizeStart}
+                              >
+                                <div className="absolute inset-y-0 -left-2 -right-2" />
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <svg width="8" height="24" viewBox="0 0 8 24" fill="none" className="text-muted-foreground">
+                                    <path d="M2 3v18M6 3v18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                  </svg>
+                                </div>
+                              </div>
+                              <span>Linha do Tempo</span>
+                            </div>
+                          </TableHead>
                           <TableHead className='w-32 py-3 px-4 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -3048,7 +3073,8 @@ export default function OrganizeRoutePage() {
           </DragOverlay>
         </Tabs>
         </DndContext>
-      </div>
+        </div>
+      </ResizableDivider>
     </div>
     <Dialog open={isAddServiceDialogOpen} onOpenChange={setIsAddServiceDialogOpen}>
         <DialogContent className="sm:max-w-lg">
