@@ -160,10 +160,11 @@ export default function MonitoringPage() {
 
   React.useEffect(() => {
     // Busca apenas rotas ativas (despachadas ou em andamento)
+    // Removido orderBy para evitar a necessidade de índice composto
+    // A ordenação será feita no cliente após receber os dados
     const q = query(
       collection(db, 'routes'),
-      where('status', 'in', ['dispatched', 'in_progress']),
-      orderBy('plannedDate', 'desc')
+      where('status', 'in', ['dispatched', 'in_progress'])
     );
 
     const unsubscribe = onSnapshot(
@@ -176,6 +177,14 @@ export default function MonitoringPage() {
             ...doc.data(),
           } as RouteDocument);
         });
+
+        // Ordena por plannedDate no cliente (mais recentes primeiro)
+        routesData.sort((a, b) => {
+          const dateA = a.plannedDate?.toMillis() || 0;
+          const dateB = b.plannedDate?.toMillis() || 0;
+          return dateB - dateA; // desc (mais recentes primeiro)
+        });
+
         setRoutes(routesData);
         setIsLoading(false);
       },
