@@ -300,10 +300,10 @@ export default function MonitoringPage() {
             <div className="col-span-1">Data</div>
             <div className="col-span-2">Operador</div>
             <div className="col-span-1">Status</div>
-            <div className="col-span-1 text-center">Ocorrências</div>
+            <div className="col-span-1 text-center">Código</div>
             <div className="col-span-1 text-center">Sucessos</div>
             <div className="col-span-1 text-center">Falhas</div>
-            <div className="col-span-1 text-center">Sucessos</div>
+            <div className="col-span-1 text-center">Total</div>
             <div className="col-span-3">Rotograma</div>
             <div className="col-span-1 text-right"></div>
           </div>
@@ -335,10 +335,10 @@ export default function MonitoringPage() {
                   <div className="col-span-1">
                     <StatusBadge status={route.status} />
                   </div>
-                  <div className="col-span-1 text-center font-medium">{stats.occurrences}/{stats.total}</div>
-                  <div className="col-span-1 text-center font-medium">{stats.completed + stats.failed}/{stats.total}</div>
-                  <div className="col-span-1 text-center font-medium text-destructive">{stats.failed}</div>
+                  <div className="col-span-1 text-center font-medium">{route.code || '-'}</div>
                   <div className="col-span-1 text-center font-medium text-green-600">{stats.completed}</div>
+                  <div className="col-span-1 text-center font-medium text-destructive">{stats.failed}</div>
+                  <div className="col-span-1 text-center font-medium">{stats.total}</div>
                   <div className="col-span-3">
                     <Rotograma stops={route.stops} color={route.color} onStopClick={handleStopClick} />
                   </div>

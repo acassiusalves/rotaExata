@@ -512,13 +512,19 @@ export default function RoutesPage() {
                                           {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                                       </CardDescription>
                                   </div>
-                                  <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" className="h-8 w-8 p-0">
-                                          <span className="sr-only">Abrir menu</span>
-                                          <MoreVertical className="h-4 w-4" />
-                                      </Button>
-                                      </DropdownMenuTrigger>
+                                  <div className="flex items-center gap-2">
+                                    {route.code && (
+                                      <Badge variant="outline" className="font-mono">
+                                        {route.code}
+                                      </Badge>
+                                    )}
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" className="h-8 w-8 p-0">
+                                            <span className="sr-only">Abrir menu</span>
+                                            <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                        </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
                                           <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
                                               <Copy className="mr-2 h-4 w-4" />
@@ -540,7 +546,8 @@ export default function RoutesPage() {
                                           <span>Excluir Rota</span>
                                           </DropdownMenuItem>
                                       </DropdownMenuContent>
-                                  </DropdownMenu>
+                                    </DropdownMenu>
+                                  </div>
                                 </div>
                               </CardHeader>
                               <CardContent className="flex-1 space-y-4">
