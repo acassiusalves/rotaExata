@@ -432,6 +432,9 @@ export default function OrganizeRoutePage() {
   const [manualService, setManualService] = React.useState({
     customerName: '',
     phone: '',
+    orderNumber: '',
+    timeWindowStart: '',
+    timeWindowEnd: '',
     locationLink: '',
     cep: '',
     rua: '',
@@ -1335,9 +1338,30 @@ export default function OrganizeRoutePage() {
             color: targetRoute.color,
             visible: targetRoute.visible
           } : null);
+
+          // If this is an existing route, update Firestore so driver app receives the update
+          if (routeData.isExistingRoute && routeData.currentRouteId) {
+            try {
+              const routeRef = doc(db, 'routes', routeData.currentRouteId);
+              await updateDoc(routeRef, {
+                stops: updatedStops,
+                encodedPolyline: newRouteInfo.encodedPolyline,
+                distanceMeters: newRouteInfo.distanceMeters,
+                duration: newRouteInfo.duration,
+              });
+              console.log('✅ Rota atualizada no Firestore com ponto editado');
+            } catch (error) {
+              console.error('Erro ao atualizar rota no Firestore:', error);
+              toast({
+                variant: 'destructive',
+                title: 'Aviso',
+                description: 'O ponto foi atualizado localmente, mas pode não sincronizar com o app do motorista.',
+              });
+            }
+          }
         }
 
-        toast({ title: 'Serviço Atualizado!', description: 'A rota foi recalculada com as novas informações.' });
+        toast({ title: 'Serviço Atualizado!', description: `A rota foi recalculada com as novas informações.${routeData.isExistingRoute ? ' O motorista receberá a atualização.' : ''}` });
       }
 
       setIsEditStopDialogOpen(false);
@@ -1391,6 +1415,10 @@ export default function OrganizeRoutePage() {
         address: geocoded.address,
         customerName: manualService.customerName,
         phone: manualService.phone,
+        orderNumber: manualService.orderNumber,
+        timeWindowStart: manualService.timeWindowStart,
+        timeWindowEnd: manualService.timeWindowEnd,
+        complemento: manualService.complemento,
         notes: manualService.notes,
       };
 
@@ -1454,6 +1482,9 @@ export default function OrganizeRoutePage() {
       setManualService({
         customerName: '',
         phone: '',
+        orderNumber: '',
+        timeWindowStart: '',
+        timeWindowEnd: '',
         locationLink: '',
         cep: '',
         rua: '',
