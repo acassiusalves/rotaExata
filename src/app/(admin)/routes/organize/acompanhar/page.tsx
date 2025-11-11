@@ -451,7 +451,7 @@ export default function OrganizeRoutePage() {
 
   // State for Edit Stop Dialog
   const [isEditStopDialogOpen, setIsEditStopDialogOpen] = React.useState(false);
-  const [stopToEdit, setStopToEdit] = React.useState<{ stop: PlaceValue; routeKey: 'A' | 'B' | 'unassigned'; index: number } | null>(null);
+  const [stopToEdit, setStopToEdit] = React.useState<{ stop: PlaceValue; routeKey: string; index: number } | null>(null);
   const [editService, setEditService] = React.useState({
     customerName: '',
     phone: '',
@@ -1320,9 +1320,7 @@ export default function OrganizeRoutePage() {
           return;
         }
 
-        const targetRoute = stopToEdit.routeKey === 'A' ? routeA : routeB;
-        const setter = stopToEdit.routeKey === 'A' ? setRouteA : setRouteB;
-
+        const targetRoute = getRoute(stopToEdit.routeKey);
         if (!targetRoute) return;
 
         const updatedStops = [...targetRoute.stops];
@@ -1331,7 +1329,7 @@ export default function OrganizeRoutePage() {
         // Recalculate route
         const newRouteInfo = await computeRoute(routeData.origin, updatedStops);
         if (newRouteInfo) {
-          setter(prev => prev ? {
+          setRoute(stopToEdit.routeKey, prev => prev ? {
             ...prev,
             ...newRouteInfo,
             stops: updatedStops,
@@ -1511,14 +1509,14 @@ export default function OrganizeRoutePage() {
     setActiveId(active.id as string);
 
     // Find the stop being dragged
-    const routeKey = active.data.current?.routeKey as 'A' | 'B';
+    const routeKey = active.data.current?.routeKey as string;
     const index = active.data.current?.index as number;
 
     setActiveRouteKey(routeKey);
     setActiveIndex(index);
 
     if (routeKey && index !== undefined) {
-      const route = routeKey === 'A' ? routeA : routeB;
+      const route = getRoute(routeKey);
       if (route) {
         // Get from pendingEdits if exists, otherwise from route
         const stops = pendingEdits[routeKey] || route.stops;
@@ -1628,7 +1626,7 @@ export default function OrganizeRoutePage() {
       const sourceRoute = getRoute(activeRouteKey);
       const targetRoute = getRoute(overRouteKey);
 
-      if (!sourceRoute || !targetRoute || !routeData) return;
+      if (!sourceRoute || !routeData) return;
 
       const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
@@ -1641,8 +1639,9 @@ export default function OrganizeRoutePage() {
       }));
 
       // Check if there's already a pending edit for target route
+      // Target route might be null/empty, so handle that case
       const currentTargetPending = pendingEdits[overRouteKey];
-      const targetStopsToEdit = currentTargetPending || targetRoute.stops.map((stop, idx) => ({
+      const targetStopsToEdit = currentTargetPending || (targetRoute?.stops || []).map((stop, idx) => ({
         ...stop,
         _originalIndex: (stop as any)._originalIndex ?? idx
       }));
@@ -2063,9 +2062,10 @@ export default function OrganizeRoutePage() {
   const handleEditStop = async (stopId: string) => {
     // Find which route contains this stop
     let targetStop: PlaceValue | null = null;
-    let routeKey: 'A' | 'B' | 'unassigned' = 'unassigned';
+    let routeKey: string = 'unassigned';
     let index = -1;
 
+    // Check route A
     if (routeA) {
       const foundIndex = routeA.stops.findIndex(s => String(s.id ?? s.placeId) === stopId);
       if (foundIndex !== -1) {
@@ -2075,6 +2075,7 @@ export default function OrganizeRoutePage() {
       }
     }
 
+    // Check route B
     if (!targetStop && routeB) {
       const foundIndex = routeB.stops.findIndex(s => String(s.id ?? s.placeId) === stopId);
       if (foundIndex !== -1) {
@@ -2084,6 +2085,20 @@ export default function OrganizeRoutePage() {
       }
     }
 
+    // Check dynamic routes
+    if (!targetStop) {
+      for (const dynamicRoute of dynamicRoutes) {
+        const foundIndex = dynamicRoute.data.stops.findIndex(s => String(s.id ?? s.placeId) === stopId);
+        if (foundIndex !== -1) {
+          targetStop = dynamicRoute.data.stops[foundIndex];
+          routeKey = dynamicRoute.key;
+          index = foundIndex;
+          break;
+        }
+      }
+    }
+
+    // Check unassigned stops
     if (!targetStop) {
       const foundIndex = unassignedStops.findIndex(s => String(s.id ?? s.placeId) === stopId);
       if (foundIndex !== -1) {
@@ -2139,12 +2154,10 @@ export default function OrganizeRoutePage() {
     }
   };
 
-  const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
+  const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: string) => {
     if (!routeData) return;
 
-    const targetRoute = routeKey === 'A' ? routeA : routeB;
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
-
+    const targetRoute = getRoute(routeKey);
     if (!targetRoute) return;
 
     // Remove the stop from the route and add to unassigned
@@ -2153,31 +2166,29 @@ export default function OrganizeRoutePage() {
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
-      setter({
+      setRoute(routeKey, () => ({
         ...targetRoute,
         stops: [],
         encodedPolyline: '',
         distanceMeters: 0,
         duration: '0s'
-      });
+      }));
       toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
     } else {
       // Recalculate route with remaining stops
-      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      setRoute(routeKey, prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
       const newRouteInfo = await computeRoute(routeData.origin, newStops);
       if (newRouteInfo) {
-        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+        setRoute(routeKey, prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
       }
       toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
     }
   };
 
-  const handleDeleteStopFromTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
+  const handleDeleteStopFromTimeline = async (stop: PlaceValue, index: number, routeKey: string) => {
     if (!routeData) return;
 
-    const targetRoute = routeKey === 'A' ? routeA : routeB;
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
-
+    const targetRoute = getRoute(routeKey);
     if (!targetRoute) return;
 
     // Delete the stop completely from the route
@@ -2185,13 +2196,13 @@ export default function OrganizeRoutePage() {
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
-      setter({
+      setRoute(routeKey, () => ({
         ...targetRoute,
         stops: [],
         encodedPolyline: '',
         distanceMeters: 0,
         duration: '0s'
-      });
+      }));
 
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
@@ -2212,10 +2223,10 @@ export default function OrganizeRoutePage() {
       toast({ title: 'Ponto excluído!', description: `O ponto foi excluído permanentemente.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}` });
     } else {
       // Recalculate route with remaining stops
-      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      setRoute(routeKey, prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
       const newRouteInfo = await computeRoute(routeData.origin, newStops);
       if (newRouteInfo) {
-        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+        setRoute(routeKey, prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
 
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
@@ -2414,29 +2425,25 @@ export default function OrganizeRoutePage() {
     setIsStopInfoDialogOpen(true);
   };
 
-  const handleApplyPendingEdits = async (routeKey: 'A' | 'B') => {
+  const handleApplyPendingEdits = async (routeKey: string) => {
     if (!routeData) return;
 
     const pendingStops = pendingEdits[routeKey];
     if (!pendingStops) return;
 
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
-    const currentRoute = routeKey === 'A' ? routeA : routeB;
-    const otherRouteKey: 'A' | 'B' = routeKey === 'A' ? 'B' : 'A';
-    const otherPendingStops = pendingEdits[otherRouteKey];
-
+    const currentRoute = getRoute(routeKey);
     if (!currentRoute) return;
 
     // Clean stops - remove metadata properties
     const cleanedStops = pendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
 
     // Update state with pending stops
-    setter((prev) => (prev ? { ...prev, stops: cleanedStops, encodedPolyline: '' } : null));
+    setRoute(routeKey, (prev) => (prev ? { ...prev, stops: cleanedStops, encodedPolyline: '' } : null));
 
     // Recalculate route
     const newRouteInfo = await computeRoute(routeData.origin, cleanedStops);
     if (newRouteInfo) {
-      setter((prev) => (prev ? {
+      setRoute(routeKey, (prev) => (prev ? {
         ...prev,
         ...newRouteInfo,
         stops: cleanedStops,
@@ -2445,22 +2452,24 @@ export default function OrganizeRoutePage() {
       } : null));
     }
 
-    // Check if there's a pending edit in the other route (cross-route movement)
-    if (otherPendingStops) {
-      const otherSetter = otherRouteKey === 'A' ? setRouteA : setRouteB;
-      const otherRoute = otherRouteKey === 'A' ? routeA : routeB;
+    // Check if there are pending edits in other routes (cross-route movement)
+    const otherRoutesWithPending = Object.keys(pendingEdits).filter(key => key !== routeKey && pendingEdits[key]);
 
-      if (otherRoute) {
+    for (const otherRouteKey of otherRoutesWithPending) {
+      const otherPendingStops = pendingEdits[otherRouteKey];
+      const otherRoute = getRoute(otherRouteKey);
+
+      if (otherRoute && otherPendingStops) {
         const cleanedOtherStops = otherPendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
 
-        otherSetter((prev) => (prev ? { ...prev, stops: cleanedOtherStops, encodedPolyline: '' } : null));
+        setRoute(otherRouteKey, (prev) => (prev ? { ...prev, stops: cleanedOtherStops, encodedPolyline: '' } : null));
 
         const otherRouteInfo = cleanedOtherStops.length > 0
           ? await computeRoute(routeData.origin, cleanedOtherStops)
           : null;
 
         if (otherRouteInfo) {
-          otherSetter((prev) => (prev ? {
+          setRoute(otherRouteKey, (prev) => (prev ? {
             ...prev,
             ...otherRouteInfo,
             stops: cleanedOtherStops,
@@ -2468,7 +2477,7 @@ export default function OrganizeRoutePage() {
             visible: otherRoute.visible
           } : null));
         } else if (cleanedOtherStops.length === 0) {
-          otherSetter((prev) => (prev ? {
+          setRoute(otherRouteKey, (prev) => (prev ? {
             ...prev,
             stops: [],
             encodedPolyline: '',
@@ -2501,18 +2510,19 @@ export default function OrganizeRoutePage() {
       }
     }
 
-    // Clear pending edits for both routes
-    setPendingEdits(prev => ({
-      ...prev,
-      [routeKey]: null,
-      ...(otherPendingStops ? { [otherRouteKey]: null } : {})
-    }));
+    // Clear pending edits for this route and affected routes
+    setPendingEdits(prev => {
+      const newEdits = { ...prev, [routeKey]: null };
+      otherRoutesWithPending.forEach(key => { newEdits[key] = null; });
+      return newEdits;
+    });
 
+    const routeName = routeKey === 'A' || routeKey === 'B' ? routeNames[routeKey] : `Rota ${routeKey}`;
     toast({
       title: 'Edições aplicadas!',
-      description: otherPendingStops
-        ? `Ambas as rotas foram atualizadas com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`
-        : `A ${routeNames[routeKey]} foi atualizada com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`,
+      description: otherRoutesWithPending.length > 0
+        ? `Múltiplas rotas foram atualizadas com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`
+        : `A ${routeName} foi atualizada com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`,
     });
   };
 
@@ -2584,9 +2594,9 @@ export default function OrganizeRoutePage() {
   const routesForTable = [
       { key: 'A' as const, name: routeNames.A, data: routeA },
       { key: 'B' as const, name: routeNames.B, data: routeB },
-  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data && r.data.stops.length > 0)
+  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data)
    .concat(
-     dynamicRoutes.filter(r => r.data.stops.length > 0) as any[]
+     dynamicRoutes as any[]
    );
 
   const handleRefreshDriverLocation = async (driverId: string) => {
@@ -2707,7 +2717,7 @@ export default function OrganizeRoutePage() {
                       variant="default"
                       size="sm"
                       onClick={async () => {
-                        const keysWithPending = Object.keys(pendingEdits).filter(key => pendingEdits[key as 'A' | 'B']) as ('A' | 'B')[];
+                        const keysWithPending = Object.keys(pendingEdits).filter(key => pendingEdits[key]);
                         for (const key of keysWithPending) {
                           await handleApplyPendingEdits(key);
                         }

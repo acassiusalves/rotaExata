@@ -9,6 +9,7 @@ import {
   horizontalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import {
   Popover,
@@ -191,6 +192,40 @@ interface RouteTimelineProps {
   dragDelay?: number;
 }
 
+function EmptyRouteDropZone({ routeKey, color }: { routeKey: string; color: string }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `${routeKey}-dropzone`,
+    data: { routeKey, index: 0 }, // When dropped here, it will be at index 0
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex items-center gap-2 w-full min-h-[40px] px-2 py-2 rounded transition-colors ${
+        isOver ? 'bg-primary/10' : ''
+      }`}
+    >
+      {/* Home Icon */}
+      <div
+        className="flex h-6 w-6 items-center justify-center rounded-md flex-shrink-0"
+        style={{ backgroundColor: color }}
+      >
+        <Home className="h-4 w-4 text-white" />
+      </div>
+      {/* Empty drop zone - expands to fill space */}
+      <div
+        className={`flex-1 px-4 py-2 text-xs italic border-2 border-dashed rounded transition-colors ${
+          isOver
+            ? 'border-primary bg-primary/5 text-primary'
+            : 'border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
+        }`}
+      >
+        Arraste pontos para cá
+      </div>
+    </div>
+  );
+}
+
 export function RouteTimeline({
   stops,
   originalStops,
@@ -202,25 +237,39 @@ export function RouteTimeline({
   onShowInfo,
   dragDelay = 200,
 }: RouteTimelineProps) {
+  // If empty route, show a drop zone
   if (stops.length === 0) {
-    return null;
+    return <EmptyRouteDropZone routeKey={routeKey} color={color} />;
   }
+
   // Generate unique IDs that include routeKey to force re-render when moving between routes
   const stopIds = stops.map((s, i) => `${routeKey}-${s.id ?? s.placeId ?? i}`);
 
-  return (
-    <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>
-      <div className="flex items-center overflow-x-auto py-1">
-        {/* Home Icon */}
-        <div
-          className="flex h-6 w-6 items-center justify-center rounded-md"
-          style={{ backgroundColor: color }}
-        >
-          <Home className="h-4 w-4 text-white" />
-        </div>
+  // Create a droppable zone for the entire timeline
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `${routeKey}-timeline`,
+    data: { routeKey, index: stops.length }, // Drop at the end by default
+  });
 
-        {/* Stops */}
-        {stops.map((stop, index) => {
+  return (
+    <div
+      ref={setDropRef}
+      className={`w-full min-h-[40px] px-2 py-1 rounded transition-colors ${
+        isOver ? 'bg-primary/10' : ''
+      }`}
+    >
+      <SortableContext items={stopIds} strategy={horizontalListSortingStrategy}>
+        <div className="flex items-center overflow-x-auto py-1">
+          {/* Home Icon */}
+          <div
+            className="flex h-6 w-6 items-center justify-center rounded-md"
+            style={{ backgroundColor: color }}
+          >
+            <Home className="h-4 w-4 text-white" />
+          </div>
+
+          {/* Stops */}
+          {stops.map((stop, index) => {
           // Use _originalIndex if available (stored in stop), otherwise find in originalStops
           let originalIndex: number | undefined = (stop as any)._originalIndex;
 
@@ -249,5 +298,6 @@ export function RouteTimeline({
         })}
       </div>
     </SortableContext>
+    </div>
   );
 }
