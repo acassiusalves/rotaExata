@@ -38,6 +38,7 @@ import { useToast } from '@/hooks/use-toast';
 import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
 import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
 import { StopChangeBadge } from '@/components/driver/stop-change-badge';
+import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -469,6 +470,22 @@ export default function RouteDetailsPage() {
       });
 
       console.log('✅ Salvo com sucesso no Firestore!');
+
+      // Sincronizar status com pedidos do Lunna se a rota for importada
+      if (route.source === 'lunna') {
+        try {
+          console.log('🔄 Sincronizando status com Lunna...');
+          await syncLunnaOrderStatus(
+            route,
+            updatedStop,
+            data.status === 'completed' ? 'entregue' : 'falha'
+          );
+          console.log('✅ Status sincronizado com Lunna!');
+        } catch (syncError) {
+          console.error('⚠️ Erro ao sincronizar com Lunna (não crítico):', syncError);
+          // Não bloqueia a operação se a sincronização falhar
+        }
+      }
 
       toast({
         title: data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada',

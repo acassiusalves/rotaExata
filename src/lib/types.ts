@@ -108,6 +108,9 @@ export type RouteInfo = {
   pendingChanges?: boolean;
   lastModifiedAt?: Timestamp | Date;
   lastModifiedBy?: string;
+  // Integração com sistema Lunna
+  source?: 'rota-exata' | 'lunna'; // Origem da rota
+  lunnaOrderIds?: string[]; // Array de números de pedidos do Lunna (ex: ['P0001', 'P0002'])
 };
 
 export type OrderStatus =
@@ -179,4 +182,60 @@ export type ActivityEvent = {
     role: 'admin' | 'driver';
   };
   details: string;
+};
+
+// ============================================
+// TIPOS PARA INTEGRAÇÃO COM SISTEMA LUNNA
+// ============================================
+
+export type LunnaOrder = {
+  id: string; // ID do documento no Firestore
+  number: string; // Número do pedido (P0001, P0002, etc.)
+  client: {
+    id: string;
+    name: string;
+  };
+  createdAt: Timestamp | Date;
+  createdBy: string;
+  updatedAt?: Timestamp | Date;
+  items: Array<{
+    code: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+    tipo: 'Venda' | 'Troca';
+    productId?: string;
+  }>;
+  billing: {
+    finalValue: number;
+  };
+  shipping?: {
+    deliveryDate?: Timestamp | Date;
+  };
+  complement?: {
+    notes?: string;
+  };
+  logisticsStatus?: 'pendente' | 'em_rota' | 'entregue' | 'falha';
+  rotaExataRouteId?: string; // ID da rota no Rota Exata
+  rotaExataRouteCode?: string; // Código da rota (LN-0001)
+};
+
+export type LunnaClient = {
+  codigo: string;
+  nome: string;
+  tipo: 'cpf' | 'cnpj';
+  telefone: string;
+  email: string;
+  cpf?: string;
+  cnpj?: string;
+  dataNascimento?: string;
+  inscricaoEstadual?: string;
+  razaoSocial?: string;
+  rua: string;
+  numero: string;
+  complemento?: string;
+  bairro: string;
+  cidade: string;
+  cep: string;
 };

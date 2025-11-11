@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/accordion";
 import { useRouter } from 'next/navigation';
 import { useRouteSearch } from './layout';
+import { LunnaBadge } from '@/components/routes/lunna-badge';
 
 
 // Extend RouteInfo to include fields from Firestore doc
@@ -518,6 +519,7 @@ export default function RoutesPage() {
                                         {route.code}
                                       </Badge>
                                     )}
+                                    {route.source === 'lunna' && <LunnaBadge />}
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" className="h-8 w-8 p-0">

@@ -40,6 +40,7 @@ import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { RouteMapDialog } from '@/components/routes/route-map-dialog';
+import { LunnaBadge } from '@/components/routes/lunna-badge';
 import {
   Dialog,
   DialogContent,
@@ -335,7 +336,12 @@ export default function MonitoringPage() {
                   <div className="col-span-1">
                     <StatusBadge status={route.status} />
                   </div>
-                  <div className="col-span-1 text-center font-medium">{route.code || '-'}</div>
+                  <div className="col-span-1 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="font-medium">{route.code || '-'}</span>
+                      {route.source === 'lunna' && <LunnaBadge />}
+                    </div>
+                  </div>
                   <div className="col-span-1 text-center font-medium text-green-600">{stats.completed}</div>
                   <div className="col-span-1 text-center font-medium text-destructive">{stats.failed}</div>
                   <div className="col-span-1 text-center font-medium">{stats.total}</div>

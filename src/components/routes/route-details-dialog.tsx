@@ -38,6 +38,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import Image from 'next/image';
 import { RouteMapDialog, RouteDocument } from './route-map-dialog';
+import { LunnaBadge } from './lunna-badge';
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(2);
 const formatDuration = (durationString: string = '0s') => {
@@ -104,6 +105,7 @@ export function RouteDetailsDialog({
             <DialogTitle className="flex items-center gap-3">
               <FileText />
               Detalhes da Rota: {route.name}
+              {route.source === 'lunna' && <LunnaBadge />}
             </DialogTitle>
             <DialogDescription>
               Resumo completo da rota e de todas as suas paradas.
