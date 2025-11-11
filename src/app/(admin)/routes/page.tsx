@@ -288,7 +288,7 @@ export default function RoutesPage() {
   };
 
   const handleUpdateRouteName = async () => {
-    if (!routeToModify || !newRouteName.trim()) {
+    if (!routeToModify || !newRouteName?.trim()) {
       toast({
         variant: 'destructive',
         title: 'Nome inválido',
@@ -702,7 +702,7 @@ export default function RoutesPage() {
             <Button variant="outline" onClick={() => setIsEditNameDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleUpdateRouteName} disabled={isUpdating || !newRouteName.trim()}>
+            <Button onClick={handleUpdateRouteName} disabled={isUpdating || !newRouteName?.trim()}>
               {isUpdating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
