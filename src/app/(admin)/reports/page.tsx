@@ -204,7 +204,9 @@ export default function ReportsPage() {
     const totalRevenue = filteredDeliveries
       .filter(d => d.deliveryStatus === 'completed' && d.payments)
       .reduce((sum, d) => {
-        const deliveryTotal = d.payments?.reduce((s, p) => s + (p.value || 0), 0) || 0;
+        const deliveryTotal = selectedPaymentMethod !== 'all'
+          ? d.payments?.filter(p => p.method === selectedPaymentMethod).reduce((s, p) => s + (p.value || 0), 0) || 0
+          : d.payments?.reduce((s, p) => s + (p.value || 0), 0) || 0;
         return sum + deliveryTotal;
       }, 0);
 
@@ -216,7 +218,7 @@ export default function ReportsPage() {
       completionRate: completionRate.toFixed(1),
       totalRevenue,
     };
-  }, [filteredDeliveries]);
+  }, [filteredDeliveries, selectedPaymentMethod]);
 
   // Lista de motoristas únicos
   const drivers = React.useMemo(() => {
@@ -594,7 +596,13 @@ export default function ReportsPage() {
         periodo, // Matutino ou Vespertino
         periodoExecucao, // Horário completo
         d.phone || '',
-        d.payments ? formatCurrency(d.payments.reduce((s, p) => s + (p.value || 0), 0)) : '',
+        d.payments
+          ? formatCurrency(
+              selectedPaymentMethod !== 'all'
+                ? d.payments.filter(p => p.method === selectedPaymentMethod).reduce((s, p) => s + (p.value || 0), 0)
+                : d.payments.reduce((s, p) => s + (p.value || 0), 0)
+            )
+          : '',
         d.failureReason || '',
       ];
     });
@@ -967,7 +975,13 @@ export default function ReportsPage() {
                       </TableCell>
                       <TableCell>
                         {delivery.payments
-                          ? formatCurrency(delivery.payments.reduce((s, p) => s + (p.value || 0), 0))
+                          ? formatCurrency(
+                              selectedPaymentMethod !== 'all'
+                                ? delivery.payments
+                                    .filter(p => p.method === selectedPaymentMethod)
+                                    .reduce((s, p) => s + (p.value || 0), 0)
+                                : delivery.payments.reduce((s, p) => s + (p.value || 0), 0)
+                            )
                           : '-'}
                       </TableCell>
                       <TableCell>
