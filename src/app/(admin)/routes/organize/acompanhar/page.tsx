@@ -1267,11 +1267,11 @@ export default function OrganizeRoutePage() {
     if (!stopToEdit) return;
 
     const { rua, numero, bairro, cidade, cep, lat, lng } = editService;
-    if (!rua || !numero || !bairro || !cidade) {
+    if (!rua || !bairro || !cidade) {
       toast({
         variant: 'destructive',
         title: 'Campos Obrigatórios',
-        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+        description: 'Rua, bairro e cidade são obrigatórios para geocodificar o endereço.',
       });
       return;
     }
@@ -1280,7 +1280,9 @@ export default function OrganizeRoutePage() {
 
     // Se temos lat/lng do mapa ajustado, usar essas coordenadas
     if (lat && lng) {
-      const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const addressString = numero
+        ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+        : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
       geocoded = {
         lat,
         lng,
@@ -1289,7 +1291,9 @@ export default function OrganizeRoutePage() {
       };
     } else {
       // Caso contrário, geocodificar o endereço
-      const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const addressString = numero
+        ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+        : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
       geocoded = await geocodeAddress(addressString);
     }
 
@@ -1393,16 +1397,18 @@ export default function OrganizeRoutePage() {
 
   const handleAddService = async () => {
     const { rua, numero, bairro, cidade, cep } = manualService;
-    if (!rua || !numero || !bairro || !cidade) {
+    if (!rua || !bairro || !cidade) {
       toast({
         variant: 'destructive',
         title: 'Campos Obrigatórios',
-        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+        description: 'Rua, bairro e cidade são obrigatórios para geocodificar o endereço.',
       });
       return;
     }
 
-    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+    const addressString = numero
+      ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+      : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
 
     const geocoded = await geocodeAddress(addressString);
 
@@ -1957,43 +1963,63 @@ export default function OrganizeRoutePage() {
 
     // Find which route contains this stop
     let targetRoute: RouteInfo | null = null;
-    let routeKey: 'A' | 'B' | null = null;
-    let setter: React.Dispatch<React.SetStateAction<RouteInfo | null>> | null = null;
+    let routeKey: string | null = null;
 
+    // Check route A
     if (routeA?.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
       targetRoute = routeA;
       routeKey = 'A';
-      setter = setRouteA;
-    } else if (routeB?.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
+    }
+    // Check route B
+    else if (routeB?.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
       targetRoute = routeB;
       routeKey = 'B';
-      setter = setRouteB;
-    } else if (unassignedStops.some(s => String(s.id ?? s.placeId) === stopId)) {
+    }
+    // Check dynamic routes
+    else {
+      for (const dynamicRoute of dynamicRoutes) {
+        if (dynamicRoute.data.stops.some(s => String(s.id ?? s.placeId) === stopId)) {
+          targetRoute = dynamicRoute.data;
+          routeKey = dynamicRoute.key;
+          break;
+        }
+      }
+    }
+
+    // Check unassigned stops
+    if (!routeKey && unassignedStops.some(s => String(s.id ?? s.placeId) === stopId)) {
       // Remove from unassigned stops
       setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
       toast({ title: 'Parada removida!', description: 'A parada foi removida dos serviços não alocados.' });
       return;
     }
 
-    if (!targetRoute || !setter || !routeKey) return;
+    if (!targetRoute || !routeKey) return;
 
     console.log('📍 Rota encontrada:', {
       routeKey,
       stopsCount: targetRoute.stops.length
     });
 
+    // Find the stop to move to unassigned
+    const stopToMove = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
+    if (!stopToMove) return;
+
+    // Add to unassigned stops
+    setUnassignedStops(prev => [...prev, stopToMove]);
+
     // Remove the stop from the route
     const newStops = targetRoute.stops.filter(s => String(s.id ?? s.placeId) !== stopId);
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
-      setter({
+      setRoute(routeKey, () => ({
         ...targetRoute,
         stops: [],
         encodedPolyline: '',
         distanceMeters: 0,
         duration: '0s'
-      });
+      }));
 
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
@@ -2020,13 +2046,14 @@ export default function OrganizeRoutePage() {
         }
       }
 
-      toast({ title: 'Parada removida!', description: `A última parada da ${routeNames[routeKey]} foi removida.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}` });
+      const routeName = routeKey === 'A' || routeKey === 'B' ? routeNames[routeKey] : `Rota ${routeKey}`;
+      toast({ title: 'Parada movida!', description: `A parada foi movida da ${routeName} para serviços não alocados.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}` });
     } else {
       // Recalculate route with remaining stops
-      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      setRoute(routeKey, prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
       const newRouteInfo = await computeRoute(routeData.origin, newStops);
       if (newRouteInfo) {
-        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+        setRoute(routeKey, prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
 
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
@@ -2055,7 +2082,8 @@ export default function OrganizeRoutePage() {
           }
         }
       }
-      toast({ title: 'Parada removida!', description: `A parada foi removida da ${routeNames[routeKey]}.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}` });
+      const routeName = routeKey === 'A' || routeKey === 'B' ? routeNames[routeKey] : `Rota ${routeKey}`;
+      toast({ title: 'Parada movida!', description: `A parada foi movida da ${routeName} para serviços não alocados.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}` });
     }
   };
 

@@ -424,16 +424,18 @@ export default function NewRoutePage() {
 
   const handleSaveManualService = async (isEditing = false) => {
     const { rua, numero, bairro, cidade, cep } = manualService;
-    if (!rua || !numero || !bairro || !cidade) {
+    if (!rua || !bairro || !cidade) {
         toast({
             variant: 'destructive',
             title: 'Campos Obrigatórios',
-            description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+            description: 'Rua, bairro e cidade são obrigatórios para geocodificar o endereço.',
         });
         return;
     }
 
-    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+    const addressString = numero
+      ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+      : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
     
     const geocoded = await geocodeAddress(addressString);
 

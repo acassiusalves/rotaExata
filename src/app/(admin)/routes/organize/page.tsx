@@ -1302,11 +1302,11 @@ export default function OrganizeRoutePage() {
     if (!stopToEdit) return;
 
     const { rua, numero, bairro, cidade, cep, lat, lng } = editService;
-    if (!rua || !numero || !bairro || !cidade) {
+    if (!rua || !bairro || !cidade) {
       toast({
         variant: 'destructive',
         title: 'Campos Obrigatórios',
-        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+        description: 'Rua, bairro e cidade são obrigatórios para geocodificar o endereço.',
       });
       return;
     }
@@ -1315,7 +1315,9 @@ export default function OrganizeRoutePage() {
 
     // Se temos lat/lng do mapa ajustado, usar essas coordenadas
     if (lat && lng) {
-      const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const addressString = numero
+        ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+        : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
       geocoded = {
         lat,
         lng,
@@ -1324,7 +1326,9 @@ export default function OrganizeRoutePage() {
       };
     } else {
       // Caso contrário, geocodificar o endereço
-      const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const addressString = numero
+        ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+        : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
       geocoded = await geocodeAddress(addressString);
     }
 
@@ -1409,16 +1413,18 @@ export default function OrganizeRoutePage() {
 
   const handleAddService = async () => {
     const { rua, numero, bairro, cidade, cep } = manualService;
-    if (!rua || !numero || !bairro || !cidade) {
+    if (!rua || !bairro || !cidade) {
       toast({
         variant: 'destructive',
         title: 'Campos Obrigatórios',
-        description: 'Rua, número, bairro e cidade são obrigatórios para geocodificar o endereço.',
+        description: 'Rua, bairro e cidade são obrigatórios para geocodificar o endereço.',
       });
       return;
     }
 
-    const addressString = `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+    const addressString = numero
+      ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
+      : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
 
     const geocoded = await geocodeAddress(addressString);
 
