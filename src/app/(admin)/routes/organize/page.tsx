@@ -2640,7 +2640,7 @@ export default function OrganizeRoutePage() {
                 </DropdownMenu>
                 <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
                   <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" disabled className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">
+                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
                       <Wand2 className="mr-2 h-4 w-4" />
                       Organizar
                     </TabsTrigger>

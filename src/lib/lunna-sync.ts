@@ -1,4 +1,4 @@
-import { db } from '@/lib/firebase/config';
+import { db } from '@/lib/firebase/client';
 import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import type { RouteInfo, PlaceValue } from '@/lib/types';
 

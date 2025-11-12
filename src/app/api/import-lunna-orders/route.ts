@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase/config';
-import {
-  collection,
-  doc,
-  getDoc,
-  addDoc,
-  updateDoc,
-  runTransaction,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { adminDb } from '@/lib/firebase/admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo } from '@/lib/types';
 
 // Função para geocodificar um endereço usando Google Maps API
@@ -55,14 +47,18 @@ async function geocodeAddress(address: string): Promise<PlaceValue | null> {
 
 // Função para gerar código LN-XXXX usando o contador existente
 async function generateLunnaRouteCode(): Promise<string> {
-  const counterRef = doc(db, 'counters', 'routeCode');
+  if (!adminDb) {
+    throw new Error('Firebase Admin não inicializado');
+  }
 
-  const newCode = await runTransaction(db, async (transaction) => {
+  const counterRef = adminDb.collection('counters').doc('routeCode');
+
+  const newCode = await adminDb.runTransaction(async (transaction) => {
     const counterDoc = await transaction.get(counterRef);
 
     let currentValue = 0;
-    if (counterDoc.exists()) {
-      currentValue = counterDoc.data().value || 0;
+    if (counterDoc.exists) {
+      currentValue = counterDoc.data()?.value || 0;
     }
 
     const nextValue = currentValue + 1;
@@ -77,14 +73,18 @@ async function generateLunnaRouteCode(): Promise<string> {
 // Validar permissões do usuário
 async function validateUserPermissions(userId: string): Promise<boolean> {
   try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    if (!userDoc.exists()) {
+    if (!adminDb) {
+      return false;
+    }
+
+    const userDoc = await adminDb.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
       return false;
     }
 
     const userData = userDoc.data();
     const allowedRoles = ['admin', 'gestor', 'socio'];
-    return allowedRoles.includes(userData.role);
+    return allowedRoles.includes(userData?.role);
   } catch (error) {
     console.error('Erro ao validar permissões:', error);
     return false;
@@ -93,6 +93,13 @@ async function validateUserPermissions(userId: string): Promise<boolean> {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!adminDb) {
+      return NextResponse.json(
+        { error: 'Firebase Admin não inicializado' },
+        { status: 500 }
+      );
+    }
+
     const body = await request.json();
     const { orderIds, userId } = body;
 
@@ -125,8 +132,8 @@ export async function POST(request: NextRequest) {
     const notFoundOrders: string[] = [];
 
     for (const orderId of orderIds) {
-      const orderDoc = await getDoc(doc(db, 'orders', orderId));
-      if (!orderDoc.exists()) {
+      const orderDoc = await adminDb.collection('orders').doc(orderId).get();
+      if (!orderDoc.exists) {
         notFoundOrders.push(orderId);
       } else {
         orders.push({ id: orderDoc.id, ...orderDoc.data() } as LunnaOrder);
@@ -149,8 +156,8 @@ export async function POST(request: NextRequest) {
 
     for (const order of orders) {
       if (!clientsMap.has(order.client.id)) {
-        const clientDoc = await getDoc(doc(db, 'clientes', order.client.id));
-        if (clientDoc.exists()) {
+        const clientDoc = await adminDb.collection('clientes').doc(order.client.id).get();
+        if (clientDoc.exists) {
           clientsMap.set(order.client.id, clientDoc.data() as LunnaClient);
         } else {
           missingClients.push(`Pedido ${order.number}: Cliente ${order.client.name} (ID: ${order.client.id}) não encontrado`);
@@ -272,20 +279,20 @@ export async function POST(request: NextRequest) {
       source: 'lunna',
       lunnaOrderIds: orders.map((o) => o.number),
       visible: true,
-      plannedDate: serverTimestamp(),
+      plannedDate: FieldValue.serverTimestamp(),
       createdBy: userId,
-      createdAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     };
 
-    const routeRef = await addDoc(collection(db, 'routes'), routeData);
+    const routeRef = await adminDb.collection('routes').add(routeData);
 
     // 6. Atualizar status dos pedidos no Lunna
     for (const order of orders) {
-      await updateDoc(doc(db, 'orders', order.id), {
+      await adminDb.collection('orders').doc(order.id).update({
         logisticsStatus: 'em_rota',
         rotaExataRouteId: routeRef.id,
         rotaExataRouteCode: routeCode,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
 
