@@ -435,19 +435,21 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         markerBorder = '#FF6B00';
         markerGlyph = '★';
         markerScale = 1.5;
+      } else if (isCompleted) {
+        // Prioridade para entregas concluídas
+        markerBackground = '#22c55e'; // Verde para concluído
+        markerBorder = '#16a34a';
+        markerGlyph = '✓';
+      } else if (isFailed) {
+        // Prioridade para entregas falhadas
+        markerBackground = '#ef4444'; // Vermelho para falha
+        markerBorder = '#dc2626';
+        markerGlyph = '✗';
       } else if (isNewlyAdded) {
         markerBackground = '#FF6B00'; // Laranja brilhante para recém-adicionados
         markerBorder = '#FFD700';
         markerGlyph = '✨';
         markerScale = 1.3;
-      } else if (isCompleted) {
-        markerBackground = '#22c55e'; // Verde para concluído
-        markerBorder = '#16a34a';
-        markerGlyph = '✓';
-      } else if (isFailed) {
-        markerBackground = '#ef4444'; // Vermelho para falha
-        markerBorder = '#dc2626';
-        markerGlyph = '✗';
       }
 
       const pinElement = isUnassigned
@@ -631,7 +633,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       markerContainer.style.cursor = 'pointer';
       markerContainer.style.pointerEvents = 'auto';
       const root = createRoot(markerContainer);
-      root.render(<DriverLocationPulse size={44.8} />);
+      root.render(<DriverLocationPulse size={100} />);
 
       driverMarkerRef.current = new google.maps.marker.AdvancedMarkerElement({
         map,
@@ -700,7 +702,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             markerContainer.style.cursor = 'pointer';
             markerContainer.style.pointerEvents = 'auto';
             const root = createRoot(markerContainer);
-            root.render(<DriverLocationPulse size={44.8} />);
+            root.render(<DriverLocationPulse size={100} />);
 
             marker = new google.maps.marker.AdvancedMarkerElement({
                 map,

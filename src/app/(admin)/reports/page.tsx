@@ -304,11 +304,11 @@ export default function ReportsPage() {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(
         d =>
-          d.customerName.toLowerCase().includes(search) ||
-          d.address.toLowerCase().includes(search) ||
+          d.customerName?.toLowerCase().includes(search) ||
+          d.address?.toLowerCase().includes(search) ||
           d.orderNumber?.toLowerCase().includes(search) ||
-          d.routeName.toLowerCase().includes(search) ||
-          d.driverName.toLowerCase().includes(search)
+          d.routeName?.toLowerCase().includes(search) ||
+          d.driverName?.toLowerCase().includes(search)
       );
     }
 

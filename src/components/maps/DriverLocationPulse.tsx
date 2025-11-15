@@ -1,42 +1,60 @@
 import React from 'react';
+import Image from 'next/image';
 
-export const DriverLocationPulse: React.FC<{ size?: number }> = ({ size = 44.8 }) => {
+export const DriverLocationPulse: React.FC<{ size?: number }> = ({ size = 128 }) => {
   return (
     <div
       style={{
         width: `${size}px`,
         height: `${size}px`,
         position: 'relative',
-        transform: 'rotate(45deg)',
-        pointerEvents: 'none', // Permitir que eventos passem através do container
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'auto', // Permitir cliques no ícone
       }}
     >
       <style>{`
         @keyframes pulse-driver-location {
-          to {
-            transform: perspective(${size * 7.5}px) translateZ(${size * 3.75}px);
+          0% {
+            transform: scale(1);
+            opacity: 0.7;
+          }
+          50% {
+            transform: scale(1.2);
+            opacity: 0.3;
+          }
+          100% {
+            transform: scale(1.4);
             opacity: 0;
           }
         }
 
-        .driver-pulse-before,
-        .driver-pulse-after {
+        .driver-pulse-ring {
           content: "";
           position: absolute;
-          inset: 0;
-          border-radius: 50% 50% 0 50%;
-          background: transparent;
-          background-image: radial-gradient(circle ${size * 0.25}px at 50% 50%, transparent 94%, #10b981);
-          pointer-events: none; /* Elementos visuais não bloqueiam cliques */
-        }
-
-        .driver-pulse-after {
-          animation: pulse-driver-location 1s infinite;
-          transform: perspective(${size * 7.5}px) translateZ(0px);
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          background: rgba(209, 0, 0, 0.3);
+          animation: pulse-driver-location 2s infinite;
+          pointer-events: none;
         }
       `}</style>
-      <div className="driver-pulse-before" />
-      <div className="driver-pulse-after" />
+      <div className="driver-pulse-ring" />
+      <Image
+        src="/icons/driver-marker.svg"
+        alt="Localização do Motorista"
+        width={size}
+        height={size}
+        style={{
+          position: 'relative',
+          zIndex: 10,
+          pointerEvents: 'none',
+          transform: 'rotate(0deg)', // Garantir rotação correta
+        }}
+        unoptimized
+      />
     </div>
   );
 };

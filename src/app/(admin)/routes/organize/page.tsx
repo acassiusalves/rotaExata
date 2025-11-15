@@ -674,18 +674,13 @@ export default function OrganizeRoutePage() {
         const routes: RouteInfo[] = [];
         const visibility: Record<string, boolean> = {};
 
-        // Array of distinct colors for routes
+        // Array of distinct colors for routes (sistema sequencial de cores)
         const routeColors = [
-          '#2196F3', // Blue
-          '#4CAF50', // Green
-          '#FF9800', // Orange
-          '#9C27B0', // Purple
-          '#00BCD4', // Cyan
-          '#FFEB3B', // Yellow
-          '#E91E63', // Pink
-          '#795548', // Brown
-          '#607D8B', // Blue Grey
-          '#FF5722', // Deep Orange
+          '#e60000', // Vermelho - Icone address 1.svg
+          '#1fd634', // Verde - Icone address 2.svg
+          '#fa9200', // Laranja - Icone address 3.svg
+          '#bf07e4', // Roxo - Icone address 4.svg
+          '#000000', // Preto - Icone address 5.svg
         ];
 
         // Get colors already used by main routes (A and B)
@@ -839,7 +834,7 @@ export default function OrganizeRoutePage() {
                 distanceMeters: routeData.distanceMeters,
                 duration: routeData.duration,
                 encodedPolyline: routeData.encodedPolyline,
-                color: routeData.color || parsedData.existingRouteData?.color || '#F44336',
+                color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
                 visible: true,
               });
               setRouteB(null); // Não tem segunda rota
@@ -1002,10 +997,10 @@ export default function OrganizeRoutePage() {
               : Promise.resolve(null),
           ]);
           if (computedRouteA) {
-            setRouteA({ ...computedRouteA, color: '#F44336', visible: true });
+            setRouteA({ ...computedRouteA, color: '#e60000', visible: true });
           }
           if (computedRouteB) {
-            setRouteB({ ...computedRouteB, color: '#FF9800', visible: true });
+            setRouteB({ ...computedRouteB, color: '#1fd634', visible: true });
           }
           setIsLoading(false);
         };
@@ -1603,12 +1598,12 @@ export default function OrganizeRoutePage() {
           ...prev,
           ...newRouteInfo,
           stops: newTargetStops,
-          color: targetRoute?.color || (overRouteKey === 'A' ? '#F44336' : overRouteKey === 'B' ? '#FF9800' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#4CAF50'),
+          color: targetRoute?.color || (overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200'),
           visible: targetRoute?.visible ?? true
         } : {
           ...newRouteInfo,
           stops: newTargetStops,
-          color: overRouteKey === 'A' ? '#F44336' : overRouteKey === 'B' ? '#FF9800' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#4CAF50',
+          color: overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200',
           visible: true
         });
       }
@@ -1755,7 +1750,13 @@ export default function OrganizeRoutePage() {
 
   // Function to add a new dynamic route
   const handleAddNewRoute = () => {
-    const routeColors = ['#4CAF50', '#9C27B0', '#FF5722', '#00BCD4', '#FFC107', '#E91E63'];
+    const routeColors = [
+      '#e60000', // Vermelho - Icone address 1.svg
+      '#1fd634', // Verde - Icone address 2.svg
+      '#fa9200', // Laranja - Icone address 3.svg
+      '#bf07e4', // Roxo - Icone address 4.svg
+      '#000000', // Preto - Icone address 5.svg
+    ];
     const nextRouteIndex = dynamicRoutes.length;
     const nextRouteLetter = String.fromCharCode(67 + nextRouteIndex); // C, D, E, F, etc.
     const color = routeColors[nextRouteIndex % routeColors.length];
