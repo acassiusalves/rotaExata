@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate:driver-deliveries": "tsx scripts/update-driver-deliveries.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

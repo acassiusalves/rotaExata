@@ -11,8 +11,8 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { History, Loader2, MapPin, Milestone, FileText, Calendar, User, LayoutGrid, List } from 'lucide-react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { History, Loader2, MapPin, Milestone, FileText, LayoutGrid, List, Search, Sunrise, Sunset, Calendar } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -25,12 +25,21 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@/components/ui/toggle-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { db } from '@/lib/firebase/client';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { RouteDetailsDialog } from '@/components/routes/route-details-dialog';
+import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -48,6 +57,39 @@ type RouteDocument = RouteInfo & {
 };
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(2);
+
+// Função para determinar o período (Matutino, Vespertino ou Noturno)
+const getPeriodInfo = (date: Date | Timestamp) => {
+  const hour = date instanceof Date ? date.getHours() : date.toDate().getHours();
+
+  // Matutino: 8h - 11h59
+  if (hour >= 8 && hour < 12) {
+    return {
+      period: 'matutino',
+      label: 'Matutino',
+      icon: Sunrise,
+      color: '#3B82F6',
+    };
+  }
+  // Vespertino: 12h - 18h59
+  else if (hour >= 12 && hour < 19) {
+    return {
+      period: 'vespertino',
+      label: 'Vespertino',
+      icon: Sunset,
+      color: '#F59E0B',
+    };
+  }
+  // Noturno: 19h+
+  else {
+    return {
+      period: 'noturno',
+      label: 'Noturno',
+      icon: Sunset,
+      color: '#8B5CF6',
+    };
+  }
+};
 
 // Componente de Badge de Status
 const StatusBadge: React.FC<{ status?: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto' }> = ({ status }) => {
@@ -79,10 +121,18 @@ const getInitials = (name: string) => {
 
 export default function HistoryRoutesPage() {
   const [completedRoutes, setCompletedRoutes] = React.useState<RouteDocument[]>([]);
+  const [filteredRoutes, setFilteredRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
+
+  // Estados dos filtros
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [selectedDriver, setSelectedDriver] = React.useState<string>('all');
+  const [selectedPeriod, setSelectedPeriod] = React.useState<string>('all');
+  const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 30));
+  const [endDate, setEndDate] = React.useState<Date>(new Date());
 
   // Buscar todas as rotas concluídas
   React.useEffect(() => {
@@ -118,6 +168,58 @@ export default function HistoryRoutesPage() {
     return () => unsubscribe();
   }, []);
 
+  // Extrair lista única de motoristas
+  const drivers = React.useMemo(() => {
+    const driverNames = new Set<string>();
+    completedRoutes.forEach(route => {
+      if (route.driverInfo?.name) {
+        driverNames.add(route.driverInfo.name);
+      }
+    });
+    return Array.from(driverNames).sort();
+  }, [completedRoutes]);
+
+  // Aplicar filtros
+  React.useEffect(() => {
+    let filtered = [...completedRoutes];
+
+    // Filtro por busca de texto
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        route =>
+          route.name?.toLowerCase().includes(search) ||
+          route.code?.toLowerCase().includes(search) ||
+          route.driverInfo?.name?.toLowerCase().includes(search)
+      );
+    }
+
+    // Filtro por motorista
+    if (selectedDriver !== 'all') {
+      filtered = filtered.filter(route => route.driverInfo?.name === selectedDriver);
+    }
+
+    // Filtro por período do dia
+    if (selectedPeriod !== 'all') {
+      filtered = filtered.filter(route => {
+        if (!route.plannedDate) return false;
+        const period = getPeriodInfo(route.plannedDate);
+        return period.period === selectedPeriod;
+      });
+    }
+
+    // Filtro por intervalo de datas
+    const start = startOfDay(startDate);
+    const end = endOfDay(endDate);
+    filtered = filtered.filter(route => {
+      if (!route.completedAt) return false;
+      const completedDate = route.completedAt.toDate();
+      return completedDate >= start && completedDate <= end;
+    });
+
+    setFilteredRoutes(filtered);
+  }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate]);
+
   const handleOpenDetails = (route: RouteDocument) => {
     setSelectedRoute(route);
     setIsDetailsOpen(true);
@@ -130,7 +232,9 @@ export default function HistoryRoutesPage() {
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Histórico de Rotas</h2>
             <p className="text-muted-foreground">
-              Consulte todas as rotas concluídas do sistema
+              {filteredRoutes.length === completedRoutes.length
+                ? `${completedRoutes.length} rota${completedRoutes.length !== 1 ? 's' : ''} concluída${completedRoutes.length !== 1 ? 's' : ''}`
+                : `${filteredRoutes.length} de ${completedRoutes.length} rota${completedRoutes.length !== 1 ? 's' : ''}`}
             </p>
           </div>
           <ToggleGroup type="single" value={viewMode} onValueChange={(value) => value && setViewMode(value as 'grid' | 'list')}>
@@ -143,27 +247,102 @@ export default function HistoryRoutesPage() {
           </ToggleGroup>
         </div>
 
+        {/* Filtros */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Filtros</CardTitle>
+            <CardDescription>Refine sua busca de rotas concluídas</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {/* Campo de busca */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Buscar</label>
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Nome, código ou motorista..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+              </div>
+
+              {/* Filtro de intervalo de datas */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Período</label>
+                <DatePickerWithPresets
+                  startDate={startDate}
+                  endDate={endDate}
+                  onDateRangeChange={(start, end) => {
+                    setStartDate(start);
+                    setEndDate(end);
+                  }}
+                  placeholder="Selecione o período"
+                />
+              </div>
+
+              {/* Filtro de motorista */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Motorista</label>
+                <Select value={selectedDriver} onValueChange={setSelectedDriver}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {drivers.map(driver => (
+                      <SelectItem key={driver} value={driver}>
+                        {driver}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Filtro de período do dia */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Período do Dia</label>
+                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="matutino">Matutino (8h-11h)</SelectItem>
+                    <SelectItem value="vespertino">Vespertino (12h-18h)</SelectItem>
+                    <SelectItem value="noturno">Noturno (19h+)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {isLoading && (
           <div className="flex h-[400px] items-center justify-center rounded-lg border border-dashed">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {!isLoading && completedRoutes.length === 0 && (
+        {!isLoading && filteredRoutes.length === 0 && (
           <Card className="min-h-[400px] flex items-center justify-center border-dashed">
             <CardContent className="text-center pt-6">
               <History className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-4 text-lg font-semibold">Nenhuma Rota no Histórico</h3>
+              <h3 className="mt-4 text-lg font-semibold">Nenhuma Rota Encontrada</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Ainda não há rotas concluídas no sistema.
+                {completedRoutes.length === 0
+                  ? 'Ainda não há rotas concluídas no sistema.'
+                  : 'Nenhuma rota corresponde aos filtros selecionados.'}
               </p>
             </CardContent>
           </Card>
         )}
 
-        {!isLoading && completedRoutes.length > 0 && viewMode === 'grid' && (
+        {!isLoading && filteredRoutes.length > 0 && viewMode === 'grid' && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {completedRoutes.map((route) => (
+            {filteredRoutes.map((route) => (
               <Card key={route.id} className="flex flex-col">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
@@ -230,7 +409,7 @@ export default function HistoryRoutesPage() {
           </div>
         )}
 
-        {!isLoading && completedRoutes.length > 0 && viewMode === 'list' && (
+        {!isLoading && filteredRoutes.length > 0 && viewMode === 'list' && (
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -247,7 +426,7 @@ export default function HistoryRoutesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {completedRoutes.map((route) => (
+                {filteredRoutes.map((route) => (
                   <TableRow key={route.id}>
                     <TableCell>
                       <Badge variant="outline" className="font-mono">

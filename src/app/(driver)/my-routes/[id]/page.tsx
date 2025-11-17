@@ -26,7 +26,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { db, storage } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, Timestamp, updateDoc, increment } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -470,6 +470,19 @@ export default function RouteDetailsPage() {
       });
 
       console.log('✅ Salvo com sucesso no Firestore!');
+
+      // Incrementar contador de entregas do motorista se for entrega bem-sucedida
+      if (data.status === 'completed' && route.driverId) {
+        try {
+          const driverRef = doc(db, 'users', route.driverId);
+          await updateDoc(driverRef, {
+            totalDeliveries: increment(1),
+          });
+          console.log('✅ Contador de entregas do motorista incrementado!');
+        } catch (counterError) {
+          console.error('⚠️ Erro ao incrementar contador (não crítico):', counterError);
+        }
+      }
 
       // Sincronizar status com pedidos do Lunna se a rota for importada
       if (route.source === 'lunna') {
