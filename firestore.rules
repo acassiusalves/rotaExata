@@ -83,5 +83,11 @@ service cloud.firestore {
       // Drivers can read and update notifications for their routes
       allow read, update: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
     }
+
+    // RULES FOR COUNTERS (used for generating route codes)
+    match /counters/{counterId} {
+      // Only admins can read and write counters
+      allow read, write: if isAppAdmin();
+    }
   }
 }

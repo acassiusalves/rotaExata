@@ -743,9 +743,11 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         }
 
         marker.position = { lat: loc.lat, lng: loc.lng };
-        if (loc.heading && marker.content instanceof HTMLElement) {
-            marker.content.style.transform = `rotate(${loc.heading}deg)`;
-        }
+        // Removido: rotação do marcador baseada no heading
+        // O ícone do motorista deve sempre ficar na vertical
+        // if (loc.heading && marker.content instanceof HTMLElement) {
+        //     marker.content.style.transform = `rotate(${loc.heading}deg)`;
+        // }
 
         bounds.extend(marker.position);
     });
