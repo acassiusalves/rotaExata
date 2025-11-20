@@ -1700,7 +1700,10 @@ export default function OrganizeRoutePage() {
     if (routeKey === 'A') return routeA;
     if (routeKey === 'B') return routeB;
     const dynamicRoute = dynamicRoutes.find(r => r.key === routeKey);
-    return dynamicRoute?.data || null;
+    if (dynamicRoute) return dynamicRoute.data;
+    // Check in additional routes (Outras Rotas do Período)
+    const additionalRoute = additionalRoutes.find(r => r.id === routeKey);
+    return additionalRoute?.data || null;
   };
 
   const setRoute = (routeKey: string, updater: (prev: RouteInfo | null) => RouteInfo | null) => {
@@ -1709,11 +1712,22 @@ export default function OrganizeRoutePage() {
     } else if (routeKey === 'B') {
       setRouteB(updater);
     } else {
-      setDynamicRoutes(prev => prev.map(r =>
-        r.key === routeKey
-          ? { ...r, data: updater(r.data) || r.data }
-          : r
-      ));
+      // Try to update in dynamicRoutes first
+      const isDynamicRoute = dynamicRoutes.some(r => r.key === routeKey);
+      if (isDynamicRoute) {
+        setDynamicRoutes(prev => prev.map(r =>
+          r.key === routeKey
+            ? { ...r, data: updater(r.data) || r.data }
+            : r
+        ));
+      } else {
+        // Update in additionalRoutes (Outras Rotas do Período)
+        setAdditionalRoutes(prev => prev.map(r =>
+          r.id === routeKey
+            ? { ...r, data: updater(r.data) || r.data }
+            : r
+        ));
+      }
     }
   };
 
@@ -2970,14 +2984,16 @@ export default function OrganizeRoutePage() {
                                 <span>Rota {idx + 2}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{route.data.stops.length}</TableCell>
+                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[route.id] || route.data.stops).length}</TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.data.distanceMeters)} km</TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(route.data.duration)}</TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(route.data.distanceMeters)}</TableCell>
                             <TableCell className="py-4 px-4">
                               <RouteTimeline
+                                key={`timeline-${route.id}-${(pendingEdits[route.id] || route.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
                                 routeKey={route.id}
-                                stops={route.data.stops}
+                                stops={pendingEdits[route.id] || route.data.stops}
+                                originalStops={pendingEdits[route.id] ? route.data.stops : undefined}
                                 color={route.data.color}
                                 dragDelay={DRAG_DELAY}
                                 onStopClick={(stop) => {
@@ -2985,18 +3001,26 @@ export default function OrganizeRoutePage() {
                                   if (id) mapApiRef.current?.openStopInfo(id);
                                 }}
                                 onRemoveFromRoute={(stop, index) => handleTransferStopToAnotherRoute(stop, index, route.id)}
+                                onDeleteStop={(stop, index) => handleDeleteStopFromTimeline(stop, index, route.id)}
+                                onShowInfo={handleShowStopInfo}
                               />
                             </TableCell>
                             <TableCell className="py-4 px-4 text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled
-                                className="border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
-                              >
-                                <Wand2 className="mr-2 h-4 w-4" />
-                                Otimizar
-                              </Button>
+                              {pendingEdits[route.id] ? (
+                                <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                                  {pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
+                                </Badge>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled
+                                  className="border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                                >
+                                  <Wand2 className="mr-2 h-4 w-4" />
+                                  Otimizar
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
