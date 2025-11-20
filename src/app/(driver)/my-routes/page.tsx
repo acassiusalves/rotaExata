@@ -1,31 +1,23 @@
-
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
-import {
-  Card,
-  CardContent,
-  CardFooter,
-} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   MapPin,
-  ArrowRightLeft,
-  ShoppingBag,
+  Route as RouteIcon,
   Loader2,
-  Route,
-  Bell,
-  ShieldAlert,
+  Package,
+  Car,
+  CheckCircle,
+  Clock,
+  Weight,
 } from 'lucide-react';
 import { db } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/use-auth';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { requestPushPermission, saveCourierToken, onForegroundNotification, isPushSupported } from '@/lib/firebase/messaging';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import Image from 'next/image';
 
 type RouteDocument = {
   id: string;
@@ -38,158 +30,128 @@ type RouteDocument = {
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(0);
 
-const RouteCard: React.FC<{ route: RouteDocument }> = ({ route }) => (
-  <Card className="w-full shadow-md">
-    <CardContent className="pt-6">
-      <div className="text-center space-y-2">
-        <h3 className="font-semibold text-lg">{route.name}</h3>
-        <p className="text-sm text-muted-foreground">
-          {format(route.plannedDate.toDate(), 'dd/MM/yyyy - HH:mm', {
-            locale: ptBR,
-          })}
-        </p>
-        <div className="flex justify-around items-center pt-4">
-          <div className="flex flex-col items-center gap-1">
-            <MapPin className="h-5 w-5 text-muted-foreground" />
-            <span className="text-xs font-bold">{route.stops.length} PARADAS</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <ArrowRightLeft className="h-5 w-5 text-muted-foreground" />
-            <span className="text-xs font-bold">{formatDistance(route.distanceMeters)}KM</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <ShoppingBag className="h-5 w-5 text-muted-foreground" />
-            <span className="text-xs font-bold">11.200KG</span>
-          </div>
-        </div>
-      </div>
-    </CardContent>
-    <CardFooter>
-      <Button asChild className="w-full text-accent font-bold" variant="link">
-        <Link href={`/my-routes/${route.id}`}>VISUALIZAR</Link>
-      </Button>
-    </CardFooter>
-  </Card>
-);
+const getRouteMapUrl = (stops: any[]) => {
+  if (!stops || stops.length === 0) return null;
+
+  const apiKey = process.env.NEXT_PUBLIC_GMAPS_KEY;
+  if (!apiKey) return null;
+
+  // Pegar primeiro e último ponto da rota
+  const origin = stops[0];
+  const destination = stops[stops.length - 1];
+
+  // Verificar diferentes formatos de coordenadas
+  const getCoords = (stop: any) => {
+    // Formato 1: stop.location.lat/lng
+    if (stop?.location?.lat && stop?.location?.lng) {
+      return { lat: stop.location.lat, lng: stop.location.lng };
+    }
+    // Formato 2: stop.lat/lng direto
+    if (stop?.lat && stop?.lng) {
+      return { lat: stop.lat, lng: stop.lng };
+    }
+    // Formato 3: stop.latitude/longitude
+    if (stop?.latitude && stop?.longitude) {
+      return { lat: stop.latitude, lng: stop.longitude };
+    }
+    return null;
+  };
+
+  const originCoords = getCoords(origin);
+  const destCoords = getCoords(destination);
+
+  if (!originCoords || !destCoords) return null;
+
+  const originLatLng = `${originCoords.lat},${originCoords.lng}`;
+  const destinationLatLng = `${destCoords.lat},${destCoords.lng}`;
+
+  // Criar waypoints para os pontos intermediários (máximo 8 waypoints)
+  const waypoints = stops.slice(1, -1).slice(0, 8)
+    .map((stop: any) => {
+      const coords = getCoords(stop);
+      return coords ? `${coords.lat},${coords.lng}` : null;
+    })
+    .filter(Boolean)
+    .join('|');
+
+  // Construir URL do Google Maps Static API
+  let url = `https://maps.googleapis.com/maps/api/staticmap?`;
+  url += `size=600x300`;
+  url += `&scale=2`;
+  url += `&maptype=roadmap`;
+  url += `&markers=color:green|label:A|${originLatLng}`;
+  url += `&markers=color:red|label:B|${destinationLatLng}`;
+
+  // Adicionar waypoints como markers
+  if (waypoints) {
+    const waypointArray = waypoints.split('|');
+    waypointArray.forEach((wp: string, idx: number) => {
+      url += `&markers=color:blue|label:${idx + 1}|${wp}`;
+    });
+  }
+
+  // Adicionar a rota
+  url += `&path=color:0x4285F4|weight:3|${originLatLng}`;
+  if (waypoints) {
+    url += `|${waypoints}`;
+  }
+  url += `|${destinationLatLng}`;
+
+  url += `&key=${apiKey}`;
+
+  return url;
+};
+
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case 'in_progress':
+      return {
+        label: 'Em Andamento',
+        icon: Car,
+        className: 'bg-blue-500/20 text-blue-500 dark:text-blue-400',
+      };
+    case 'dispatched':
+      return {
+        label: 'Pendente',
+        icon: Clock,
+        className: 'bg-orange-500/20 text-orange-500 dark:text-orange-400',
+      };
+    case 'completed':
+      return {
+        label: 'Concluída',
+        icon: CheckCircle,
+        className: 'bg-green-500/20 text-green-500 dark:text-green-400',
+      };
+    default:
+      return {
+        label: 'Desconhecido',
+        icon: Clock,
+        className: 'bg-gray-500/20 text-gray-500',
+      };
+  }
+};
+
+const getTotalWeight = (stops: any[]) => {
+  // Placeholder - você pode calcular o peso real se tiver essa informação
+  return Math.floor(Math.random() * 100) + 50;
+};
 
 export default function MyRoutesPage() {
   const { user } = useAuth();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isPushLoading, setIsPushLoading] = React.useState(false);
-  const [pushSupported, setPushSupported] = React.useState(true);
-  const [pushBlocked, setPushBlocked] = React.useState(false);
-  const [pushError, setPushError] = React.useState<string | null>(null);
   const { toast } = useToast();
 
   React.useEffect(() => {
-    // Listen for incoming messages when the app is in the foreground
-    onForegroundNotification(() => {
-      toast({ title: 'Nova rota recebida!', description: 'Uma nova rota foi atribuída a você.' });
-    });
-  }, [toast]);
-
-  React.useEffect(() => {
-    isPushSupported()
-      .then((supported) => {
-        setPushSupported(supported);
-        if (typeof window !== 'undefined' && 'Notification' in window) {
-          setPushBlocked(Notification.permission === 'denied');
-        }
-      })
-      .catch(() => {
-        setPushSupported(false);
-      });
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && 'Notification' in window) {
-        setPushBlocked(Notification.permission === 'denied');
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
-  async function enablePush() {
     if (!user) {
-      toast({ variant: 'destructive', title: 'Erro', description: 'Você precisa estar logado.' });
+      setIsLoading(false);
       return;
     }
-    if (!pushSupported) {
-      toast({ variant: 'destructive', title: 'Navegador não suportado', description: 'As notificações push não estão disponíveis neste dispositivo.' });
-      return;
-    }
-    setIsPushLoading(true);
-    try {
-      const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
-      if (!vapidKey) {
-        throw new Error('VAPID key não configurada no ambiente.');
-      }
-      const token = await requestPushPermission(vapidKey);
-      await saveCourierToken(user.uid, token);
-      toast({ title: 'Notificações ativadas!', description: 'Você receberá alertas de novas rotas.' });
-      setPushBlocked(false);
-      setPushError(null);
-    } catch (e: any) {
-      console.error('Push notification error:', e);
-      const message = /Navegador não suporta Web Push/i.test(e?.message || '')
-        ? 'As notificações push não estão disponíveis neste dispositivo.'
-        : e.message;
-      toast({ variant: 'destructive', title: 'Erro ao ativar notificações', description: message });
-      if (/Notificações bloqueadas/i.test(e?.message || '')) {
-        setPushBlocked(true);
-        setPushError('Notificações bloqueadas no navegador. Libere o envio nas permissões do site e tente novamente.');
-      } else {
-        setPushError(e?.message || 'Erro ao ativar notificações');
-      }
-    } finally {
-        setIsPushLoading(false);
-    }
-  }
-
-  function openNotificationSettings() {
-    if (typeof window === 'undefined') return;
-    const origin = window.location.origin;
-    const ua = navigator.userAgent.toLowerCase();
-
-    try {
-      if (ua.includes('android') && ua.includes('chrome')) {
-        window.open(`chrome://settings/content/siteDetails?site=${encodeURIComponent(origin)}`);
-      } else if (ua.includes('android') && ua.includes('samsung')) {
-        window.open('samsunginternet://settings/content/notifications');
-      } else if (ua.includes('android') && ua.includes('firefox')) {
-        window.open('about:preferences#privacy', '_blank');
-      } else {
-        toast({
-          title: 'Como liberar notificações',
-          description: 'Abra as configurações do navegador e habilite notificações para este site.',
-        });
-      }
-    } catch (error) {
-      console.error('Falha ao abrir configurações de notificações', error);
-      toast({
-        title: 'Como liberar notificações',
-        description: 'Abra manualmente as configurações do navegador e habilite notificações para este site.',
-      });
-    }
-  }
-
-
-  React.useEffect(() => {
-    if (!user) {
-        setIsLoading(false);
-        return;
-    };
 
     const q = query(
-        collection(db, 'routes'), 
-        where('driverId', '==', user.uid),
-        where('status', 'in', ['dispatched', 'in_progress'])
+      collection(db, 'routes'),
+      where('driverId', '==', user.uid),
+      where('status', 'in', ['dispatched', 'in_progress'])
     );
 
     const unsubscribe = onSnapshot(
@@ -202,18 +164,37 @@ export default function MyRoutesPage() {
             ...doc.data(),
           } as RouteDocument);
         });
+
+        // Ordenar: in_progress > dispatched
+        routesData.sort((a, b) => {
+          const order = { in_progress: 0, dispatched: 1 };
+          return order[a.status] - order[b.status];
+        });
+
         setRoutes(routesData);
         setIsLoading(false);
       },
       (error) => {
         console.error('Error fetching routes: ', error);
-        toast({ variant: 'destructive', title: 'Erro ao buscar rotas', description: 'Você não tem permissão para ver estas rotas ou ocorreu um erro.' });
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao buscar rotas',
+          description: 'Ocorreu um erro ao carregar suas rotas.',
+        });
         setIsLoading(false);
       }
     );
 
     return () => unsubscribe();
   }, [user, toast]);
+
+  const stats = React.useMemo(() => {
+    return {
+      totalRoutes: routes.length,
+      totalStops: routes.reduce((acc, route) => acc + route.stops.length, 0),
+      totalDistance: routes.reduce((acc, route) => acc + (route.distanceMeters || 0), 0),
+    };
+  }, [routes]);
 
   if (isLoading) {
     return (
@@ -226,63 +207,107 @@ export default function MyRoutesPage() {
   if (routes.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center p-12 h-[calc(100vh-10rem)]">
-        <Route className="h-16 w-16 text-muted-foreground" />
-        <h3 className="mt-4 text-lg font-semibold">Nenhuma rota para hoje</h3>
+        <RouteIcon className="h-16 w-16 text-muted-foreground" />
+        <h3 className="mt-4 text-lg font-semibold">Nenhuma rota disponível</h3>
         <p className="mt-2 text-sm text-muted-foreground">
           Quando uma rota for atribuída a você, ela aparecerá aqui.
         </p>
-         <Button onClick={enablePush} disabled={isPushLoading || !pushSupported} className="mt-6">
-            {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
-            {isPushLoading ? 'Ativando...' : pushSupported ? 'Ativar Notificações' : 'Não suportado'}
-        </Button>
-        {!pushSupported && (
-          <p className="mt-2 text-xs text-muted-foreground">Este navegador não oferece suporte a notificações push.</p>
-        )}
-        {pushBlocked && pushSupported && (
-          <Alert className="mt-4 w-full max-w-md text-left">
-            <ShieldAlert className="h-4 w-4" />
-            <AlertTitle>Notificações bloqueadas</AlertTitle>
-            <AlertDescription className="space-y-2">
-              <p>{pushError ?? 'Libere o envio de notificações nas permissões do navegador e tente novamente.'}</p>
-              <Button variant="secondary" size="sm" onClick={openNotificationSettings}>
-                Abrir configurações
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 py-4">
-       <div className="flex items-center justify-between px-4">
-        <h1 className="text-xl font-bold">Minhas Rotas</h1>
-        <div className="flex flex-col items-end">
-          <Button onClick={enablePush} disabled={isPushLoading || !pushSupported} variant="outline" size="sm">
-            {isPushLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
-            {pushSupported ? 'Notificações' : 'Não suportado'}
-          </Button>
-          {!pushSupported && (
-            <p className="mt-1 text-xs text-muted-foreground text-right">O seu navegador não suporta notificações push.</p>
-          )}
-          {pushBlocked && pushSupported && (
-            <Alert className="mt-2 w-full max-w-xs text-left">
-              <ShieldAlert className="h-4 w-4" />
-              <AlertTitle>Notificações bloqueadas</AlertTitle>
-              <AlertDescription className="space-y-2">
-                <p>{pushError ?? 'Permita notificações para receber alertas de novas rotas.'}</p>
-                <Button variant="secondary" size="sm" onClick={openNotificationSettings}>
-                  Abrir configurações
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
+    <div className="flex flex-col min-h-screen">
+      {/* Headline */}
+      <h2 className="text-2xl font-bold px-4 pb-3 pt-5">Seu resumo de hoje</h2>
+
+      {/* Stats */}
+      <div className="flex flex-wrap gap-4 p-4">
+        <div className="flex min-w-[158px] flex-1 flex-col gap-2 rounded-xl p-4 bg-card border">
+          <p className="text-sm font-medium text-muted-foreground">Rotas</p>
+          <p className="text-3xl font-bold">{stats.totalRoutes}</p>
+        </div>
+        <div className="flex min-w-[158px] flex-1 flex-col gap-2 rounded-xl p-4 bg-card border">
+          <p className="text-sm font-medium text-muted-foreground">Paradas</p>
+          <p className="text-3xl font-bold">{stats.totalStops}</p>
+        </div>
+        <div className="flex min-w-[158px] flex-1 flex-col gap-2 rounded-xl p-4 bg-card border">
+          <p className="text-sm font-medium text-muted-foreground">Distância</p>
+          <p className="text-3xl font-bold">{formatDistance(stats.totalDistance)} km</p>
         </div>
       </div>
-      {routes.map((route) => (
-        <RouteCard key={route.id} route={route} />
-      ))}
+
+      {/* Section Header */}
+      <h2 className="text-xl font-bold px-4 pb-3 pt-5">Rotas Atribuídas</h2>
+
+      {/* Route Cards */}
+      <div className="px-4 pb-4 space-y-4">
+        {routes.map((route) => {
+          const statusInfo = getStatusBadge(route.status);
+          const StatusIcon = statusInfo.icon;
+          const mapUrl = getRouteMapUrl(route.stops);
+
+          return (
+            <div
+              key={route.id}
+              className="flex flex-col items-stretch justify-start rounded-xl shadow-sm bg-card border overflow-hidden"
+            >
+              {/* Map Thumbnail */}
+              <div className="w-full bg-muted aspect-[2/1] relative flex items-center justify-center overflow-hidden">
+                {mapUrl ? (
+                  <img
+                    src={mapUrl}
+                    alt={`Mapa da rota ${route.name}`}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <MapPin className="h-12 w-12 text-muted-foreground/30" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
+              </div>
+
+              {/* Content */}
+              <div className="flex w-full grow flex-col items-stretch justify-center gap-4 p-4">
+                {/* Header with Status */}
+                <div className="flex justify-between items-start">
+                  <p className="text-lg font-bold">{route.name}</p>
+                  <div className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${statusInfo.className}`}>
+                    <StatusIcon className="h-4 w-4" />
+                    <span>{statusInfo.label}</span>
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div className="flex items-center gap-4 text-muted-foreground text-sm">
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="h-4 w-4" />
+                    <span>{route.stops.length} Paradas</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RouteIcon className="h-4 w-4" />
+                    <span>{formatDistance(route.distanceMeters)} km</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Weight className="h-4 w-4" />
+                    <span>{getTotalWeight(route.stops)} kg</span>
+                  </div>
+                </div>
+
+                {/* Action Button */}
+                <Button
+                  asChild
+                  className="w-full mt-2"
+                >
+                  <Link href={`/my-routes/${route.id}`}>
+                    {route.status === 'in_progress' && 'Ver Detalhes'}
+                    {route.status === 'dispatched' && 'Iniciar Rota'}
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

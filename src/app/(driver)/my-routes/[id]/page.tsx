@@ -15,6 +15,7 @@ import {
   StopCircle,
   RadioTower,
   XCircle,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -434,7 +435,7 @@ export default function RouteDetailsPage() {
       }
 
       // Upload da foto da tentativa de entrega se houver
-      if (data.attemptPhoto && data.wentToLocation) {
+      if (data.attemptPhoto) {
         try {
           console.log('📸 Iniciando upload da foto de tentativa...');
           const attemptPhotoRef = ref(
@@ -580,9 +581,6 @@ export default function RouteDetailsPage() {
                         Finalizar {!canFinishRoute() && `(${getCompletionPercentage().toFixed(0)}%)`}
                     </Button>
                 )}
-                <Avatar className="h-8 w-8">
-                    <AvatarFallback>{route.driverInfo ? getInitials(route.driverInfo.name) : 'N/A'}</AvatarFallback>
-                </Avatar>
             </div>
       </header>
 
@@ -648,28 +646,28 @@ export default function RouteDetailsPage() {
             </CardContent>
         </Card>
         
-        <Button
-          size="lg"
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
-          onClick={() => handleNavigateRoute('google')}
-        >
-          <Navigation className="mr-2 h-5 w-5" />
-          Iniciar Rota Completa em Ordem
-        </Button>
+        {route.status !== 'completed' && (
+          <Button
+            size="lg"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
+            onClick={() => handleNavigateRoute('google')}
+          >
+            <Navigation className="mr-2 h-5 w-5" />
+            Iniciar Rota Completa em Ordem
+          </Button>
+        )}
 
-        <div className="space-y-4">
+        <div className="relative flex flex-col">
+            {/* Linha vertical conectora */}
+            <div className="absolute left-5 top-5 h-[calc(100%-2.5rem)] w-px bg-border"></div>
+
             {route.stops.map((stop, index) => (
-                <div key={stop.id || index}>
-                    <div className="flex items-start gap-4">
-                        <div className="flex flex-col items-center gap-1">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-primary bg-primary/10 text-primary font-bold">
-                                {index + 1}
-                            </div>
-                            {index < route.stops.length - 1 && (
-                                <div className="w-px h-8 bg-border"></div>
-                            )}
-                        </div>
-                        <div className="flex-1 space-y-2">
+                <div key={stop.id || index} className="relative flex gap-4 pb-8 last:pb-0">
+                    <div className="z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-primary bg-background text-primary font-bold">
+                        {index + 1}
+                    </div>
+                    <Card className="flex-1 w-full">
+                        <CardContent className="p-4 space-y-3">
                             <div className="flex justify-between items-start">
                                 <div className="font-semibold">{stop.customerName || 'Endereço'}</div>
                                 {stop.deliveryStatus === 'completed' && (
@@ -703,29 +701,47 @@ export default function RouteDetailsPage() {
                                 <p className="text-xs text-muted-foreground italic">{stop.notes}</p>
                             )}
                             <div className="flex gap-2 pt-2">
-                                 <DropdownMenu>
-                                   <DropdownMenuTrigger asChild>
-                                     <Button size="sm" variant="outline">
-                                       <Navigation className="mr-2 h-4 w-4" />
-                                       Navegar
-                                     </Button>
-                                   </DropdownMenuTrigger>
-                                   <DropdownMenuContent align="start">
-                                     <DropdownMenuItem onClick={() => handleNavigation(stop, 'google')}>
-                                       <MapPin className="mr-2 h-4 w-4" />
-                                       Google Maps
-                                     </DropdownMenuItem>
-                                     <DropdownMenuItem onClick={() => handleNavigation(stop, 'waze')}>
-                                       <Navigation className="mr-2 h-4 w-4" />
-                                       Waze
-                                     </DropdownMenuItem>
-                                   </DropdownMenuContent>
-                                 </DropdownMenu>
+                                 {route.status !== 'completed' ? (
+                                   <DropdownMenu>
+                                     <DropdownMenuTrigger asChild>
+                                       <Button size="sm" variant="outline">
+                                         <Navigation className="mr-2 h-4 w-4" />
+                                         Navegar
+                                       </Button>
+                                     </DropdownMenuTrigger>
+                                     <DropdownMenuContent align="start">
+                                       <DropdownMenuItem onClick={() => handleNavigation(stop, 'google')}>
+                                         <MapPin className="mr-2 h-4 w-4" />
+                                         Google Maps
+                                       </DropdownMenuItem>
+                                       <DropdownMenuItem onClick={() => handleNavigation(stop, 'waze')}>
+                                         <Navigation className="mr-2 h-4 w-4" />
+                                         Waze
+                                       </DropdownMenuItem>
+                                     </DropdownMenuContent>
+                                   </DropdownMenu>
+                                 ) : (
+                                   <Button size="sm" variant="outline" disabled>
+                                     <Navigation className="mr-2 h-4 w-4" />
+                                     Navegar
+                                   </Button>
+                                 )}
                                  {stop.phone && (
                                      <Button size="icon" variant="outline" className="text-green-600 border-green-600/50 hover:bg-green-50 hover:text-green-700" onClick={() => handleWhatsApp(stop.phone, stop.customerName)}>
                                         <WhatsAppIcon className="h-4 w-4" />
                                     </Button>
                                  )}
+                                {route.status === 'completed' && stop.deliveryStatus && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="ml-auto"
+                                        onClick={() => handleOpenConfirmDialog(index)}
+                                    >
+                                        <Info className="mr-2 h-4 w-4" />
+                                        Ver Detalhes
+                                    </Button>
+                                )}
                                 {(route.status === 'in_progress' || route.status === 'dispatched') &&
                                  !stop.deliveryStatus && (
                                     <Button
@@ -752,8 +768,8 @@ export default function RouteDetailsPage() {
                                     </Button>
                                 )}
                             </div>
-                        </div>
-                    </div>
+                        </CardContent>
+                    </Card>
                 </div>
             ))}
         </div>
@@ -771,6 +787,7 @@ export default function RouteDetailsPage() {
           customerName={route.stops[selectedStopIndex]?.customerName}
           address={route.stops[selectedStopIndex]?.address}
           complement={route.stops[selectedStopIndex]?.complemento}
+          viewOnly={route.status === 'completed'}
           stopLocation={
             route.stops[selectedStopIndex]?.lat && route.stops[selectedStopIndex]?.lng
               ? {

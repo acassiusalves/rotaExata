@@ -20,8 +20,13 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, update: if isOwner(userId);
       allow create, delete: if isAppAdmin();
+
+      // Users can read/write their own settings subcollection
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
     }
-    
+
     // Admins can manage all users
     match /users/{userId} {
       allow list: if isAppAdmin();
@@ -46,6 +51,11 @@ service cloud.firestore {
       allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
       // Drivers can update their assigned routes (e.g., change status)
       allow update: if isAuthed() && resource.data.driverId == request.auth.uid;
+
+      // Allow read/write to subcollections within routes
+      match /{document=**} {
+        allow read, write: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+      }
     }
 
     // RULES FOR SETTINGS
@@ -64,6 +74,16 @@ service cloud.firestore {
       allow read: if isAuthed() && driverId == request.auth.uid;
       // Drivers can delete their own processed requests
       allow delete: if isAuthed() && driverId == request.auth.uid;
+    }
+
+    // RULES FOR ROUTE CHANGE NOTIFICATIONS
+    match /routeChangeNotifications/{routeId} {
+      // Admins can create and manage notifications
+      allow create, update, delete: if isAppAdmin();
+      // Drivers can read notifications for their routes
+      allow read: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+      // Drivers can update (acknowledge) notifications for their routes
+      allow update: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
     }
   }
 }

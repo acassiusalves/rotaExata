@@ -8,7 +8,6 @@ import {
   Package,
   Search,
   Users,
-  BotMessageSquare,
   Route,
   ChevronDown,
   Code,
@@ -34,7 +33,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
@@ -45,6 +44,7 @@ interface HeaderProps {
 
 export function Header({}: HeaderProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, userRole, signOut } = useAuth();
   const isDriver = userRole === 'driver';
 
@@ -89,7 +89,7 @@ export function Header({}: HeaderProps) {
       <Sheet>
         <SheetTrigger asChild>
           <Button variant="outline" size="icon" className="shrink-0 md:hidden">
-            <BotMessageSquare className="h-5 w-5" />
+            <Image src="/logo.svg" alt="RotaExata" width={20} height={20} />
             <span className="sr-only">Toggle navigation menu</span>
           </Button>
         </SheetTrigger>
@@ -103,7 +103,7 @@ export function Header({}: HeaderProps) {
               href="/"
               className="flex items-center gap-2 text-lg font-semibold"
             >
-              <BotMessageSquare className="h-6 w-6 text-primary" />
+              <Image src="/logo.svg" alt="RotaExata" width={24} height={24} className="text-primary" />
               <span className="sr-only">RotaExata</span>
             </Link>
              {!isDriver ? (
