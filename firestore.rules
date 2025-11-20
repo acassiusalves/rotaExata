@@ -78,12 +78,10 @@ service cloud.firestore {
 
     // RULES FOR ROUTE CHANGE NOTIFICATIONS
     match /routeChangeNotifications/{routeId} {
-      // Admins can create and manage notifications
-      allow create, update, delete: if isAppAdmin();
-      // Drivers can read notifications for their routes
-      allow read: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
-      // Drivers can update (acknowledge) notifications for their routes
-      allow update: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+      // Admins can do anything with notifications
+      allow read, create, update, delete: if isAppAdmin();
+      // Drivers can read and update notifications for their routes
+      allow read, update: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
     }
   }
 }
