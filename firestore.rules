@@ -94,8 +94,12 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       // Admins and managers can read, create, update, and delete notifications
       allow read, create, update, delete: if isAppAdmin();
-      // Drivers can read notifications
-      allow read: if isAuthed();
+      // Drivers can read their own notifications
+      allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
+      // Drivers can update only 'opened' and 'openedAt' fields of their own notifications
+      allow update: if isAuthed()
+        && resource.data.driverId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt']);
     }
   }
 }

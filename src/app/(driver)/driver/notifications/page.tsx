@@ -29,6 +29,7 @@ import {
   doc,
   updateDoc,
   Timestamp,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -87,15 +88,22 @@ export default function DriverNotificationsPage() {
 
   // Marcar notificação como aberta quando visualizada
   const handleMarkAsOpened = async (notificationId: string, alreadyOpened: boolean) => {
-    if (alreadyOpened) return;
+    if (alreadyOpened) {
+      console.log('📱 [DriverNotifications] Notificação já foi aberta:', notificationId);
+      return;
+    }
+
+    console.log('📱 [DriverNotifications] Marcando notificação como aberta:', notificationId);
 
     try {
-      await updateDoc(doc(db, 'notifications', notificationId), {
+      const notificationRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notificationRef, {
         opened: true,
-        openedAt: new Date(),
+        openedAt: serverTimestamp(),
       });
+      console.log('✅ [DriverNotifications] Notificação marcada como aberta com sucesso');
     } catch (error) {
-      console.error('Erro ao marcar notificação como aberta:', error);
+      console.error('❌ [DriverNotifications] Erro ao marcar notificação como aberta:', error);
     }
   };
 

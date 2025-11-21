@@ -282,11 +282,11 @@ match /notifications/{notificationId} {
   // Admins/gestores/sócios podem fazer tudo
   allow read, create, update, delete: if isAppAdmin();
 
-  // Motoristas podem apenas ler suas próprias notificações
-  allow read: if request.auth != null && resource.data.driverId == request.auth.uid;
+  // Motoristas podem ler suas próprias notificações
+  allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
 
   // Motoristas podem atualizar apenas os campos opened e openedAt
-  allow update: if request.auth != null
+  allow update: if isAuthed()
     && resource.data.driverId == request.auth.uid
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt']);
 }
