@@ -89,5 +89,13 @@ service cloud.firestore {
       // Only admins can read and write counters
       allow read, write: if isAppAdmin();
     }
+
+    // RULES FOR NOTIFICATIONS
+    match /notifications/{notificationId} {
+      // Admins and managers can read, create, update, and delete notifications
+      allow read, create, update, delete: if isAppAdmin();
+      // Drivers can read notifications
+      allow read: if isAuthed();
+    }
   }
 }

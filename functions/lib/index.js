@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.syncAuthUsers = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -398,6 +398,102 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
     }
     catch (error) {
         const msg = error.message || "Falha ao notificar mudanças.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
+/* ========== sendCustomNotification (callable) ========== */
+exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const title = String(d.title || "").trim();
+    const message = String(d.message || "").trim();
+    const driverIds = Array.isArray(d.driverIds) ? d.driverIds : [];
+    const priority = String(d.priority || "medium").trim();
+    const type = String(d.type || "system").trim();
+    // Verificar autenticação
+    const auth = req.auth;
+    if (!auth) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        // Verificar permissão (admin, socio ou gestor)
+        const userDoc = await db.collection("users").doc(auth.uid).get();
+        const userData = userDoc.data();
+        const userRole = userData?.role || "";
+        if (!["admin", "socio", "gestor"].includes(userRole)) {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem enviar notificações customizadas");
+        }
+        if (!title || !message) {
+            throw new https_1.HttpsError("invalid-argument", "Título e mensagem são obrigatórios");
+        }
+        if (driverIds.length === 0) {
+            throw new https_1.HttpsError("invalid-argument", "Selecione pelo menos um motorista");
+        }
+        const messaging = (0, messaging_1.getMessaging)();
+        let successCount = 0;
+        let failureCount = 0;
+        // Enviar notificação push para cada motorista
+        for (const driverId of driverIds) {
+            try {
+                // Buscar FCM token do motorista
+                const driverDoc = await db.collection("users").doc(driverId).get();
+                const driverData = driverDoc.data();
+                const fcmToken = driverData?.fcmToken;
+                if (!fcmToken) {
+                    console.log(`⚠️ Motorista ${driverId} não tem FCM token`);
+                    failureCount++;
+                    continue;
+                }
+                // Montar mensagem de notificação
+                const pushMessage = {
+                    notification: {
+                        title,
+                        body: message,
+                    },
+                    data: {
+                        type,
+                        priority,
+                        customNotification: "true",
+                    },
+                    token: fcmToken,
+                    android: {
+                        priority: priority === "high" ? "high" : "normal",
+                        notification: {
+                            sound: "default",
+                            priority: priority === "high" ? "high" : "default",
+                            channelId: "custom_notifications",
+                        },
+                    },
+                    webpush: {
+                        notification: {
+                            icon: "/icons/pwa-192.png",
+                            badge: "/icons/pwa-192.png",
+                            requireInteraction: priority === "high",
+                            tag: `custom-${Date.now()}`,
+                        },
+                        fcmOptions: {
+                            link: "/driver/notifications",
+                        },
+                    },
+                };
+                await messaging.send(pushMessage);
+                successCount++;
+                console.log(`✅ Push notification enviada para motorista ${driverId}`);
+            }
+            catch (error) {
+                console.error(`❌ Erro ao enviar push para motorista ${driverId}:`, error);
+                failureCount++;
+            }
+        }
+        return {
+            ok: true,
+            message: `Notificações enviadas: ${successCount} sucesso, ${failureCount} falhas`,
+            successCount,
+            failureCount,
+        };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao enviar notificações.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
 });

@@ -12,6 +12,8 @@ import {
   Filter,
   Search,
   Calendar,
+  Plus,
+  Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -64,6 +66,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { CreateNotificationDialog } from '@/components/notifications/create-notification-dialog';
 
 interface Notification {
   id: string;
@@ -71,12 +74,15 @@ interface Notification {
   title: string;
   message: string;
   read: boolean;
+  opened?: boolean;
+  openedAt?: Timestamp | null;
   routeId?: string;
   routeName?: string;
   driverId?: string;
   driverName?: string;
   timestamp: Timestamp;
   priority: 'low' | 'medium' | 'high';
+  createdBy?: string;
 }
 
 export default function NotificationsPage() {
@@ -87,6 +93,7 @@ export default function NotificationsPage() {
   const [filterType, setFilterType] = React.useState<string>('all');
   const [filterStatus, setFilterStatus] = React.useState<string>('all');
   const [notificationToDelete, setNotificationToDelete] = React.useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const { toast } = useToast();
 
   // Load notifications from Firestore
@@ -265,7 +272,7 @@ export default function NotificationsPage() {
             Notificações
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Gerencie todas as notificações do sistema
+            Gerencie e envie notificações para motoristas
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -280,6 +287,10 @@ export default function NotificationsPage() {
               Marcar todas como lidas
             </Button>
           )}
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nova Notificação
+          </Button>
         </div>
       </div>
 
@@ -320,6 +331,7 @@ export default function NotificationsPage() {
             <div className="text-2xl font-bold">
               {
                 notifications.filter((n) => {
+                  if (!n.timestamp) return false;
                   const today = new Date();
                   const notifDate = n.timestamp.toDate();
                   return (
@@ -464,16 +476,30 @@ export default function NotificationsPage() {
                       {getPriorityBadge(notification.priority)}
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {format(notification.timestamp.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                      </span>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                      {notification.timestamp && (
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {format(notification.timestamp.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        </span>
+                      )}
                       {notification.driverName && (
                         <span>• Motorista: {notification.driverName}</span>
                       )}
                       {notification.routeName && (
                         <span>• {notification.routeName}</span>
+                      )}
+                      {notification.opened && notification.openedAt && (
+                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                          <Eye className="h-3 w-3 mr-1" />
+                          Aberta {format(notification.openedAt.toDate(), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                        </Badge>
+                      )}
+                      {!notification.opened && notification.read && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          <Send className="h-3 w-3 mr-1" />
+                          Enviada
+                        </Badge>
                       )}
                       <Badge variant="outline" className="ml-auto text-xs">
                         {getTypeLabel(notification.type)}
@@ -529,6 +555,12 @@ export default function NotificationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Create Notification Dialog */}
+      <CreateNotificationDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+      />
     </div>
   );
 }

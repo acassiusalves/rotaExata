@@ -69,7 +69,7 @@ self.addEventListener('notificationclick', (event) => {
       // Caso contrário, abrir nova janela
       if (clients.openWindow) {
         const routeId = event.notification.data?.routeId;
-        const url = routeId ? `/my-routes/${routeId}` : '/my-routes';
+        const url = routeId ? `/my-routes/${routeId}` : '/driver/notifications';
         return clients.openWindow(url);
       }
     })

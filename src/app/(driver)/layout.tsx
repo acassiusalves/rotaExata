@@ -8,7 +8,10 @@ import { Loader2, Bell, Home } from 'lucide-react';
 import { NotificationPermissionPrompt } from '@/components/notifications/notification-permission-prompt';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
+import { db } from '@/lib/firebase/client';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 export default function DriverLayout({
   children,
@@ -18,6 +21,7 @@ export default function DriverLayout({
   const { user, userRole, loading, mustChangePassword } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = React.useState(0);
 
   console.log('🚗 [DriverLayout] Renderizando. Loading:', loading, 'MustChangePassword:', mustChangePassword);
 
@@ -26,6 +30,23 @@ export default function DriverLayout({
       router.replace('/auth/change-password');
     }
   }, [loading, mustChangePassword, router]);
+
+  // Carregar contador de notificações não lidas
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'notifications'),
+      where('driverId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const count = snapshot.docs.filter(doc => !doc.data().opened).length;
+      setUnreadCount(count);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   if (loading || mustChangePassword) {
     return (
@@ -61,8 +82,19 @@ export default function DriverLayout({
           </Button>
         )}
         <div className="flex-1" />
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <Button variant="ghost" size="icon" className="relative" asChild>
+          <Link href="/driver/notifications">
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <Badge
+                variant="destructive"
+                className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+              >
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </Badge>
+            )}
+            <span className="sr-only">Notificações</span>
+          </Link>
         </Button>
         <Avatar className="h-8 w-8">
           <AvatarImage src={user?.photoURL ?? undefined} />
