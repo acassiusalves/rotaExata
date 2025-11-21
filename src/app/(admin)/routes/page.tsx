@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -45,6 +45,7 @@ import type { RouteInfo, Driver } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -105,18 +106,21 @@ const getRoutePeriod = (date: Date): { label: string; color: string } => {
 export default function RoutesPage() {
   const router = useRouter();
   const { searchQuery } = useRouteSearch();
+  const { userRole } = useAuth();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [pendingNotifications, setPendingNotifications] = React.useState<Set<string>>(new Set());
   const [isChangeDriverDialogOpen, setIsChangeDriverDialogOpen] = React.useState(false);
   const [isEditNameDialogOpen, setIsEditNameDialogOpen] = React.useState(false);
+  const [isCompleteRouteDialogOpen, setIsCompleteRouteDialogOpen] = React.useState(false);
   const [routeToModify, setRouteToModify] = React.useState<RouteDocument | null>(null);
   const [newDriverId, setNewDriverId] = React.useState<string>('');
   const [newRouteName, setNewRouteName] = React.useState<string>('');
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isDuplicating, setIsDuplicating] = React.useState(false);
+  const [isCompleting, setIsCompleting] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
   const { toast } = useToast();
@@ -219,6 +223,12 @@ export default function RoutesPage() {
     setRouteToModify(route);
     setNewRouteName(route.name);
     setTimeout(() => setIsEditNameDialogOpen(true), 100); // Small delay to ensure dropdown closes
+  };
+
+  const handleOpenCompleteRouteDialog = (route: RouteDocument) => {
+    setOpenDropdownId(null); // Close dropdown first
+    setRouteToModify(route);
+    setTimeout(() => setIsCompleteRouteDialogOpen(true), 100); // Small delay to ensure dropdown closes
   };
 
 
@@ -324,6 +334,33 @@ export default function RoutesPage() {
       });
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleCompleteRoute = async () => {
+    if (!routeToModify) return;
+    setIsCompleting(true);
+
+    try {
+      const completeRouteFn = httpsCallable(functions, 'completeRoute');
+      await completeRouteFn({ routeId: routeToModify.id });
+
+      toast({
+        title: 'Rota Concluída!',
+        description: `A rota "${routeToModify.name}" foi marcada como concluída.`,
+      });
+
+      setIsCompleteRouteDialogOpen(false);
+      setRouteToModify(null);
+    } catch (error: any) {
+      console.error('Error completing route:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Concluir Rota',
+        description: error.message || 'Não foi possível marcar a rota como concluída.',
+      });
+    } finally {
+      setIsCompleting(false);
     }
   };
 
@@ -544,6 +581,15 @@ export default function RoutesPage() {
                                               <UserCog className="mr-2 h-4 w-4" />
                                               <span>Trocar Motorista</span>
                                           </DropdownMenuItem>
+                                          {(userRole === 'admin' || userRole === 'socio') && (
+                                            <DropdownMenuItem
+                                              onClick={() => handleOpenCompleteRouteDialog(route)}
+                                              className="text-green-600 dark:text-green-400"
+                                            >
+                                              <CheckCircle className="mr-2 h-4 w-4" />
+                                              <span>Marcar como Concluída</span>
+                                            </DropdownMenuItem>
+                                          )}
                                           <DropdownMenuItem
                                               className="text-destructive"
                                               onClick={() => handleOpenDeleteDialog(route)}
@@ -719,6 +765,37 @@ export default function RoutesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Complete Route Confirmation Dialog */}
+      <AlertDialog open={isCompleteRouteDialogOpen} onOpenChange={setIsCompleteRouteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar Rota como Concluída?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você está prestes a marcar a rota <span className="font-semibold">{routeToModify?.name}</span> como concluída.
+              Esta ação irá remover a rota da lista de rotas ativas e movê-la para o histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCompleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button
+                variant="default"
+                onClick={handleCompleteRoute}
+                disabled={isCompleting}
+                className="bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
+              >
+                {isCompleting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                )}
+                {isCompleting ? 'Concluindo...' : 'Sim, marcar como concluída'}
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

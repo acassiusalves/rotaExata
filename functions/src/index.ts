@@ -295,6 +295,54 @@ export const duplicateRoute = onCall(
   }
 );
 
+/* ========== completeRoute (callable) ========== */
+export const completeRoute = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+
+    // Verificar permissão do usuário
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+
+    try {
+      const db = getFirestore();
+
+      // Buscar role do usuário
+      const userDoc = await db.collection("users").doc(auth.uid).get();
+      const userData = userDoc.data();
+      const userRole = userData?.role || "";
+
+      // Verificar se o usuário tem permissão (admin ou socio)
+      if (userRole !== "admin" && userRole !== "socio") {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas administradores e sócios podem marcar rotas como concluídas"
+        );
+      }
+
+      if (!routeId) {
+        throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+      }
+
+      // Atualizar status da rota para 'completed'
+      await db.collection("routes").doc(routeId).update({
+        status: "completed",
+        completedAt: FieldValue.serverTimestamp(),
+        completedBy: auth.uid,
+      });
+
+      return { ok: true, message: `Rota marcada como concluída com sucesso.` };
+    } catch (error: any) {
+      const msg = error.message || "Falha ao marcar a rota como concluída.";
+      throw new HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+  }
+);
+
 
 /* ========== notifyRouteChanges (callable) ========== */
 export const notifyRouteChanges = onCall(

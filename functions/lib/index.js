@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.notifyRouteChanges = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.syncAuthUsers = exports.authUserMirror = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -41,6 +41,35 @@ const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 (0, app_1.initializeApp)();
+/**
+ * Gera o próximo código sequencial único para uma rota
+ * Formato: RT-0001, RT-0002, RT-0003, etc.
+ */
+async function generateRouteCode() {
+    const db = (0, firestore_1.getFirestore)();
+    const counterRef = db.collection("counters").doc("routeCode");
+    try {
+        const newCount = await db.runTransaction(async (transaction) => {
+            const counterDoc = await transaction.get(counterRef);
+            let currentCount = 0;
+            if (counterDoc.exists) {
+                const data = counterDoc.data();
+                currentCount = data?.count || 0;
+            }
+            const nextCount = currentCount + 1;
+            // Atualizar o contador
+            transaction.set(counterRef, { count: nextCount }, { merge: true });
+            return nextCount;
+        });
+        // Formatar o código com padding de zeros (ex: RT-0001)
+        const code = `RT-${String(newCount).padStart(4, "0")}`;
+        return code;
+    }
+    catch (error) {
+        console.error("Erro ao gerar código da rota:", error);
+        throw new https_1.HttpsError("internal", "Não foi possível gerar o código da rota");
+    }
+}
 // --- Presence function ---
 // Listens for changes to the Realtime Database and updates Firestore.
 // COMMENTED OUT: Requires Realtime Database to be configured
@@ -220,9 +249,12 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
         if (!routeData) {
             throw new https_1.HttpsError("internal", "Dados da rota não encontrados");
         }
-        // Criar uma cópia da rota com um novo nome
+        // Gerar novo código sequencial para a rota duplicada
+        const newCode = await generateRouteCode();
+        // Criar uma cópia da rota com um novo nome e código
         const newRouteData = {
             ...routeData,
+            code: newCode,
             name: `${routeData.name} (Cópia)`,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         };
@@ -232,6 +264,41 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
     }
     catch (error) {
         const msg = error.message || "Falha ao duplicar a rota.";
+        throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
+    }
+});
+/* ========== completeRoute (callable) ========== */
+exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    // Verificar permissão do usuário
+    const auth = req.auth;
+    if (!auth) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        // Buscar role do usuário
+        const userDoc = await db.collection("users").doc(auth.uid).get();
+        const userData = userDoc.data();
+        const userRole = userData?.role || "";
+        // Verificar se o usuário tem permissão (admin ou socio)
+        if (userRole !== "admin" && userRole !== "socio") {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores e sócios podem marcar rotas como concluídas");
+        }
+        if (!routeId) {
+            throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
+        }
+        // Atualizar status da rota para 'completed'
+        await db.collection("routes").doc(routeId).update({
+            status: "completed",
+            completedAt: firestore_1.FieldValue.serverTimestamp(),
+            completedBy: auth.uid,
+        });
+        return { ok: true, message: `Rota marcada como concluída com sucesso.` };
+    }
+    catch (error) {
+        const msg = error.message || "Falha ao marcar a rota como concluída.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
 });
