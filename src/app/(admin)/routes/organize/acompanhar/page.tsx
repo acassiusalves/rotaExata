@@ -400,7 +400,7 @@ export default function OrganizeRoutePage() {
   const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
 
   // State for additional routes from same period
-  const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; data: RouteInfo; driverId?: string; driverInfo?: any }>>([]);
+  const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any }>>([]);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
 
   // State for dynamic routes (C, D, E, etc.)
@@ -734,6 +734,7 @@ export default function OrganizeRoutePage() {
 
           routes.push({
             id: doc.id,
+            name: routeDoc.name || `Rota ${doc.id.substring(0, 6)}`, // Use real route name from Firestore
             data: routeInfo,
             driverId: routeDoc.driverId,
             driverInfo: routeDoc.driverInfo
@@ -2981,7 +2982,7 @@ export default function OrganizeRoutePage() {
                             <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
                               <div className="flex items-center gap-2">
                                 <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                                <span>Rota {idx + 2}</span>
+                                <span>{route.name}</span>
                               </div>
                             </TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[route.id] || route.data.stops).length}</TableCell>

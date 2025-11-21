@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Bell,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -68,6 +69,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { href: '/users', icon: Users, label: 'Usuários' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
+    { href: '/notifications', icon: Bell, label: 'Notificações' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
   ];
 
