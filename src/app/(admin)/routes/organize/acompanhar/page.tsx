@@ -35,6 +35,8 @@ import {
   PackagePlus,
   MoreHorizontal,
   Search,
+  Download,
+  Bug,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import { GoogleMap, Marker } from '@react-google-maps/api';
@@ -398,6 +400,156 @@ export default function OrganizeRoutePage() {
   const [highlightedStops, setHighlightedStops] = React.useState<string[]>([]);
   const [driverLocation, setDriverLocation] = React.useState<{lat: number; lng: number; heading?: number} | null>(null);
   const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
+
+  // Debug logs system
+  const [debugLogs, setDebugLogs] = React.useState<Array<{ timestamp: string; type: string; message: string; data?: any }>>([]);
+  const consoleCaptureRef = React.useRef<Array<{ timestamp: string; type: string; args: any[] }>>([]);
+
+  // Intercept console logs - using ref to avoid re-renders
+  React.useEffect(() => {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.log = function(...args) {
+      try {
+        consoleCaptureRef.current = [...consoleCaptureRef.current.slice(-199), {
+          timestamp: new Date().toISOString(),
+          type: 'log',
+          args: args.map(arg => {
+            try {
+              return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+            } catch (e) {
+              return '[Circular or Non-Serializable]';
+            }
+          })
+        }];
+      } catch (e) {
+        // Ignore errors in logging
+      }
+      originalLog.apply(console, args);
+    };
+
+    console.error = function(...args) {
+      try {
+        consoleCaptureRef.current = [...consoleCaptureRef.current.slice(-199), {
+          timestamp: new Date().toISOString(),
+          type: 'error',
+          args: args.map(arg => {
+            try {
+              return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+            } catch (e) {
+              return '[Circular or Non-Serializable]';
+            }
+          })
+        }];
+      } catch (e) {
+        // Ignore errors in logging
+      }
+      originalError.apply(console, args);
+    };
+
+    console.warn = function(...args) {
+      try {
+        consoleCaptureRef.current = [...consoleCaptureRef.current.slice(-199), {
+          timestamp: new Date().toISOString(),
+          type: 'warn',
+          args: args.map(arg => {
+            try {
+              return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+            } catch (e) {
+              return '[Circular or Non-Serializable]';
+            }
+          })
+        }];
+      } catch (e) {
+        // Ignore errors in logging
+      }
+      originalWarn.apply(console, args);
+    };
+
+    return () => {
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+    };
+  }, []);
+
+  const addDebugLog = React.useCallback((type: string, message: string, data?: any) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = { timestamp, type, message, data };
+    console.log(`[${type}] ${message}`, data || '');
+    setDebugLogs(prev => [...prev.slice(-199), logEntry]); // Keep last 200 logs
+  }, []);
+
+  // Log when page loads
+  React.useEffect(() => {
+    addDebugLog('PAGE_LOAD', 'Page loaded - routes organize acompanhar', {
+      userAgent: navigator.userAgent,
+      screenSize: `${window.innerWidth}x${window.innerHeight}`,
+      timestamp: new Date().toISOString()
+    });
+  }, [addDebugLog]);
+
+  const exportDebugLogs = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `rotaexata-debug-${timestamp}.json`;
+
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      dragDropLogs: debugLogs,
+      consoleLogs: consoleCaptureRef.current,
+      state: {
+        routeAStopsCount: routeA?.stops.length || 0,
+        routeBStopsCount: routeB?.stops.length || 0,
+        dynamicRoutesCount: dynamicRoutes.length,
+        additionalRoutesCount: additionalRoutes.length,
+        unassignedStopsCount: unassignedStops.length,
+        pendingEditsKeys: Object.keys(pendingEdits),
+        pendingEditsCounts: Object.entries(pendingEdits).map(([key, stops]) => ({
+          route: key,
+          stopsCount: stops?.length || 0
+        })),
+        routeAStops: routeA?.stops.map(s => ({
+          id: s.id || s.placeId,
+          customerName: s.customerName,
+          address: s.address
+        })) || [],
+        routeBStops: routeB?.stops.map(s => ({
+          id: s.id || s.placeId,
+          customerName: s.customerName,
+          address: s.address
+        })) || [],
+        additionalRoutesDetails: additionalRoutes.map(r => ({
+          id: r.id,
+          name: r.name,
+          stopsCount: r.data.stops.length,
+          stops: r.data.stops.map(s => ({
+            id: s.id || s.placeId,
+            customerName: s.customerName,
+            address: s.address
+          }))
+        }))
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: 'Logs Exportados',
+      description: `Arquivo ${filename} baixado com sucesso.`,
+    });
+
+    addDebugLog('EXPORT', 'Debug logs exported', { filename, logsCount: debugLogs.length });
+  };
 
   // State for additional routes from same period
   const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any }>>([]);
@@ -1530,17 +1682,34 @@ export default function OrganizeRoutePage() {
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
+    addDebugLog('DRAG_END', 'Drag operation ended', {
+      activeId: active.id,
+      overId: over?.id,
+      activeRouteKey: active.data.current?.routeKey,
+      overRouteKey: over?.data.current?.routeKey,
+      activeIndex: active.data.current?.index,
+      overIndex: over?.data.current?.index,
+    });
+
     setActiveId(null);
     setActiveStop(null);
     setActiveRouteKey(null);
     setActiveIndex(null);
 
     if (!over || active.id === over.id) {
+      addDebugLog('DRAG_END', 'Drag cancelled - no valid drop target or same position', { over: !!over, sameId: active.id === over?.id });
       return;
     }
 
     const activeRouteKey = active.data.current?.routeKey as string | 'unassigned';
     const overRouteKey = over.data.current?.routeKey as string;
+
+    addDebugLog('DRAG_END', 'Processing drag operation', {
+      activeRouteKey,
+      overRouteKey,
+      isUnassignedSource: activeRouteKey === 'unassigned',
+      isSameRoute: activeRouteKey === overRouteKey,
+    });
 
     // Case: Moving from unassigned to a route
     if (activeRouteKey === 'unassigned' && overRouteKey && overRouteKey !== 'unassigned') {
@@ -1592,11 +1761,18 @@ export default function OrganizeRoutePage() {
 
     // Case 1: Moving within the same route - save as pending edit
     if (activeRouteKey === overRouteKey) {
+      addDebugLog('DRAG_SAME_ROUTE', 'Moving within same route', { routeKey: activeRouteKey });
+
       const currentRoute = getRoute(activeRouteKey);
-      if (!currentRoute || !routeData) return;
+      if (!currentRoute || !routeData) {
+        addDebugLog('DRAG_SAME_ROUTE', 'ERROR: Route not found or no route data', { currentRoute: !!currentRoute, routeData: !!routeData });
+        return;
+      }
 
       const oldIndex = active.data.current?.index as number;
       const newIndex = over.data.current?.index as number;
+
+      addDebugLog('DRAG_SAME_ROUTE', 'Reordering stops', { oldIndex, newIndex, totalStops: currentRoute.stops.length });
 
       // Check if there's already a pending edit, if so use that, otherwise use current route
       const currentPending = pendingEdits[activeRouteKey];
@@ -1617,6 +1793,12 @@ export default function OrganizeRoutePage() {
         return stop;
       });
 
+      addDebugLog('DRAG_SAME_ROUTE', 'Saved as pending edit', {
+        routeKey: activeRouteKey,
+        movedStopId: stopId,
+        newStopsCount: updatedStops.length
+      });
+
       // Save as pending edit (don't recalculate route yet)
       setPendingEdits(prev => ({
         ...prev,
@@ -1625,13 +1807,33 @@ export default function OrganizeRoutePage() {
     }
     // Case 2: Moving between different routes - save as pending edit
     else {
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Moving between different routes', {
+        sourceRouteKey: activeRouteKey,
+        targetRouteKey: overRouteKey
+      });
+
       const sourceRoute = getRoute(activeRouteKey);
       const targetRoute = getRoute(overRouteKey);
 
-      if (!sourceRoute || !routeData) return;
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Retrieved routes', {
+        hasSourceRoute: !!sourceRoute,
+        hasTargetRoute: !!targetRoute,
+        sourceStopsCount: sourceRoute?.stops?.length || 0,
+        targetStopsCount: targetRoute?.stops?.length || 0
+      });
+
+      if (!sourceRoute || !routeData) {
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'ERROR: Source route not found or no route data', {
+          sourceRoute: !!sourceRoute,
+          routeData: !!routeData
+        });
+        return;
+      }
 
       const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
+
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Indices', { activeIndex, overIndex });
 
       // Check if there's already a pending edit for source route
       const currentSourcePending = pendingEdits[activeRouteKey];
@@ -1648,8 +1850,20 @@ export default function OrganizeRoutePage() {
         _originalIndex: (stop as any)._originalIndex ?? idx
       }));
 
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Pending edits status', {
+        hasSourcePending: !!currentSourcePending,
+        hasTargetPending: !!currentTargetPending,
+        sourceStopsToEditCount: sourceStopsToEdit.length,
+        targetStopsToEditCount: targetStopsToEdit.length
+      });
+
       // Get stop to move from the correct source (pending edits or original route)
       const stopToMove = sourceStopsToEdit[activeIndex];
+
+      if (!stopToMove) {
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'ERROR: Stop to move not found', { activeIndex, sourceStopsToEditCount: sourceStopsToEdit.length });
+        return;
+      }
 
       // Get the original index if it exists, otherwise use current index
       const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? activeIndex;
@@ -1660,10 +1874,19 @@ export default function OrganizeRoutePage() {
       // Add to target at the position of the over item with marker for cross-route movement
       const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
 
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Stop to move details', {
+        stopId: movedStopId,
+        stopName: stopToMove.customerName,
+        originalIndex: originalIndexOfMovedStop,
+        newSourceStopsCount: newSourceStops.length
+      });
+
       // Check if stop already exists in target (to prevent duplicates)
       const existsInTarget = targetStopsToEdit.some(s =>
         String(s.id ?? s.placeId) === movedStopId
       );
+
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Duplicate check', { existsInTarget });
 
       let newTargetStops;
       if (existsInTarget) {
@@ -1671,11 +1894,15 @@ export default function OrganizeRoutePage() {
         const existingIndex = targetStopsToEdit.findIndex(s =>
           String(s.id ?? s.placeId) === movedStopId
         );
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'Stop already exists in target - reordering', { existingIndex, overIndex });
+
         newTargetStops = [...targetStopsToEdit];
         const [removed] = newTargetStops.splice(existingIndex, 1);
         newTargetStops.splice(overIndex, 0, removed);
       } else {
         // Normal case: add to target
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'Adding stop to target', { overIndex });
+
         newTargetStops = [...targetStopsToEdit];
         const movedStop = {
           ...stopToMove,
@@ -1687,12 +1914,21 @@ export default function OrganizeRoutePage() {
         newTargetStops.splice(overIndex, 0, movedStop);
       }
 
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Saving pending edits', {
+        sourceRouteKey: activeRouteKey,
+        targetRouteKey: overRouteKey,
+        newSourceStopsCount: newSourceStops.length,
+        newTargetStopsCount: newTargetStops.length
+      });
+
       // Save as pending edits for both routes
       setPendingEdits(prev => ({
         ...prev,
         [activeRouteKey]: newSourceStops,
         [overRouteKey]: newTargetStops
       }));
+
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Successfully saved pending edits');
     }
   };
 
@@ -2710,6 +2946,17 @@ export default function OrganizeRoutePage() {
                      onChange={(e) => setSearchQuery(e.target.value)}
                    />
                  </div>
+                 {/* Debug Logs Export Button */}
+                 <Button
+                   variant="outline"
+                   size="icon"
+                   className="h-9 w-9 rounded-full"
+                   onClick={exportDebugLogs}
+                   title="Exportar logs de debug"
+                 >
+                   <Bug className="h-4 w-4" />
+                 </Button>
+
                  {unassignedStops.length > 0 && (
                     <Popover>
                         <PopoverTrigger asChild>

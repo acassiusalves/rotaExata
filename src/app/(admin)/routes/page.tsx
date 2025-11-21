@@ -118,6 +118,7 @@ export default function RoutesPage() {
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isDuplicating, setIsDuplicating] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+  const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -201,20 +202,23 @@ export default function RoutesPage() {
   }, [routes.map(r => r.id).join(',')]);
 
   const handleOpenChangeDriver = (route: RouteDocument) => {
+    setOpenDropdownId(null); // Close dropdown first
     setRouteToModify(route);
     setNewDriverId(route.driverId || '');
-    setIsChangeDriverDialogOpen(true);
+    setTimeout(() => setIsChangeDriverDialogOpen(true), 100); // Small delay to ensure dropdown closes
   };
 
   const handleOpenDeleteDialog = (route: RouteDocument) => {
+    setOpenDropdownId(null); // Close dropdown first
     setRouteToModify(route);
-    setIsDeleteDialogOpen(true);
+    setTimeout(() => setIsDeleteDialogOpen(true), 100); // Small delay to ensure dropdown closes
   };
-  
+
   const handleOpenEditNameDialog = (route: RouteDocument) => {
+    setOpenDropdownId(null); // Close dropdown first
     setRouteToModify(route);
     setNewRouteName(route.name);
-    setIsEditNameDialogOpen(true);
+    setTimeout(() => setIsEditNameDialogOpen(true), 100); // Small delay to ensure dropdown closes
   };
 
 
@@ -520,7 +524,7 @@ export default function RoutesPage() {
                                       </Badge>
                                     )}
                                     {route.source === 'lunna' && <LunnaBadge />}
-                                    <DropdownMenu>
+                                    <DropdownMenu open={openDropdownId === route.id} onOpenChange={(open) => setOpenDropdownId(open ? route.id : null)}>
                                         <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" className="h-8 w-8 p-0">
                                             <span className="sr-only">Abrir menu</span>
