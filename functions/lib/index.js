@@ -363,18 +363,26 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
                     routeId,
                     changeCount: String(changes.length),
                     type: 'route_change',
+                    title: notificationTitle, // Passa título nos dados também
+                    body: notificationBody, // Passa mensagem nos dados também
                 },
                 token: fcmToken,
                 android: {
                     priority: 'high',
                     notification: {
+                        title: notificationTitle, // Título explícito para Android
+                        body: notificationBody, // Mensagem explícita para Android
                         sound: 'default',
                         priority: 'high',
                         channelId: 'route_updates',
+                        icon: '@mipmap/ic_launcher', // Ícone do app
+                        color: '#2962FF', // Cor do tema
                     },
                 },
                 webpush: {
                     notification: {
+                        title: notificationTitle, // Título explícito para Web
+                        body: notificationBody, // Mensagem explícita para Web
                         icon: '/icons/pwa-192.png',
                         badge: '/icons/pwa-192.png',
                         requireInteraction: true,
@@ -454,18 +462,26 @@ exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-eas
                         type,
                         priority,
                         customNotification: "true",
+                        title, // Passa título nos dados também
+                        body: message, // Passa mensagem nos dados também
                     },
                     token: fcmToken,
                     android: {
                         priority: priority === "high" ? "high" : "normal",
                         notification: {
+                            title, // Título explícito para Android
+                            body: message, // Mensagem explícita para Android
                             sound: "default",
                             priority: priority === "high" ? "high" : "default",
                             channelId: "custom_notifications",
+                            icon: "@mipmap/ic_launcher", // Ícone do app
+                            color: "#2962FF", // Cor do tema
                         },
                     },
                     webpush: {
                         notification: {
+                            title, // Título explícito para Web
+                            body: message, // Mensagem explícita para Web
                             icon: "/icons/pwa-192.png",
                             badge: "/icons/pwa-192.png",
                             requireInteraction: priority === "high",

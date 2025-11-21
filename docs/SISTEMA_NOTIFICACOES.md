@@ -136,7 +136,7 @@ Acessível por administradores, gestores e sócios, permite:
 │       3. Envia via Firebase Cloud Messaging                    │
 │       4. Registra sucesso/falha                                │
 │     - Retorna estatísticas de envio                           │
-└────────────────────────┬────────────────────────────────────────┘
+└────────────────────────┬─────��──────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -155,7 +155,7 @@ Acessível por administradores, gestores e sócios, permite:
 │                                                                 │
 │     - Notificação aparece no dispositivo                       │
 │     - Clica na notificação                                     │
-│     - App abre na tela /my-routes                             │
+│     - App abre na tela /driver/notifications                   │
 │     - Notificação fica marcada como "opened"                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -231,24 +231,34 @@ Acessível por administradores, gestores e sócios, permite:
   data: {
     type: "system",
     priority: "high",
-    customNotification: "true"
+    customNotification: "true",
+    title: "Título da notificação",
+    body: "Mensagem da notificação"
   },
   token: "fcmToken_do_motorista",
   android: {
     priority: "high", // ou "normal"
     notification: {
+      title: "Título da notificação", // Explícito para evitar "from RotaExata"
+      body: "Mensagem da notificação",
       sound: "default",
-      channelId: "custom_notifications"
+      priority: "high", // ou "default"
+      channelId: "custom_notifications",
+      icon: "@mipmap/ic_launcher",
+      color: "#2962FF"
     }
   },
   webpush: {
     notification: {
+      title: "Título da notificação", // Explícito
+      body: "Mensagem da notificação",
       icon: "/icons/pwa-192.png",
+      badge: "/icons/pwa-192.png",
       requireInteraction: true, // Se prioridade alta
       tag: "custom-timestamp"
     },
     fcmOptions: {
-      link: "/my-routes" // Onde abrir ao clicar
+      link: "/driver/notifications" // Onde abrir ao clicar
     }
   }
 }
@@ -272,8 +282,13 @@ match /notifications/{notificationId} {
   // Admins/gestores/sócios podem fazer tudo
   allow read, create, update, delete: if isAppAdmin();
 
-  // Motoristas podem apenas ler
-  allow read: if isAuthed();
+  // Motoristas podem apenas ler suas próprias notificações
+  allow read: if request.auth != null && resource.data.driverId == request.auth.uid;
+
+  // Motoristas podem atualizar apenas os campos opened e openedAt
+  allow update: if request.auth != null
+    && resource.data.driverId == request.auth.uid
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt']);
 }
 ```
 
@@ -281,6 +296,7 @@ match /notifications/{notificationId} {
 - `timestamp` (DESC) - Para ordenação padrão
 - `driverId` + `timestamp` (DESC) - Para filtrar por motorista
 - `type` + `timestamp` (DESC) - Para filtrar por tipo
+- `driverId` + `opened` (ASC) - Para contar não lidas
 
 ## Diferenças entre Tipos de Notificação
 
@@ -399,6 +415,12 @@ firebase functions:log --only sendCustomNotification --limit 50
 
 **Solução**:
 - Implementar lógica de deduplicação usando `tag` nas notificações
+
+### Aparece "from RotaExata" na notificação
+
+**Causa**: Android adiciona automaticamente o nome do app
+
+**Solução**: Definir explicitamente `title` e `body` em `android.notification` e `webpush.notification`
 
 ## Melhorias Futuras
 
