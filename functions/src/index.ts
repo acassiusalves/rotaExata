@@ -405,35 +405,27 @@ export const notifyRouteChanges = onCall(
           notificationBody = `Parada foi removida da rota. Total: ${changes.length} alterações.`;
         }
 
+        // Usando apenas 'data' para evitar "from RotaExata" no Android
         const message = {
-          notification: {
-            title: notificationTitle,
-            body: notificationBody,
-          },
           data: {
             routeId,
             changeCount: String(changes.length),
             type: 'route_change',
-            title: notificationTitle, // Passa título nos dados também
-            body: notificationBody, // Passa mensagem nos dados também
+            title: notificationTitle,
+            body: notificationBody,
+            notificationTitle, // Backup
+            notificationBody, // Backup
           },
           token: fcmToken,
           android: {
             priority: 'high' as const,
-            notification: {
-              title: notificationTitle, // Título explícito para Android
-              body: notificationBody, // Mensagem explícita para Android
-              sound: 'default',
-              priority: 'high' as const,
-              channelId: 'route_updates',
-              icon: '@mipmap/ic_launcher', // Ícone do app
-              color: '#2962FF', // Cor do tema
-            },
+            // Remove 'notification' para evitar o "from RotaExata"
+            // O Service Worker vai criar a notificação
           },
           webpush: {
             notification: {
-              title: notificationTitle, // Título explícito para Web
-              body: notificationBody, // Mensagem explícita para Web
+              title: notificationTitle,
+              body: notificationBody,
               icon: '/icons/pwa-192.png',
               badge: '/icons/pwa-192.png',
               requireInteraction: true,
@@ -521,35 +513,28 @@ export const sendCustomNotification = onCall(
           }
 
           // Montar mensagem de notificação
+          // Usando apenas 'data' para evitar "from RotaExata" no Android
           const pushMessage = {
-            notification: {
-              title,
-              body: message,
-            },
             data: {
               type,
               priority,
               customNotification: "true",
-              title, // Passa título nos dados também
-              body: message, // Passa mensagem nos dados também
+              title, // Título
+              body: message, // Mensagem
+              notificationTitle: title, // Backup
+              notificationBody: message, // Backup
             },
             token: fcmToken,
             android: {
               priority: priority === "high" ? ("high" as const) : ("normal" as const),
-              notification: {
-                title, // Título explícito para Android
-                body: message, // Mensagem explícita para Android
-                sound: "default",
-                priority: priority === "high" ? ("high" as const) : ("default" as const),
-                channelId: "custom_notifications",
-                icon: "@mipmap/ic_launcher", // Ícone do app
-                color: "#2962FF", // Cor do tema
-              },
+              // Remove 'notification' para evitar o "from RotaExata"
+              // O Service Worker vai criar a notificação
             },
             webpush: {
+              // Para web, precisamos do objeto notification
               notification: {
-                title, // Título explícito para Web
-                body: message, // Mensagem explícita para Web
+                title,
+                body: message,
                 icon: "/icons/pwa-192.png",
                 badge: "/icons/pwa-192.png",
                 requireInteraction: priority === "high",

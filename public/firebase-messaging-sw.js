@@ -24,14 +24,17 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Recebida mensagem em background:', payload);
 
-  const notificationTitle = payload.notification?.title || 'Nova Notificação';
+  // Priorizar dados do payload.data para evitar "from RotaExata"
+  const notificationTitle = payload.data?.title || payload.data?.notificationTitle || payload.notification?.title || 'Nova Notificação';
+  const notificationBody = payload.data?.body || payload.data?.notificationBody || payload.notification?.body || 'Você tem uma nova mensagem';
+
   const notificationOptions = {
-    body: payload.notification?.body || 'Você tem uma nova mensagem',
+    body: notificationBody,
     icon: '/icons/pwa-192.png',
     badge: '/icons/pwa-192.png',
     data: payload.data,
-    tag: payload.data?.routeId || 'notification',
-    requireInteraction: true,
+    tag: payload.data?.routeId || payload.data?.type || 'notification',
+    requireInteraction: payload.data?.priority === 'high',
     actions: [
       {
         action: 'open',

@@ -224,33 +224,26 @@ Acessível por administradores, gestores e sócios, permite:
 **Estrutura da Mensagem FCM**:
 ```javascript
 {
-  notification: {
-    title: "Título da notificação",
-    body: "Mensagem da notificação"
-  },
+  // IMPORTANTE: Não usar 'notification' no nível raiz para Android
+  // Isso evita que apareça "from RotaExata" no Android
   data: {
     type: "system",
     priority: "high",
     customNotification: "true",
     title: "Título da notificação",
-    body: "Mensagem da notificação"
+    body: "Mensagem da notificação",
+    notificationTitle: "Título da notificação", // Backup
+    notificationBody: "Mensagem da notificação" // Backup
   },
   token: "fcmToken_do_motorista",
   android: {
     priority: "high", // ou "normal"
-    notification: {
-      title: "Título da notificação", // Explícito para evitar "from RotaExata"
-      body: "Mensagem da notificação",
-      sound: "default",
-      priority: "high", // ou "default"
-      channelId: "custom_notifications",
-      icon: "@mipmap/ic_launcher",
-      color: "#2962FF"
-    }
+    // NÃO incluir 'notification' aqui
+    // O Service Worker cria a notificação a partir do 'data'
   },
   webpush: {
     notification: {
-      title: "Título da notificação", // Explícito
+      title: "Título da notificação",
       body: "Mensagem da notificação",
       icon: "/icons/pwa-192.png",
       badge: "/icons/pwa-192.png",
@@ -262,6 +255,19 @@ Acessível por administradores, gestores e sócios, permite:
     }
   }
 }
+```
+
+**Como o Service Worker Processa**:
+```javascript
+// Em firebase-messaging-sw.js
+const notificationTitle = payload.data?.title || 'Nova Notificação';
+const notificationBody = payload.data?.body || 'Você tem uma nova mensagem';
+
+self.registration.showNotification(notificationTitle, {
+  body: notificationBody,
+  icon: '/icons/pwa-192.png',
+  // ...
+});
 ```
 
 #### 2. **Service Worker: firebase-messaging-sw.js**
@@ -418,9 +424,27 @@ firebase functions:log --only sendCustomNotification --limit 50
 
 ### Aparece "from RotaExata" na notificação
 
-**Causa**: Android adiciona automaticamente o nome do app
+**Causa**: Quando a mensagem FCM inclui o campo `notification` no nível raiz ou em `android.notification`, o Android adiciona automaticamente "from [App Name]" como subtítulo.
 
-**Solução**: Definir explicitamente `title` e `body` em `android.notification` e `webpush.notification`
+**Solução Implementada**:
+1. **Remover** o campo `notification` do nível raiz da mensagem FCM
+2. **Remover** o campo `android.notification` completamente
+3. **Enviar apenas via `data`** com os campos `title` e `body`
+4. **Service Worker** extrai título e corpo do `payload.data` e cria a notificação manualmente
+
+```javascript
+// ❌ ERRADO - Causa "from RotaExata"
+{
+  notification: { title: "Título", body: "Mensagem" },
+  android: { notification: { title: "Título" } }
+}
+
+// ✅ CORRETO - Sem "from RotaExata"
+{
+  data: { title: "Título", body: "Mensagem" },
+  android: { priority: "high" }
+}
+```
 
 ## Melhorias Futuras
 
