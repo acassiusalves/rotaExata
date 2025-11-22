@@ -139,17 +139,6 @@ export default function DriverNotificationsPage() {
     }
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high':
-        return 'bg-red-100 border-red-300 dark:bg-red-900/20 dark:border-red-800';
-      case 'medium':
-        return 'bg-amber-100 border-amber-300 dark:bg-amber-900/20 dark:border-amber-800';
-      default:
-        return 'bg-slate-100 border-slate-300 dark:bg-slate-900/20 dark:border-slate-800';
-    }
-  };
-
   const unreadCount = notifications.filter((n) => !n.opened).length;
 
   if (loading) {
@@ -202,11 +191,10 @@ export default function DriverNotificationsPage() {
             <Card
               key={notification.id}
               className={cn(
-                'transition-all cursor-pointer hover:shadow-md',
+                'transition-all duration-300 cursor-pointer hover:shadow-md',
                 !notification.opened
-                  ? 'border-l-4 border-l-primary bg-primary/5'
-                  : 'bg-card',
-                getPriorityColor(notification.priority)
+                  ? 'border-l-4 border-l-primary bg-blue-50 dark:bg-blue-950/30'
+                  : 'bg-card border-l-4 border-l-transparent opacity-75'
               )}
               onClick={() => handleMarkAsOpened(notification.id, notification.opened || false)}
             >
@@ -215,11 +203,14 @@ export default function DriverNotificationsPage() {
                   <div className="mt-1">{getTypeIcon(notification.type)}</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2 mb-1">
-                      <CardTitle className="text-base">
+                      <CardTitle className={cn(
+                        "text-base transition-all",
+                        !notification.opened ? "font-bold" : "font-semibold"
+                      )}>
                         {notification.title}
                       </CardTitle>
                       {!notification.opened && (
-                        <Badge variant="default" className="shrink-0 text-xs">
+                        <Badge variant="default" className="shrink-0 text-xs bg-primary">
                           Nova
                         </Badge>
                       )}
