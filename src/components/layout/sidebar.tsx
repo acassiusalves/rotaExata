@@ -77,7 +77,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
   const reportItems = [
     { href: '/reports/general', icon: FileText, label: 'Relatório Geral' },
-    { href: '/reports/numbers', icon: List, label: 'Lista de Números' },
+    { href: '/reports/numbers', icon: List, label: 'Lista de Clientes' },
   ];
 
   const routeItems = [

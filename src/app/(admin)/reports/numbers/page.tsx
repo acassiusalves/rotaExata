@@ -261,7 +261,7 @@ export default function NumbersListPage() {
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `lista-numeros-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    link.download = `lista-clientes-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     link.click();
   };
 
@@ -283,9 +283,9 @@ export default function NumbersListPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Phone className="h-8 w-8 text-primary" />
+          <User className="h-8 w-8 text-primary" />
           <div>
-            <h1 className="text-3xl font-bold">Lista de Números</h1>
+            <h1 className="text-3xl font-bold">Lista de Clientes</h1>
             <p className="text-muted-foreground">
               Visualize os dados dos clientes das rotas
             </p>
