@@ -16,6 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
+  FileText,
+  List,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -55,6 +57,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const isDriver = userRole === 'driver';
   const [routesOpen, setRoutesOpen] = useState(pathname.startsWith('/routes'));
   const [historyOpen, setHistoryOpen] = useState(pathname.startsWith('/history'));
+  const [reportsOpen, setReportsOpen] = useState(pathname.startsWith('/reports'));
 
   const getInitials = (name: string | null | undefined) => {
     if (!name) return 'U';
@@ -70,7 +73,11 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
     { href: '/users', icon: Users, label: 'Usuários' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/notifications', icon: Bell, label: 'Notificações' },
-    { href: '/reports', icon: LineChart, label: 'Relatórios' },
+  ];
+
+  const reportItems = [
+    { href: '/reports/general', icon: FileText, label: 'Relatório Geral' },
+    { href: '/reports/numbers', icon: List, label: 'Lista de Números' },
   ];
 
   const routeItems = [
@@ -147,6 +154,63 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
               </Tooltip>
             </TooltipProvider>
           ))}
+
+          <Collapsible open={reportsOpen} onOpenChange={setReportsOpen}>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                   <CollapsibleTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        className={cn(
+                          'w-full justify-start gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300',
+                          pathname.startsWith('/reports')
+                            ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                          !isOpen && 'justify-center'
+                        )}
+                      >
+                        <LineChart className="h-5 w-5" />
+                        {isOpen && (
+                          <>
+                            <span className="flex-1 text-left animate-fade-in">Relatórios</span>
+                            <ChevronDown
+                              className={cn('h-4 w-4 transition-transform duration-300', reportsOpen && 'rotate-180')}
+                            />
+                          </>
+                        )}
+                      </Button>
+                    </CollapsibleTrigger>
+                </TooltipTrigger>
+                 {!isOpen && (
+                  <TooltipContent side="right">
+                    Relatórios
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
+
+            {isOpen && (
+               <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
+                  {reportItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-300',
+                        isActive(item.href)
+                          ? 'sidebar-link-active shadow-button-primary'
+                          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span className="animate-fade-in">{item.label}</span>
+                    </Link>
+                  ))}
+               </CollapsibleContent>
+            )}
+          </Collapsible>
+
           <Collapsible open={routesOpen} onOpenChange={setRoutesOpen}>
             <TooltipProvider delayDuration={0}>
               <Tooltip>
