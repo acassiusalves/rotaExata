@@ -192,11 +192,16 @@ export function Header({}: HeaderProps) {
         {user && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                <Avatar className="h-9 w-9">
+              <Button variant="ghost" className="relative h-auto px-2 py-1.5 rounded-full">
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:block text-sm font-medium">
+                    {user?.displayName || user?.email?.split('@')[0] || 'Usuário'}
+                  </span>
+                  <Avatar className="h-9 w-9">
                     <AvatarImage src={user?.photoURL ?? undefined} />
                     <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
                   </Avatar>
+                </div>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">

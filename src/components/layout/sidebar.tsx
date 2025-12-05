@@ -18,6 +18,7 @@ import {
   Bell,
   FileText,
   List,
+  Shield,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -70,7 +71,6 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { href: '/users', icon: Users, label: 'Usuários' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/notifications', icon: Bell, label: 'Notificações' },
   ];
@@ -96,8 +96,12 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
     { href: '/my-routes/history', icon: History, label: 'Histórico' },
   ];
 
+  // Mostrar Permissões apenas para admin e socio
+  const canManagePermissions = userRole === 'admin' || userRole === 'socio';
+
   const settingsItems = [
     { href: '/settings', icon: Settings, label: 'Configurações' },
+    ...(canManagePermissions ? [{ href: '/permissions', icon: Shield, label: 'Permissões' }] : []),
     { href: '/api', icon: Code, label: 'API' },
   ];
 

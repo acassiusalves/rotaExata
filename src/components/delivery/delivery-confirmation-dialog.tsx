@@ -570,6 +570,7 @@ export function DeliveryConfirmationDialog({
                         {isCameraActive ? (
                           <div className="relative">
                             <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg bg-black" style={{ maxHeight: '400px' }} />
+                            <canvas ref={canvasRef} className="hidden" />
                             <div className="flex gap-2 mt-2">
                               <Button onClick={async () => {
                                 if (!videoRef.current || !canvasRef.current) return;
