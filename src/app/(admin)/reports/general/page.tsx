@@ -20,6 +20,8 @@ import {
   BarChart3,
   Sunrise,
   Sunset,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,6 +83,28 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
+import { Progress } from '@/components/ui/progress';
+
+// Tipos para conciliação com IA
+type AIReconciliationResult = {
+  routeId: string;
+  stopIndex: number;
+  customerName?: string;
+  expectedValue: number;
+  extractedValue: number;
+  success: boolean;
+  reconciled: boolean;
+  difference: number;
+  error?: string;
+};
+
+type AIReconciliationSummary = {
+  total: number;
+  reconciled: number;
+  failed: number;
+  aiErrors: number;
+  valueMismatch: number;
+};
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -118,6 +142,8 @@ type DeliveryReport = {
   reconciled?: boolean;
   reconciledAt?: Date;
   reconciledBy?: string;
+  reconciledMethod?: 'manual' | 'ai';
+  aiExtractedValue?: number;
 };
 
 const formatCurrency = (value: number) => {
@@ -191,6 +217,13 @@ export default function ReportsPage() {
   const [selectedDeliveryIds, setSelectedDeliveryIds] = React.useState<Set<string>>(new Set());
   const [isReconciling, setIsReconciling] = React.useState(false);
   const { toast } = useToast();
+
+  // Estados para conciliação com IA
+  const [isAIReconciling, setIsAIReconciling] = React.useState(false);
+  const [aiProgress, setAiProgress] = React.useState(0);
+  const [aiResultsDialogOpen, setAiResultsDialogOpen] = React.useState(false);
+  const [aiResults, setAiResults] = React.useState<AIReconciliationResult[]>([]);
+  const [aiSummary, setAiSummary] = React.useState<AIReconciliationSummary | null>(null);
 
   // Estatísticas
   const stats = React.useMemo(() => {
@@ -280,6 +313,8 @@ export default function ReportsPage() {
               reconciled: stop.reconciled || false,
               reconciledAt: stop.reconciledAt ? (stop.reconciledAt instanceof Timestamp ? stop.reconciledAt.toDate() : stop.reconciledAt) : undefined,
               reconciledBy: stop.reconciledBy,
+              reconciledMethod: stop.reconciledMethod,
+              aiExtractedValue: stop.aiExtractedValue,
             });
           });
         });
@@ -459,6 +494,119 @@ export default function ReportsPage() {
     }
   };
 
+  // Métodos de pagamento elegíveis para conciliação com IA
+  const aiEligiblePaymentMethods = ['cartao_credito', 'cartao_debito', 'pix'];
+
+  // Função para conciliação com IA
+  const handleAIReconciliation = async () => {
+    // Filtrar entregas com pagamentos elegíveis (cartão de crédito, débito ou PIX)
+    const eligibleDeliveries = filteredDeliveries.filter(d => {
+      const isSelected = selectedDeliveryIds.has(d.stopId);
+      const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
+      const hasPhoto = !!d.photoUrl;
+      const notReconciled = !d.reconciled;
+      return isSelected && hasEligiblePayment && hasPhoto && notReconciled;
+    });
+
+    if (eligibleDeliveries.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Nenhuma entrega elegível',
+        description: 'Selecione entregas com pagamento em Cartão de Crédito, Cartão de Débito ou PIX, com foto e que não estejam conciliadas.',
+      });
+      return;
+    }
+
+    if (eligibleDeliveries.length > 10) {
+      toast({
+        variant: 'destructive',
+        title: 'Limite excedido',
+        description: 'Selecione no máximo 10 entregas por vez para conciliação com IA.',
+      });
+      return;
+    }
+
+    setIsAIReconciling(true);
+    setAiProgress(10);
+
+    try {
+      // Preparar itens para a API
+      const items = eligibleDeliveries.map(d => {
+        // Buscar pagamento elegível (cartão de crédito, débito ou PIX)
+        const eligiblePayment = d.payments?.find(p => aiEligiblePaymentMethods.includes(p.method));
+        return {
+          routeId: d.routeId,
+          stopIndex: d.stopIndex,
+          expectedValue: eligiblePayment?.value || 0,
+          photoUrl: d.photoUrl!,
+          customerName: d.customerName,
+        };
+      });
+
+      setAiProgress(30);
+
+      // Chamar API de conciliação
+      const response = await fetch('/api/reconcile-with-ai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ items }),
+      });
+
+      setAiProgress(80);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Erro ao processar conciliação');
+      }
+
+      const data = await response.json();
+
+      setAiProgress(100);
+
+      // Armazenar resultados
+      setAiResults(data.results);
+      setAiSummary(data.summary);
+
+      // Mostrar dialog com resultados
+      setAiResultsDialogOpen(true);
+
+      // Limpar seleção
+      setSelectedDeliveryIds(new Set());
+
+      // Toast de sucesso
+      if (data.summary.reconciled > 0) {
+        toast({
+          title: 'Conciliação com IA concluída!',
+          description: `${data.summary.reconciled} de ${data.summary.total} entregas foram conciliadas automaticamente.`,
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Erro na conciliação com IA:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro na conciliação',
+        description: error.message || 'Não foi possível processar a conciliação com IA.',
+      });
+    } finally {
+      setIsAIReconciling(false);
+      setAiProgress(0);
+    }
+  };
+
+  // Verificar se há entregas elegíveis para IA selecionadas
+  const eligibleForAI = React.useMemo(() => {
+    return filteredDeliveries.filter(d => {
+      const isSelected = selectedDeliveryIds.has(d.stopId);
+      const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
+      const hasPhoto = !!d.photoUrl;
+      const notReconciled = !d.reconciled;
+      return isSelected && hasEligiblePayment && hasPhoto && notReconciled;
+    }).length;
+  }, [filteredDeliveries, selectedDeliveryIds]);
+
   const handleToggleReconciliation = async (delivery: DeliveryReport) => {
     setIsReconciling(true);
 
@@ -616,8 +764,27 @@ export default function ReportsPage() {
   };
 
   const getStatusBadge = (delivery: DeliveryReport) => {
-    // Se conciliado, sempre mostra badge azul
+    // Se conciliado, mostra badge com indicação do método
     if (delivery.reconciled) {
+      if (delivery.reconciledMethod === 'ai') {
+        return (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge className="bg-purple-600 hover:bg-purple-700 cursor-help">
+                  <Sparkles className="mr-1 h-3 w-3" />
+                  Conciliado
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="text-sm">
+                  Este pedido foi conciliado usando IA para analisar o valor do comprovante e comparar com o valor do pedido.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        );
+      }
       return (
         <Badge className="bg-blue-600 hover:bg-blue-700">
           <CheckCircle className="mr-1 h-3 w-3" />
@@ -682,23 +849,44 @@ export default function ReportsPage() {
         </div>
         <div className="flex items-center gap-2">
           {selectedDeliveryIds.size > 0 && (
-            <Button
-              onClick={handleReconcileSelected}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
-              disabled={isReconciling}
-            >
-              {isReconciling ? (
-                <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                  Conciliando...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4" />
-                  Conciliar Selecionados ({selectedDeliveryIds.size})
-                </>
+            <>
+              {eligibleForAI > 0 && (
+                <Button
+                  onClick={handleAIReconciliation}
+                  className="gap-2 bg-purple-600 hover:bg-purple-700"
+                  disabled={isAIReconciling || isReconciling}
+                >
+                  {isAIReconciling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Analisando com IA...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Conciliar com IA ({eligibleForAI})
+                    </>
+                  )}
+                </Button>
               )}
-            </Button>
+              <Button
+                onClick={handleReconcileSelected}
+                className="gap-2 bg-blue-600 hover:bg-blue-700"
+                disabled={isReconciling || isAIReconciling}
+              >
+                {isReconciling ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Conciliando...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-4 w-4" />
+                    Conciliar Manual ({selectedDeliveryIds.size})
+                  </>
+                )}
+              </Button>
+            </>
           )}
           <Button onClick={handleExportCSV} className="gap-2">
             <Download className="h-4 w-4" />
@@ -1107,10 +1295,17 @@ export default function ReportsPage() {
                         {selectedDelivery.reconciled ? (
                           <div className="mt-2 space-y-1">
                             <div className="flex items-center gap-2">
-                              <Badge className="bg-blue-600 hover:bg-blue-700">
-                                <CheckCircle className="mr-1 h-3 w-3" />
-                                Conciliado
-                              </Badge>
+                              {selectedDelivery.reconciledMethod === 'ai' ? (
+                                <Badge className="bg-purple-600 hover:bg-purple-700">
+                                  <Sparkles className="mr-1 h-3 w-3" />
+                                  Conciliado por IA
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-blue-600 hover:bg-blue-700">
+                                  <CheckCircle className="mr-1 h-3 w-3" />
+                                  Conciliado
+                                </Badge>
+                              )}
                             </div>
                             {selectedDelivery.reconciledAt && (
                               <p className="text-xs text-muted-foreground">
@@ -1121,6 +1316,11 @@ export default function ReportsPage() {
                                   "dd/MM/yyyy 'às' HH:mm",
                                   { locale: ptBR }
                                 )}
+                              </p>
+                            )}
+                            {selectedDelivery.reconciledMethod === 'ai' && selectedDelivery.aiExtractedValue !== undefined && (
+                              <p className="text-xs text-muted-foreground">
+                                Valor extraído pela IA: {formatCurrency(selectedDelivery.aiExtractedValue)}
                               </p>
                             )}
                           </div>
@@ -1251,6 +1451,150 @@ export default function ReportsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Modal de Progresso da IA */}
+      <Dialog open={isAIReconciling} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-600" />
+              Analisando Comprovantes com IA
+            </DialogTitle>
+            <DialogDescription>
+              A inteligência artificial está analisando as fotos dos comprovantes para extrair os valores.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Progress value={aiProgress} className="h-2" />
+            <p className="text-sm text-center text-muted-foreground">
+              {aiProgress < 30 && 'Preparando análise...'}
+              {aiProgress >= 30 && aiProgress < 80 && 'Analisando imagens com IA...'}
+              {aiProgress >= 80 && 'Finalizando...'}
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Resultados da IA */}
+      <Dialog open={aiResultsDialogOpen} onOpenChange={setAiResultsDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-600" />
+              Resultados da Conciliação com IA
+            </DialogTitle>
+            <DialogDescription>
+              Resumo da análise automática dos comprovantes de pagamento.
+            </DialogDescription>
+          </DialogHeader>
+
+          {aiSummary && (
+            <div className="space-y-6 py-4">
+              {/* Resumo */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-2xl font-bold text-center">{aiSummary.total}</div>
+                    <p className="text-xs text-center text-muted-foreground">Total Analisado</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-2xl font-bold text-center text-green-600">{aiSummary.reconciled}</div>
+                    <p className="text-xs text-center text-muted-foreground">Conciliados</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-2xl font-bold text-center text-orange-600">{aiSummary.valueMismatch}</div>
+                    <p className="text-xs text-center text-muted-foreground">Valor Diferente</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-2xl font-bold text-center text-red-600">{aiSummary.aiErrors}</div>
+                    <p className="text-xs text-center text-muted-foreground">Erros de Leitura</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Lista de Resultados */}
+              <div className="space-y-2">
+                <h4 className="font-semibold">Detalhes por Entrega</h4>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Esperado</TableHead>
+                        <TableHead>Extraído</TableHead>
+                        <TableHead>Diferença</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {aiResults.map((result, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="font-medium">
+                            {result.customerName || `Parada #${result.stopIndex + 1}`}
+                          </TableCell>
+                          <TableCell>{formatCurrency(result.expectedValue)}</TableCell>
+                          <TableCell>
+                            {result.success ? formatCurrency(result.extractedValue) : '-'}
+                          </TableCell>
+                          <TableCell>
+                            {result.success ? (
+                              <span className={result.difference <= 0.5 ? 'text-green-600' : 'text-orange-600'}>
+                                {formatCurrency(result.difference)}
+                              </span>
+                            ) : '-'}
+                          </TableCell>
+                          <TableCell>
+                            {result.reconciled ? (
+                              <Badge className="bg-green-600">
+                                <CheckCircle className="mr-1 h-3 w-3" />
+                                Conciliado
+                              </Badge>
+                            ) : result.success ? (
+                              <Badge variant="outline" className="text-orange-600 border-orange-600">
+                                <AlertCircle className="mr-1 h-3 w-3" />
+                                Revisar
+                              </Badge>
+                            ) : (
+                              <Badge variant="destructive">
+                                <XCircle className="mr-1 h-3 w-3" />
+                                Erro
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Mensagens de erro detalhadas */}
+                {aiResults.some(r => r.error) && (
+                  <div className="mt-4 space-y-2">
+                    <h4 className="font-semibold text-sm text-muted-foreground">Detalhes dos Erros</h4>
+                    {aiResults.filter(r => r.error).map((result, idx) => (
+                      <div key={idx} className="text-sm text-red-600 bg-red-50 p-2 rounded">
+                        <strong>{result.customerName || `Parada #${result.stopIndex + 1}`}:</strong> {result.error}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end">
+                <Button onClick={() => setAiResultsDialogOpen(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

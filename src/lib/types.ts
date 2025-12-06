@@ -52,6 +52,8 @@ export type PlaceValue = {
   reconciled?: boolean; // Se a entrega foi conciliada/verificada
   reconciledAt?: Timestamp | Date; // Data de conciliação
   reconciledBy?: string; // ID do usuário que conciliou
+  reconciledMethod?: 'manual' | 'ai'; // Método de conciliação (manual ou IA)
+  aiExtractedValue?: number; // Valor extraído pela IA do comprovante
   // Campos de alteração de rota
   wasModified?: boolean;
   modifiedAt?: Timestamp | Date;
