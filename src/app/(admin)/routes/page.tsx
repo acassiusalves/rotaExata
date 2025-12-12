@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check, FileEdit } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check, FileEdit, Sun, Sunset, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -90,15 +90,15 @@ const formatDuration = (durationString: string = '0s') => {
   return `${minutes}m`;
 };
 
-const getRoutePeriod = (date: Date): { label: string; color: string } => {
+const getRoutePeriod = (date: Date): { label: string; color: string; icon: React.ElementType; bgLight: string } => {
   const hour = date.getHours();
 
   if (hour >= 8 && hour < 12) {
-    return { label: 'Matutino', color: 'bg-blue-500' };
+    return { label: 'Matutino', color: 'bg-blue-500', icon: Sun, bgLight: 'bg-blue-50 dark:bg-blue-950/30' };
   } else if (hour >= 12 && hour < 19) {
-    return { label: 'Vespertino', color: 'bg-orange-500' };
+    return { label: 'Vespertino', color: 'bg-orange-500', icon: Sunset, bgLight: 'bg-orange-50 dark:bg-orange-950/30' };
   } else {
-    return { label: 'Noturno', color: 'bg-purple-500' };
+    return { label: 'Noturno', color: 'bg-purple-500', icon: Moon, bgLight: 'bg-purple-50 dark:bg-purple-950/30' };
   }
 };
 
@@ -548,119 +548,165 @@ export default function RoutesPage() {
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="p-4 pt-0">
-                      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 pt-4 border-t">
-                        {dailyRoutes.map((route) => (
-                           <Card key={route.id} className="flex flex-col">
-                              <CardHeader>
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                        <CardTitle>{route.name}</CardTitle>
-                                        {route.status === 'draft' ? (
-                                          <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">
-                                            <FileEdit className="mr-1 h-3 w-3" />
-                                            Rascunho
-                                          </Badge>
-                                        ) : (
-                                          <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
-                                            {getRoutePeriod(route.plannedDate.toDate()).label}
-                                          </Badge>
-                                        )}
-                                        {pendingNotifications.has(route.id) && (
-                                          <Badge className="bg-orange-500 hover:bg-orange-600 text-white animate-pulse">
-                                            <AlertCircle className="mr-1 h-3 w-3" />
-                                            Aguardando confirmação
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <CardDescription>
-                                          {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                                      </CardDescription>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {route.code && (
-                                      <Badge variant="outline" className="font-mono">
-                                        {route.code}
-                                      </Badge>
-                                    )}
-                                    {route.source === 'lunna' && <LunnaBadge />}
-                                    <DropdownMenu open={openDropdownId === route.id} onOpenChange={(open) => setOpenDropdownId(open ? route.id : null)}>
-                                        <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" className="h-8 w-8 p-0">
-                                            <span className="sr-only">Abrir menu</span>
-                                            <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                        </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                          <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
-                                              <Copy className="mr-2 h-4 w-4" />
-                                              <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
-                                            <Pencil className="mr-2 h-4 w-4" />
-                                            <span>Editar Nome</span>
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
-                                              <UserCog className="mr-2 h-4 w-4" />
-                                              <span>Trocar Motorista</span>
-                                          </DropdownMenuItem>
-                                          {(userRole === 'admin' || userRole === 'socio') && (
-                                            <DropdownMenuItem
-                                              onClick={() => handleOpenCompleteRouteDialog(route)}
-                                              className="text-green-600 dark:text-green-400"
-                                            >
-                                              <CheckCircle className="mr-2 h-4 w-4" />
-                                              <span>Marcar como Concluída</span>
-                                            </DropdownMenuItem>
-                                          )}
-                                          <DropdownMenuItem
-                                              className="text-destructive"
-                                              onClick={() => handleOpenDeleteDialog(route)}
-                                          >
-                                          <Trash2 className="mr-2 h-4 w-4" />
-                                          <span>Excluir Rota</span>
-                                          </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </div>
-                                </div>
-                              </CardHeader>
-                              <CardContent className="flex-1 space-y-4">
-                                  <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center gap-3">
-                                      <User className="h-4 w-4 text-muted-foreground" />
-                                      <span className="font-medium">{route.driverInfo?.name || 'Motorista não informado'}</span>
+                      {(() => {
+                        // Agrupar rotas por período
+                        const routesByPeriod = dailyRoutes.reduce((acc, route) => {
+                          const period = route.status === 'draft' ? 'Rascunho' : getRoutePeriod(route.plannedDate.toDate()).label;
+                          if (!acc[period]) acc[period] = [];
+                          acc[period].push(route);
+                          return acc;
+                        }, {} as Record<string, RouteDocument[]>);
+
+                        // Ordem dos períodos
+                        const periodOrder = ['Matutino', 'Vespertino', 'Noturno', 'Rascunho'];
+                        const sortedPeriods = Object.keys(routesByPeriod).sort(
+                          (a, b) => periodOrder.indexOf(a) - periodOrder.indexOf(b)
+                        );
+
+                        return (
+                          <div className="pt-4 border-t space-y-6">
+                            {sortedPeriods.map((period) => {
+                              const periodRoutes = routesByPeriod[period];
+                              const periodInfo = period === 'Rascunho'
+                                ? { icon: FileEdit, color: 'bg-yellow-500', bgLight: 'bg-yellow-50 dark:bg-yellow-950/30' }
+                                : getRoutePeriod(periodRoutes[0].plannedDate.toDate());
+                              const PeriodIcon = periodInfo.icon;
+
+                              return (
+                                <div key={period}>
+                                  {/* Cabeçalho do período */}
+                                  <div className={`flex items-center gap-3 mb-4 p-3 rounded-lg ${periodInfo.bgLight}`}>
+                                    <div className={`p-2 rounded-full ${periodInfo.color}`}>
+                                      <PeriodIcon className="h-4 w-4 text-white" />
+                                    </div>
+                                    <div>
+                                      <h3 className="font-semibold">{period}</h3>
+                                      <p className="text-sm text-muted-foreground">
+                                        {periodRoutes.length} rota{periodRoutes.length > 1 ? 's' : ''}
+                                      </p>
                                     </div>
                                   </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                                    <span>{route.stops.length} paradas</span>
+
+                                  {/* Grid de rotas do período */}
+                                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                    {periodRoutes.map((route) => (
+                                      <Card key={route.id} className="flex flex-col">
+                                        <CardHeader>
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                  <CardTitle>{route.name}</CardTitle>
+                                                  {route.status === 'draft' ? (
+                                                    <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">
+                                                      <FileEdit className="mr-1 h-3 w-3" />
+                                                      Rascunho
+                                                    </Badge>
+                                                  ) : (
+                                                    <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
+                                                      {getRoutePeriod(route.plannedDate.toDate()).label}
+                                                    </Badge>
+                                                  )}
+                                                  {pendingNotifications.has(route.id) && (
+                                                    <Badge className="bg-orange-500 hover:bg-orange-600 text-white animate-pulse">
+                                                      <AlertCircle className="mr-1 h-3 w-3" />
+                                                      Aguardando confirmação
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                <CardDescription>
+                                                    {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                                </CardDescription>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              {route.code && (
+                                                <Badge variant="outline" className="font-mono">
+                                                  {route.code}
+                                                </Badge>
+                                              )}
+                                              {route.source === 'lunna' && <LunnaBadge />}
+                                              <DropdownMenu open={openDropdownId === route.id} onOpenChange={(open) => setOpenDropdownId(open ? route.id : null)}>
+                                                  <DropdownMenuTrigger asChild>
+                                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                                      <span className="sr-only">Abrir menu</span>
+                                                      <MoreVertical className="h-4 w-4" />
+                                                  </Button>
+                                                  </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => handleDuplicateRoute(route)} disabled={isDuplicating}>
+                                                        <Copy className="mr-2 h-4 w-4" />
+                                                        <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleOpenEditNameDialog(route)}>
+                                                      <Pencil className="mr-2 h-4 w-4" />
+                                                      <span>Editar Nome</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleOpenChangeDriver(route)}>
+                                                        <UserCog className="mr-2 h-4 w-4" />
+                                                        <span>Trocar Motorista</span>
+                                                    </DropdownMenuItem>
+                                                    {(userRole === 'admin' || userRole === 'socio') && (
+                                                      <DropdownMenuItem
+                                                        onClick={() => handleOpenCompleteRouteDialog(route)}
+                                                        className="text-green-600 dark:text-green-400"
+                                                      >
+                                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                                        <span>Marcar como Concluída</span>
+                                                      </DropdownMenuItem>
+                                                    )}
+                                                    <DropdownMenuItem
+                                                        className="text-destructive"
+                                                        onClick={() => handleOpenDeleteDialog(route)}
+                                                    >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    <span>Excluir Rota</span>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                              </DropdownMenu>
+                                            </div>
+                                          </div>
+                                        </CardHeader>
+                                        <CardContent className="flex-1 space-y-4">
+                                            <div className="flex items-center justify-between text-sm">
+                                              <div className="flex items-center gap-3">
+                                                <User className="h-4 w-4 text-muted-foreground" />
+                                                <span className="font-medium">{route.driverInfo?.name || 'Motorista não informado'}</span>
+                                              </div>
+                                            </div>
+                                          <div className="flex items-center gap-3 text-sm">
+                                              <MapPin className="h-4 w-4 text-muted-foreground" />
+                                              <span>{route.stops.length} paradas</span>
+                                          </div>
+                                          <div className="flex items-center gap-3 text-sm">
+                                              <Milestone className="h-4 w-4 text-muted-foreground" />
+                                              <span>{formatDistance(route.distanceMeters)} km</span>
+                                          </div>
+                                          <div className="flex items-center gap-3 text-sm">
+                                              <Clock className="h-4 w-4 text-muted-foreground" />
+                                              <span>{formatDuration(route.duration)}</span>
+                                          </div>
+                                        </CardContent>
+                                        <CardFooter>
+                                          {route.status === 'draft' ? (
+                                            <Button className="w-full" variant="outline" onClick={() => handleEditDraft(route)}>
+                                              <FileEdit className="mr-2 h-4 w-4" />
+                                              Continuar Editando
+                                            </Button>
+                                          ) : (
+                                            <Button className="w-full" variant="outline" onClick={() => handleEditRoute(route)}>
+                                              <Truck className="mr-2 h-4 w-4" />
+                                              Acompanhar Rota
+                                            </Button>
+                                          )}
+                                        </CardFooter>
+                                      </Card>
+                                    ))}
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                    <Milestone className="h-4 w-4 text-muted-foreground" />
-                                    <span>{formatDistance(route.distanceMeters)} km</span>
-                                </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                    <Clock className="h-4 w-4 text-muted-foreground" />
-                                    <span>{formatDuration(route.duration)}</span>
-                                </div>
-                              </CardContent>
-                              <CardFooter>
-                                {route.status === 'draft' ? (
-                                  <Button className="w-full" variant="outline" onClick={() => handleEditDraft(route)}>
-                                    <FileEdit className="mr-2 h-4 w-4" />
-                                    Continuar Editando
-                                  </Button>
-                                ) : (
-                                  <Button className="w-full" variant="outline" onClick={() => handleEditRoute(route)}>
-                                    <Truck className="mr-2 h-4 w-4" />
-                                    Acompanhar Rota
-                                  </Button>
-                                )}
-                              </CardFooter>
-                            </Card>
-                          ))}
-                      </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                   </AccordionContent>
                 </Card>
               </AccordionItem>

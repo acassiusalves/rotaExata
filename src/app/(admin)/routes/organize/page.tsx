@@ -1949,34 +1949,17 @@ export default function OrganizeRoutePage() {
   };
   
   const handleDispatchRoute = async (routeKey: 'A' | 'B') => {
-    console.log(`🚀 [DESPACHO] Iniciando despacho da rota ${routeKey}...`);
-
-    if (!routeData) {
-      console.error('❌ [DESPACHO] routeData é null');
-      return;
-    }
+    if (!routeData) return;
 
     const routeToSave = routeKey === 'A' ? routeA : routeB;
     const routeName = routeNames[routeKey];
     const driverId = assignedDrivers[routeKey];
 
-    console.log(`📋 [DESPACHO] Dados da rota ${routeKey}:`, {
-      routeName,
-      driverId,
-      hasRouteToSave: !!routeToSave,
-      stopsCount: routeToSave?.stops?.length || 0,
-      hasEncodedPolyline: !!routeToSave?.encodedPolyline,
-      isDraft: routeData.isDraft,
-      draftRouteId: routeData.draftRouteId,
-    });
-
     if (!routeToSave) {
-        console.error('❌ [DESPACHO] Rota não encontrada para despacho');
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
         return;
     }
     if (!driverId) {
-        console.error('❌ [DESPACHO] Motorista não atribuído');
         toast({ variant: 'destructive', title: 'Motorista não atribuído', description: `Por favor, atribua um motorista para a ${routeName}.` });
         return;
     }
@@ -1985,18 +1968,13 @@ export default function OrganizeRoutePage() {
 
     try {
         const driver = availableDrivers.find(d => d.id === driverId);
-        console.log(`👤 [DESPACHO] Motorista encontrado:`, driver?.name || 'NÃO ENCONTRADO');
-
-        // Gerar código sequencial único para a rota
         const routeCode = await generateRouteCode();
-        console.log(`🔢 [DESPACHO] Código da rota gerado: ${routeCode}`);
 
         // Se for um rascunho E for a rota A, atualizar o documento existente
         // Rota B sempre cria um novo documento, pois só existe um rascunho
         const shouldUpdateDraft = routeData.isDraft && routeData.draftRouteId && routeKey === 'A';
 
         if (shouldUpdateDraft) {
-            console.log(`📝 [DESPACHO] Atualizando rascunho existente: ${routeData.draftRouteId}`);
             const draftRef = doc(db, 'routes', routeData.draftRouteId);
             await updateDoc(draftRef, {
                 code: routeCode,
@@ -2012,15 +1990,12 @@ export default function OrganizeRoutePage() {
                 driverId: driverId,
                 driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
             });
-            console.log(`✅ [DESPACHO] Rascunho atualizado com sucesso!`);
 
             toast({
                 title: 'Rota Despachada!',
                 description: `A ${routeName} foi enviada para ${driver?.name}.`,
             });
         } else {
-            // Criar novo documento (comportamento original)
-            console.log(`📄 [DESPACHO] Criando novo documento no Firestore...`);
             const routeDoc = {
                 code: routeCode,
                 name: routeName,
@@ -2037,18 +2012,7 @@ export default function OrganizeRoutePage() {
                 driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
             };
 
-            console.log(`📦 [DESPACHO] Documento a ser salvo:`, {
-              code: routeDoc.code,
-              name: routeDoc.name,
-              status: routeDoc.status,
-              driverId: routeDoc.driverId,
-              stopsCount: routeDoc.stops?.length,
-              hasOrigin: !!routeDoc.origin,
-              hasPolyline: !!routeDoc.encodedPolyline,
-            });
-
-            const docRef = await addDoc(collection(db, "routes"), routeDoc);
-            console.log(`✅ [DESPACHO] Documento criado com ID: ${docRef.id}`);
+            await addDoc(collection(db, "routes"), routeDoc);
 
             toast({
                 title: 'Rota Despachada!',
@@ -2057,16 +2021,14 @@ export default function OrganizeRoutePage() {
         }
 
         // Remove the dispatched route from state
-        console.log(`🗑️ [DESPACHO] Removendo rota ${routeKey} do estado local...`);
         if (routeKey === 'A') {
             setRouteA(null);
         } else {
             setRouteB(null);
         }
-        console.log(`✅ [DESPACHO] Rota ${routeKey} despachada com sucesso!`);
 
     } catch (error) {
-        console.error(`❌ [DESPACHO] Erro ao salvar rota ${routeKey}:`, error);
+        console.error('Erro ao salvar rota:', error);
         toast({
             variant: 'destructive',
             title: 'Falha ao Salvar Rota',
@@ -2074,7 +2036,6 @@ export default function OrganizeRoutePage() {
         });
     } finally {
         setIsSaving(prev => ({ ...prev, [routeKey]: false }));
-        console.log(`🏁 [DESPACHO] Finalizado processo para rota ${routeKey}`);
     }
   };
 
