@@ -105,7 +105,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db, functions } from '@/lib/firebase/client';
 import { generateRouteCode } from '@/lib/firebase/route-code';
-import { getRouteInProgress, clearRouteInProgress } from '@/lib/route-persistence';
 import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
@@ -126,6 +125,9 @@ interface RouteData {
     encodedPolyline: string;
     color: string;
   };
+  // Campos para rascunho
+  isDraft?: boolean;
+  draftRouteId?: string;
 }
 
 const computeRoute = async (
@@ -184,6 +186,59 @@ const calculateFreightCost = (distanceMeters: number): string => {
 // Simple Euclidean distance for clustering (good enough for this purpose)
 const getDistance = (p1: {lat: number, lng: number}, p2: {lat: number, lng: number}) => {
     return Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
+};
+
+// Ordenar paradas por proximidade, priorizando pontos com preferência de horário
+// Pontos com hasTimePreference=true são colocados no início da rota
+const sortByProximityWithPriority = (stops: PlaceValue[], origin: PlaceValue): PlaceValue[] => {
+  if (stops.length === 0) return [];
+
+  // Separar paradas com e sem preferência de horário
+  const stopsWithTimePreference = stops.filter(s => s.hasTimePreference === true);
+  const stopsWithoutTimePreference = stops.filter(s => s.hasTimePreference !== true);
+
+  console.log(`🕐 Priorizando: ${stopsWithTimePreference.length} pontos com horário, ${stopsWithoutTimePreference.length} sem horário`);
+
+  // Função auxiliar para ordenar por nearest neighbor
+  const sortNearest = (stopsToSort: PlaceValue[], startPoint: PlaceValue): PlaceValue[] => {
+    if (stopsToSort.length === 0) return [];
+
+    const sorted: PlaceValue[] = [];
+    const remaining = [...stopsToSort];
+    let current = startPoint;
+
+    while (remaining.length > 0) {
+      let nearestIndex = 0;
+      let minDistance = getDistance(current, remaining[0]);
+
+      for (let i = 1; i < remaining.length; i++) {
+        const distance = getDistance(current, remaining[i]);
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestIndex = i;
+        }
+      }
+
+      const nearest = remaining.splice(nearestIndex, 1)[0];
+      sorted.push(nearest);
+      current = nearest;
+    }
+
+    return sorted;
+  };
+
+  // Primeiro: ordenar pontos com preferência de horário por proximidade da origem
+  const sortedWithTimePreference = sortNearest(stopsWithTimePreference, origin);
+
+  // Depois: ordenar os demais pontos, começando do último ponto com preferência de horário
+  // (ou da origem se não houver pontos com preferência)
+  const lastPoint = sortedWithTimePreference.length > 0
+    ? sortedWithTimePreference[sortedWithTimePreference.length - 1]
+    : origin;
+  const sortedWithoutTimePreference = sortNearest(stopsWithoutTimePreference, lastPoint);
+
+  // Combinar: primeiro os com preferência de horário, depois os demais
+  return [...sortedWithTimePreference, ...sortedWithoutTimePreference];
 };
 
 const kMeansCluster = (stops: PlaceValue[], k: number, maxIterations = 20) => {
@@ -797,15 +852,7 @@ export default function OrganizeRoutePage() {
   }, [routeData?.isExistingRoute, routeData?.currentRouteId]);
 
   React.useEffect(() => {
-    let storedData = sessionStorage.getItem('newRouteData');
-
-    // Se não houver no sessionStorage, tentar buscar do localStorage (rota em progresso)
-    if (!storedData) {
-      const routeInProgress = getRouteInProgress();
-      if (routeInProgress) {
-        storedData = JSON.stringify(routeInProgress);
-      }
-    }
+    const storedData = sessionStorage.getItem('newRouteData');
 
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
@@ -871,6 +918,70 @@ export default function OrganizeRoutePage() {
         };
 
         loadRouteFromFirestore();
+      } else if (parsedData.isDraft && parsedData.draftRouteId) {
+        // Rota rascunho - usar dados do sessionStorage (já salvos no Firestore)
+        // Os dados já estão corretos no sessionStorage, apenas dividir geograficamente
+        const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
+        const MAX_STOPS_PER_ROUTE = 25;
+
+        console.log(`📍 Rascunho - Origem: lat=${parsedData.origin.lat}, lng=${parsedData.origin.lng}`);
+        console.log(`📦 Total de paradas: ${allStops.length}`);
+
+        // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
+        const stopsNorte = allStops.filter(stop => stop.lat >= parsedData.origin.lat);
+        const stopsSul = allStops.filter(stop => stop.lat < parsedData.origin.lat);
+
+        console.log(`🧭 Divisão geográfica: Norte (${stopsNorte.length}), Sul (${stopsSul.length})`);
+
+        // Ordenar cada grupo por proximidade, priorizando pontos com preferência de horário
+        const sortedNorte = sortByProximityWithPriority(stopsNorte, parsedData.origin);
+        const sortedSul = sortByProximityWithPriority(stopsSul, parsedData.origin);
+
+        // Determinar qual grupo vai para qual rota baseado no tamanho
+        // Rota A fica com o grupo maior (ou Norte se igual)
+        let routeAStops: PlaceValue[];
+        let routeBStops: PlaceValue[];
+
+        if (sortedNorte.length >= sortedSul.length) {
+          routeAStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
+          routeBStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
+        } else {
+          routeAStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
+          routeBStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
+        }
+
+        // Calcular rotas
+        const calculateRoutes = async () => {
+          setIsLoading(true);
+          try {
+            if (routeAStops.length > 0) {
+              const routeAInfo = await computeRoute(parsedData.origin, routeAStops);
+              if (routeAInfo) {
+                setRouteA({ ...routeAInfo, color: '#e60000', visible: true });
+              }
+            }
+
+            if (routeBStops.length > 0) {
+              const routeBInfo = await computeRoute(parsedData.origin, routeBStops);
+              if (routeBInfo) {
+                setRouteB({ ...routeBInfo, color: '#0066cc', visible: true });
+              }
+            } else {
+              setRouteB(null);
+            }
+
+            // Paradas que não couberam em nenhuma rota
+            const extraNorte = sortedNorte.slice(MAX_STOPS_PER_ROUTE);
+            const extraSul = sortedSul.slice(MAX_STOPS_PER_ROUTE);
+            if (extraNorte.length > 0 || extraSul.length > 0) {
+              setUnassignedStops([...extraNorte, ...extraSul]);
+            }
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        calculateRoutes();
       } else {
         // Rota nova - dividir geograficamente usando origem como referência
         const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
@@ -885,39 +996,9 @@ export default function OrganizeRoutePage() {
 
         console.log(`🧭 Divisão geográfica: Norte (${stopsNorte.length}), Sul (${stopsSul.length})`);
 
-        // Função para ordenar paradas por proximidade (nearest neighbor)
-        const sortByProximity = (stops: PlaceValue[], origin: PlaceValue): PlaceValue[] => {
-          if (stops.length === 0) return [];
-
-          const sorted: PlaceValue[] = [];
-          const remaining = [...stops];
-          let current = origin;
-
-          while (remaining.length > 0) {
-            // Encontrar a parada mais próxima da posição atual
-            let nearestIndex = 0;
-            let minDistance = getDistance(current, remaining[0]);
-
-            for (let i = 1; i < remaining.length; i++) {
-              const distance = getDistance(current, remaining[i]);
-              if (distance < minDistance) {
-                minDistance = distance;
-                nearestIndex = i;
-              }
-            }
-
-            // Adicionar a parada mais próxima ao resultado
-            const nearest = remaining.splice(nearestIndex, 1)[0];
-            sorted.push(nearest);
-            current = nearest;
-          }
-
-          return sorted;
-        };
-
-        // Ordenar cada região por proximidade
-        const stopsNorteOrdenadas = sortByProximity(stopsNorte, parsedData.origin);
-        const stopsSulOrdenadas = sortByProximity(stopsSul, parsedData.origin);
+        // Ordenar cada região por proximidade, priorizando pontos com preferência de horário
+        const stopsNorteOrdenadas = sortByProximityWithPriority(stopsNorte, parsedData.origin);
+        const stopsSulOrdenadas = sortByProximityWithPriority(stopsSul, parsedData.origin);
 
         // Verificar se alguma região excede o limite
         let stopsA: PlaceValue[] = [];
@@ -1796,7 +1877,12 @@ export default function OrganizeRoutePage() {
     try {
         const result = await optimizeDeliveryRoutes({
             origin: routeData.origin,
-            deliveryLocations: routeToOptimize.stops.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })),
+            deliveryLocations: routeToOptimize.stops.map(s => ({
+              id: s.id,
+              lat: s.lat,
+              lng: s.lng,
+              hasTimePreference: s.hasTimePreference,
+            })),
         });
         
         const reorderedStops = [...routeToOptimize.stops].sort((a, b) => {
@@ -1868,7 +1954,7 @@ export default function OrganizeRoutePage() {
     const routeToSave = routeKey === 'A' ? routeA : routeB;
     const routeName = routeNames[routeKey];
     const driverId = assignedDrivers[routeKey];
-    
+
     if (!routeToSave) {
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
         return;
@@ -1877,7 +1963,7 @@ export default function OrganizeRoutePage() {
         toast({ variant: 'destructive', title: 'Motorista não atribuído', description: `Por favor, atribua um motorista para a ${routeName}.` });
         return;
     }
-    
+
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
@@ -1886,27 +1972,52 @@ export default function OrganizeRoutePage() {
         // Gerar código sequencial único para a rota
         const routeCode = await generateRouteCode();
 
-        const routeDoc = {
-            code: routeCode,
-            name: routeName,
-            status: 'dispatched',
-            createdAt: serverTimestamp(),
-            plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
-            origin: routeData.origin,
-            stops: routeToSave.stops,
-            distanceMeters: routeToSave.distanceMeters,
-            duration: routeToSave.duration,
-            encodedPolyline: routeToSave.encodedPolyline,
-            color: routeToSave.color,
-            driverId: driverId,
-            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
-        };
-        await addDoc(collection(db, "routes"), routeDoc);
+        // Se for um rascunho, atualizar o documento existente
+        if (routeData.isDraft && routeData.draftRouteId) {
+            const draftRef = doc(db, 'routes', routeData.draftRouteId);
+            await updateDoc(draftRef, {
+                code: routeCode,
+                name: routeName,
+                status: 'dispatched',
+                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+                origin: routeData.origin,
+                stops: routeToSave.stops,
+                distanceMeters: routeToSave.distanceMeters,
+                duration: routeToSave.duration,
+                encodedPolyline: routeToSave.encodedPolyline,
+                color: routeToSave.color,
+                driverId: driverId,
+                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+            });
 
-        toast({
-            title: 'Rota Despachada!',
-            description: `A ${routeName} foi enviada para ${driver?.name}.`,
-        });
+            toast({
+                title: 'Rota Despachada!',
+                description: `A ${routeName} foi enviada para ${driver?.name}.`,
+            });
+        } else {
+            // Criar novo documento (comportamento original)
+            const routeDoc = {
+                code: routeCode,
+                name: routeName,
+                status: 'dispatched',
+                createdAt: serverTimestamp(),
+                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+                origin: routeData.origin,
+                stops: routeToSave.stops,
+                distanceMeters: routeToSave.distanceMeters,
+                duration: routeToSave.duration,
+                encodedPolyline: routeToSave.encodedPolyline,
+                color: routeToSave.color,
+                driverId: driverId,
+                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+            };
+            await addDoc(collection(db, "routes"), routeDoc);
+
+            toast({
+                title: 'Rota Despachada!',
+                description: `A ${routeName} foi enviada para ${driver?.name}.`,
+            });
+        }
 
         // Remove the dispatched route from state
         if (routeKey === 'A') {
@@ -1914,7 +2025,7 @@ export default function OrganizeRoutePage() {
         } else {
             setRouteB(null);
         }
-        
+
     } catch (error) {
         console.error("Error saving route:", error);
         toast({

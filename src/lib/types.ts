@@ -32,6 +32,7 @@ export type PlaceValue = {
   orderNumber?: string;
   timeWindowStart?: string;
   timeWindowEnd?: string;
+  hasTimePreference?: boolean; // Se o ponto tem preferência de horário de entrega
   addressString?: string;
   complemento?: string;
   // Campos de validação de endereço
@@ -99,7 +100,7 @@ export type RouteInfo = {
   duration: string;
   color?: string; // Optional color for rendering
   visible?: boolean;
-  status?: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
+  status?: 'draft' | 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   // Rastreamento em tempo real
   currentLocation?: DriverLocation;
   currentStopIndex?: number;

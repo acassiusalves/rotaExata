@@ -16,6 +16,7 @@ import {
   Info,
   Pencil,
   AlertCircle,
+  Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -51,13 +52,15 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
-import { saveRouteInProgress, hasRouteInProgress, clearRouteInProgress } from '@/lib/route-persistence';
+import { db } from '@/lib/firebase/client';
+import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 const initialSavedOrigins = [
   {
@@ -98,6 +101,7 @@ const initialManualServiceState = {
   orderNumber: '',
   timeWindowStart: '',
   timeWindowEnd: '',
+  hasTimePreference: false,
 };
 
 
@@ -158,7 +162,7 @@ export default function NewRoutePage() {
   const [routeTime, setRouteTime] = React.useState('18:10');
 
   const [isImporting, setIsImporting] = React.useState(false);
-  const [showRouteInProgressDialog, setShowRouteInProgressDialog] = React.useState(false);
+  const [isSavingDraft, setIsSavingDraft] = React.useState(false);
   const [isOriginDialogOpen, setIsOriginDialogOpen] = React.useState(false);
   const [isNewOriginDialogOpen, setIsNewOriginDialogOpen] = React.useState(false);
   const [isDatePopoverOpen, setIsDatePopoverOpen] = React.useState(false);
@@ -194,12 +198,6 @@ export default function NewRoutePage() {
     setRouteDate(new Date());
   }, []);
 
-  // Verificar se há rota em progresso quando o componente carregar
-  React.useEffect(() => {
-    if (typeof window !== 'undefined' && hasRouteInProgress()) {
-      setShowRouteInProgressDialog(true);
-    }
-  }, []);
 
   // Salvar origens no localStorage sempre que mudar
   React.useEffect(() => {
@@ -293,6 +291,12 @@ export default function NewRoutePage() {
       newStops[index] = { ...newStops[index], ...place, id: String(safeId) };
       setStops(newStops);
     }
+  };
+
+  const handleToggleTimePreference = (index: number, checked: boolean) => {
+    const newStops = [...stops];
+    newStops[index] = { ...newStops[index], hasTimePreference: checked };
+    setStops(newStops);
   };
 
   const geocodeAddress = React.useCallback(
@@ -450,6 +454,7 @@ export default function NewRoutePage() {
             orderNumber: manualService.orderNumber,
             timeWindowStart: manualService.timeWindowStart,
             timeWindowEnd: manualService.timeWindowEnd,
+            hasTimePreference: manualService.hasTimePreference,
         };
 
         if (isEditing && stopToEdit) {
@@ -490,6 +495,7 @@ export default function NewRoutePage() {
       orderNumber: stop.orderNumber || '',
       timeWindowStart: stop.timeWindowStart || '',
       timeWindowEnd: stop.timeWindowEnd || '',
+      hasTimePreference: stop.hasTimePreference || false,
     });
     // Apenas abrir o dialog. O preenchimento completo vem do reverse geocode
     setIsAddServiceDialogOpen(true);
@@ -877,21 +883,7 @@ export default function NewRoutePage() {
     }
   };
   
-  const handleContinueExistingRoute = () => {
-    setShowRouteInProgressDialog(false);
-    router.push('/routes/organize');
-  };
-
-  const handleDiscardExistingRoute = () => {
-    clearRouteInProgress();
-    setShowRouteInProgressDialog(false);
-    toast({
-      title: 'Rota Descartada',
-      description: 'A rota em progresso foi descartada. Você pode criar uma nova rota.',
-    });
-  };
-
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     if (!origin) {
       toast({
         variant: 'destructive',
@@ -908,19 +900,80 @@ export default function NewRoutePage() {
       });
       return;
     }
-    // Save data to session storage to pass to the next page
-    const routeData = {
-      origin,
-      stops: stops.filter(s => s.placeId), // Ensure we only pass to valid stops
-      routeDate: routeDate?.toISOString() || '',
-      routeTime,
-    };
-    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
 
-    // Salvar também no localStorage para persistência
-    saveRouteInProgress(routeData);
+    setIsSavingDraft(true);
 
-    router.push('/routes/organize');
+    try {
+      // Criar data planejada com hora selecionada
+      const [hours, minutes] = routeTime.split(':').map(Number);
+      const plannedDate = new Date(routeDate || new Date());
+      plannedDate.setHours(hours, minutes, 0, 0);
+
+      // Gerar nome padrão para o rascunho
+      const draftName = `Rascunho - ${format(plannedDate, 'dd/MM/yyyy HH:mm', { locale: ptBR })}`;
+
+      // Limpar campos undefined dos stops antes de salvar
+      const cleanedStops = stops.filter(s => s.placeId).map(stop => {
+        const cleanStop: Record<string, any> = {};
+        Object.entries(stop).forEach(([key, value]) => {
+          if (value !== undefined) {
+            cleanStop[key] = value;
+          }
+        });
+        return cleanStop;
+      });
+
+      // Limpar campos undefined da origin
+      const cleanedOrigin: Record<string, any> = {};
+      Object.entries(origin).forEach(([key, value]) => {
+        if (value !== undefined) {
+          cleanedOrigin[key] = value;
+        }
+      });
+
+      // Salvar rota como rascunho no Firestore
+      const draftDoc = {
+        name: draftName,
+        status: 'draft',
+        createdAt: serverTimestamp(),
+        plannedDate: Timestamp.fromDate(plannedDate),
+        origin: cleanedOrigin,
+        stops: cleanedStops,
+        // Campos que serão preenchidos ao despachar
+        distanceMeters: 0,
+        duration: '0s',
+        encodedPolyline: '',
+      };
+
+      const docRef = await addDoc(collection(db, 'routes'), draftDoc);
+
+      // Salvar ID do rascunho no sessionStorage para a página organize carregar
+      const routeData = {
+        origin,
+        stops: stops.filter(s => s.placeId),
+        routeDate: routeDate?.toISOString() || '',
+        routeTime,
+        isDraft: true,
+        draftRouteId: docRef.id,
+      };
+      sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+
+      toast({
+        title: 'Rascunho criado',
+        description: 'A rota foi salva como rascunho. Você pode continuar a organização.',
+      });
+
+      router.push('/routes/organize');
+    } catch (error) {
+      console.error('Erro ao salvar rascunho:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar',
+        description: 'Não foi possível salvar o rascunho. Tente novamente.',
+      });
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   const mapStops = React.useMemo(() => stops.filter((s) => s.lat && s.lng), [
@@ -1044,16 +1097,37 @@ export default function NewRoutePage() {
                 <div className="space-y-4 pb-4">
                     {stops.map((stop, index) => (
                     <div key={stop.id ?? stop.placeId ?? index} className="space-y-2">
-                        <Label htmlFor={`stop-${index}`}>
+                        <Label htmlFor={`stop-${index}`} className="flex items-center gap-2">
                         Parada {index + 1}
+                        {stop.hasTimePreference && (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">
+                            <Clock className="h-3 w-3" />
+                            Horário
+                          </span>
+                        )}
                         {stop.customerName && (
-                            <span className="ml-2 font-normal text-muted-foreground">
+                            <span className="font-normal text-muted-foreground">
                             - {stop.customerName}
                             {stop.orderNumber && ` (#${stop.orderNumber})`}
                             </span>
                         )}
                         </Label>
                         <div className="flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "flex items-center justify-center h-9 w-9 shrink-0 rounded-md border cursor-pointer transition-colors",
+                              stop.hasTimePreference
+                                ? "bg-orange-100 border-orange-400 hover:bg-orange-200"
+                                : "bg-background border-input hover:bg-accent"
+                            )}
+                            onClick={() => handleToggleTimePreference(index, !stop.hasTimePreference)}
+                            title={stop.hasTimePreference ? "Remover preferência de horário" : "Marcar preferência de horário"}
+                          >
+                            <Clock className={cn(
+                              "h-4 w-4",
+                              stop.hasTimePreference ? "text-orange-600" : "text-muted-foreground"
+                            )} />
+                          </div>
                           <AutocompleteInput
                               id={`stop-${index}`}
                               placeholder="Endereço da parada..."
@@ -1096,6 +1170,23 @@ export default function NewRoutePage() {
                                         <span className="italic">{stop.notes || "-"}</span>
                                       </div>
                                   </div>
+                                  <Separator />
+                                  <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                      id={`time-preference-${index}`}
+                                      checked={stop.hasTimePreference || false}
+                                      onCheckedChange={(checked) => handleToggleTimePreference(index, checked as boolean)}
+                                    />
+                                    <label
+                                      htmlFor={`time-preference-${index}`}
+                                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                    >
+                                      Preferência de horário
+                                    </label>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    Marque se este ponto tem prioridade de entrega dentro da janela de horário informada.
+                                  </p>
                                   <Button size="sm" onClick={() => openEditDialog(stop, index)}>
                                     <Pencil className="mr-2 h-4 w-4" />
                                     Editar
@@ -1140,9 +1231,18 @@ export default function NewRoutePage() {
                         {isImporting ? 'Importando...' : 'Importar planilha CSV'}
                     </Button>
                 </div>
-                <Button size="sm" className="w-full h-9 transition-all duration-300 hover:shadow-button-primary" onClick={handleNextStep}>
-                    Avançar para Organização
-                    <ArrowRight className='ml-2 h-4 w-4' />
+                <Button size="sm" className="w-full h-9 transition-all duration-300 hover:shadow-button-primary" onClick={handleNextStep} disabled={isSavingDraft}>
+                    {isSavingDraft ? (
+                      <>
+                        <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                        Salvando Rascunho...
+                      </>
+                    ) : (
+                      <>
+                        Avançar para Organização
+                        <ArrowRight className='ml-2 h-4 w-4' />
+                      </>
+                    )}
                 </Button>
             </div>
         </div>
@@ -1534,6 +1634,25 @@ export default function NewRoutePage() {
                     <Input id="timeWindowEnd" type="time" value={manualService.timeWindowEnd} onChange={handleManualServiceChange} />
                 </div>
             </div>
+            <div className="flex items-center space-x-2 p-3 bg-orange-50 rounded-lg border border-orange-200">
+              <Checkbox
+                id="hasTimePreference"
+                checked={manualService.hasTimePreference || false}
+                onCheckedChange={(checked) => setManualService(prev => ({ ...prev, hasTimePreference: checked as boolean }))}
+              />
+              <div className="grid gap-1.5 leading-none">
+                <label
+                  htmlFor="hasTimePreference"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                >
+                  <Clock className="h-4 w-4 text-orange-600" />
+                  Preferência de horário
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Este ponto terá prioridade de entrega dentro da janela de horário informada.
+                </p>
+              </div>
+            </div>
             <div className="space-y-2">
                 <Label htmlFor="notes">Observações</Label>
                 <Textarea id="notes" value={manualService.notes} onChange={handleManualServiceChange} placeholder="Detalhes sobre a entrega, ponto de referência..." />
@@ -1548,28 +1667,6 @@ export default function NewRoutePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Rota em Progresso */}
-      <AlertDialog open={showRouteInProgressDialog} onOpenChange={setShowRouteInProgressDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-orange-500" />
-              Rota em Progresso Detectada
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Você possui uma rota que foi iniciada mas não foi finalizada. Deseja continuar de onde parou ou descartar e criar uma nova rota?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleDiscardExistingRoute}>
-              Descartar Rota
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={handleContinueExistingRoute}>
-              Continuar Rota
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

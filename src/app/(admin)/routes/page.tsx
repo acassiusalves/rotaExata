@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check } from 'lucide-react';
+import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check, FileEdit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -71,7 +71,7 @@ import { LunnaBadge } from '@/components/routes/lunna-badge';
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  status: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
+  status: 'draft' | 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   driverId: string;
   driverInfo: {
     name: string;
@@ -387,6 +387,7 @@ export default function RoutesPage() {
 
   const handleEditRoute = (route: RouteDocument) => {
     const routeDate = route.plannedDate.toDate();
+    const period = getRoutePeriod(routeDate).label; // Matutino, Vespertino ou Noturno
     const routeData = {
       origin: route.origin,
       stops: route.stops,
@@ -394,6 +395,7 @@ export default function RoutesPage() {
       routeTime: format(routeDate, 'HH:mm'),
       isExistingRoute: true, // Flag para indicar que é uma rota já organizada
       currentRouteId: route.id, // ID da rota atual para filtrar das adicionais
+      period, // Período da rota para filtrar na página de acompanhamento
       existingRouteData: {
         distanceMeters: route.distanceMeters,
         duration: route.duration,
@@ -403,6 +405,20 @@ export default function RoutesPage() {
     };
     sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
     router.push('/routes/organize/acompanhar'); // Redirecionar para página de acompanhamento
+  }
+
+  const handleEditDraft = (route: RouteDocument) => {
+    const routeDate = route.plannedDate.toDate();
+    const routeData = {
+      origin: route.origin,
+      stops: route.stops,
+      routeDate: routeDate.toISOString(),
+      routeTime: format(routeDate, 'HH:mm'),
+      isDraft: true,
+      draftRouteId: route.id,
+    };
+    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+    router.push('/routes/organize'); // Redirecionar para página de organização
   };
   
   // Filter routes based on search query
@@ -540,9 +556,16 @@ export default function RoutesPage() {
                                   <div className="flex-1">
                                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                                         <CardTitle>{route.name}</CardTitle>
-                                        <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
-                                          {getRoutePeriod(route.plannedDate.toDate()).label}
-                                        </Badge>
+                                        {route.status === 'draft' ? (
+                                          <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">
+                                            <FileEdit className="mr-1 h-3 w-3" />
+                                            Rascunho
+                                          </Badge>
+                                        ) : (
+                                          <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
+                                            {getRoutePeriod(route.plannedDate.toDate()).label}
+                                          </Badge>
+                                        )}
                                         {pendingNotifications.has(route.id) && (
                                           <Badge className="bg-orange-500 hover:bg-orange-600 text-white animate-pulse">
                                             <AlertCircle className="mr-1 h-3 w-3" />
@@ -623,10 +646,17 @@ export default function RoutesPage() {
                                 </div>
                               </CardContent>
                               <CardFooter>
-                                <Button className="w-full" variant="outline" onClick={() => handleEditRoute(route)}>
+                                {route.status === 'draft' ? (
+                                  <Button className="w-full" variant="outline" onClick={() => handleEditDraft(route)}>
+                                    <FileEdit className="mr-2 h-4 w-4" />
+                                    Continuar Editando
+                                  </Button>
+                                ) : (
+                                  <Button className="w-full" variant="outline" onClick={() => handleEditRoute(route)}>
                                     <Truck className="mr-2 h-4 w-4" />
                                     Acompanhar Rota
-                                </Button>
+                                  </Button>
+                                )}
                               </CardFooter>
                             </Card>
                           ))}

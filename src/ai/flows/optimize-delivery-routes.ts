@@ -22,6 +22,7 @@ const OptimizeDeliveryRoutesInputSchema = z.object({
         id: z.string().describe('The unique ID of the stop.'),
         lat: z.number().describe('The latitude of the delivery location.'),
         lng: z.number().describe('The longitude of the delivery location.'),
+        hasTimePreference: z.boolean().optional().describe('Whether this stop has a time preference and should be prioritized earlier in the route.'),
       })
     )
     .describe('An array of delivery locations with latitude, longitude, and a unique ID.'),
@@ -53,16 +54,18 @@ const optimizeDeliveryRoutesPrompt = ai.definePrompt({
   output: {schema: OptimizeDeliveryRoutesOutputSchema},
   prompt: `You are an expert route optimization specialist for delivery drivers.
 
-Given a starting origin point and a list of delivery locations, you will determine the optimal sequence of stops to minimize the total travel distance. The route starts at the origin and must visit every delivery location.
+Given a starting origin point and a list of delivery locations, you will determine the optimal sequence of stops. The route starts at the origin and must visit every delivery location.
+
+IMPORTANT PRIORITY RULE: Stops marked with "hasTimePreference: true" MUST be visited FIRST, before any other stops. These customers have specific time windows and must be prioritized at the beginning of the route. Among the priority stops, optimize for minimum travel distance. After all priority stops are completed, continue with the remaining stops in the most efficient order.
 
 Origin Location: Latitude: {{{origin.lat}}}, Longitude: {{{origin.lng}}}
 
 Delivery Locations to visit:
 {{#each deliveryLocations}}
-- Stop ID: {{{id}}}, Latitude: {{{lat}}}, Longitude: {{{lng}}}
+- Stop ID: {{{id}}}, Latitude: {{{lat}}}, Longitude: {{{lng}}}{{#if hasTimePreference}} [PRIORITY - TIME PREFERENCE]{{/if}}
 {{/each}}
 
-Your task is to return the list of stops in the most efficient order. The output should be an array of stop objects, sorted by the optimized route sequence.
+Your task is to return the list of stops in the optimized order, ensuring all stops with time preference come first (optimized among themselves), followed by the remaining stops (also optimized). The output should be an array of stop objects, sorted by the optimized route sequence.
 `,
 });
 

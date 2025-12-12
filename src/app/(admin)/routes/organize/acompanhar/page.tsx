@@ -120,6 +120,7 @@ interface RouteData {
   routeTime: string;
   isExistingRoute?: boolean;
   currentRouteId?: string; // ID da rota atual para filtrar
+  period?: 'Matutino' | 'Vespertino' | 'Noturno'; // Período para filtrar rotas
   existingRouteData?: {
     distanceMeters: number;
     duration: string;
@@ -552,7 +553,7 @@ export default function OrganizeRoutePage() {
   };
 
   // State for additional routes from same period
-  const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any }>>([]);
+  const [additionalRoutes, setAdditionalRoutes] = React.useState<Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any; plannedDate?: Date }>>([]);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
 
   // State for dynamic routes (C, D, E, etc.)
@@ -621,6 +622,10 @@ export default function OrganizeRoutePage() {
   });
   const [showEditMap, setShowEditMap] = React.useState(false);
   const [editMapType, setEditMapType] = React.useState<'hybrid' | 'roadmap'>('hybrid');
+
+  // Estados para dialog de escolha de atualização de coordenadas
+  const [pendingCoordinates, setPendingCoordinates] = React.useState<{lat: number; lng: number} | null>(null);
+  const [showCoordinateUpdateDialog, setShowCoordinateUpdateDialog] = React.useState(false);
 
 
   const mapApiRef = React.useRef<RouteMapHandle>(null);
@@ -809,6 +814,14 @@ export default function OrganizeRoutePage() {
     return () => unsubscribe();
   }, [availableDrivers]);
 
+  // Helper function to get route period from date
+  const getRoutePeriodFromDate = (date: Date): 'Matutino' | 'Vespertino' | 'Noturno' => {
+    const hour = date.getHours();
+    if (hour >= 8 && hour < 12) return 'Matutino';
+    if (hour >= 12 && hour < 19) return 'Vespertino';
+    return 'Noturno';
+  };
+
   // Load additional routes from same period (only for existing routes, not new ones)
   React.useEffect(() => {
     if (!routeData?.routeDate) return;
@@ -820,6 +833,9 @@ export default function OrganizeRoutePage() {
         const routeDate = new Date(routeData.routeDate);
         const dayStart = Timestamp.fromDate(startOfDay(routeDate));
         const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
+
+        // Período selecionado para filtrar (passado da página de rotas)
+        const selectedPeriod = routeData.period;
 
         const q = query(
           collection(db, 'routes'),
@@ -861,6 +877,16 @@ export default function OrganizeRoutePage() {
             return;
           }
 
+          // Filter by period if specified
+          if (selectedPeriod && routeDoc.plannedDate) {
+            const routePlannedDate = routeDoc.plannedDate.toDate();
+            const routePeriod = getRoutePeriodFromDate(routePlannedDate);
+            if (routePeriod !== selectedPeriod) {
+              console.log('🚫 Pulando rota de outro período:', doc.id, 'Período:', routePeriod, 'Esperado:', selectedPeriod);
+              return;
+            }
+          }
+
           // Find a color that's not already used by main routes
           let assignedColor = routeDoc.color;
           if (!assignedColor || usedColors.has(assignedColor.toLowerCase())) {
@@ -887,7 +913,8 @@ export default function OrganizeRoutePage() {
             name: routeDoc.name || `Rota ${doc.id.substring(0, 6)}`, // Use real route name from Firestore
             data: routeInfo,
             driverId: routeDoc.driverId,
-            driverInfo: routeDoc.driverInfo
+            driverInfo: routeDoc.driverInfo,
+            plannedDate: routeDoc.plannedDate?.toDate(),
           });
           visibility[doc.id] = false; // Hidden by default
         });
@@ -901,7 +928,7 @@ export default function OrganizeRoutePage() {
     };
 
     loadAdditionalRoutes();
-  }, [routeData?.routeDate]);
+  }, [routeData?.routeDate, routeData?.period]);
 
   // Subscribe to real-time location updates for existing route
   React.useEffect(() => {
@@ -1299,6 +1326,33 @@ export default function OrganizeRoutePage() {
     const lat = parseFloat(match[1]);
     const lng = parseFloat(match[2]);
 
+    // Armazenar coordenadas e mostrar diálogo de escolha
+    setPendingCoordinates({ lat, lng });
+    setShowCoordinateUpdateDialog(true);
+  };
+
+  const handleUpdateCoordinatesOnly = () => {
+    if (!pendingCoordinates) return;
+
+    setEditService(prev => ({
+      ...prev,
+      lat: pendingCoordinates.lat,
+      lng: pendingCoordinates.lng,
+    }));
+    setShowEditMap(true);
+    setShowCoordinateUpdateDialog(false);
+    setPendingCoordinates(null);
+    toast({
+      title: "Coordenadas atualizadas!",
+      description: "Apenas a posição do alfinete foi atualizada. O endereço permanece o mesmo."
+    });
+  };
+
+  const handleUpdateFullAddress = async () => {
+    if (!pendingCoordinates) return;
+
+    const { lat, lng } = pendingCoordinates;
+
     toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
 
     const addressDetails = await reverseGeocode(lat, lng);
@@ -1309,10 +1363,21 @@ export default function OrganizeRoutePage() {
         lat,
         lng,
       }));
-      setShowEditMap(true); // Mostrar o mapa para permitir ajuste
-      toast({ title: "Endereço preenchido!", description: "Os campos foram preenchidos automaticamente. Você pode ajustar a posição do alfinete no mapa." });
+      setShowEditMap(true);
+      setShowCoordinateUpdateDialog(false);
+      setPendingCoordinates(null);
+      toast({
+        title: "Endereço atualizado!",
+        description: "Os campos foram preenchidos automaticamente. Você pode ajustar a posição do alfinete no mapa."
+      });
     } else {
-      toast({ variant: 'destructive', title: "Falha na busca", description: "Não foi possível encontrar o endereço para este link." });
+      toast({
+        variant: 'destructive',
+        title: "Falha na busca",
+        description: "Não foi possível encontrar o endereço para este link."
+      });
+      setShowCoordinateUpdateDialog(false);
+      setPendingCoordinates(null);
     }
   };
 
@@ -3170,6 +3235,7 @@ export default function OrganizeRoutePage() {
                                 <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
                                     <TableHead className='w-12 py-3 px-4'></TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                                    <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Período</TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
                                     <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
@@ -3211,6 +3277,17 @@ export default function OrganizeRoutePage() {
                                             }
                                           />
                                         </div>
+                                    </TableCell>
+                                    <TableCell className="py-4 px-4">
+                                      {routeData?.period && (
+                                        <Badge className={`${
+                                          routeData.period === 'Matutino' ? 'bg-blue-500 hover:bg-blue-600' :
+                                          routeData.period === 'Vespertino' ? 'bg-orange-500 hover:bg-orange-600' :
+                                          'bg-purple-500 hover:bg-purple-600'
+                                        } text-white text-xs`}>
+                                          {routeData.period}
+                                        </Badge>
+                                      )}
                                     </TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[routeItem.key] || routeItem.data.stops).length}</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
@@ -3284,6 +3361,7 @@ export default function OrganizeRoutePage() {
                         <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
                           <TableHead className='w-12 py-3 px-4'></TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
+                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Período</TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
                           <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
@@ -3329,6 +3407,25 @@ export default function OrganizeRoutePage() {
                                 <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                                 <span>{route.name}</span>
                               </div>
+                            </TableCell>
+                            <TableCell className="py-4 px-4">
+                              {route.plannedDate && (
+                                <Badge className={`${
+                                  (() => {
+                                    const hour = route.plannedDate.getHours();
+                                    if (hour >= 8 && hour < 12) return 'bg-blue-500 hover:bg-blue-600';
+                                    if (hour >= 12 && hour < 19) return 'bg-orange-500 hover:bg-orange-600';
+                                    return 'bg-purple-500 hover:bg-purple-600';
+                                  })()
+                                } text-white text-xs`}>
+                                  {(() => {
+                                    const hour = route.plannedDate.getHours();
+                                    if (hour >= 8 && hour < 12) return 'Matutino';
+                                    if (hour >= 12 && hour < 19) return 'Vespertino';
+                                    return 'Noturno';
+                                  })()}
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[route.id] || route.data.stops).length}</TableCell>
                             <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.data.distanceMeters)} km</TableCell>
@@ -3895,6 +3992,66 @@ export default function OrganizeRoutePage() {
             <DialogClose asChild>
               <Button variant="outline">Cancelar</Button>
             </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para escolher tipo de atualização de coordenadas */}
+      <Dialog open={showCoordinateUpdateDialog} onOpenChange={setShowCoordinateUpdateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Atualizar Localização</DialogTitle>
+            <DialogDescription>
+              Como você deseja atualizar a localização deste ponto?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <Button
+              onClick={handleUpdateCoordinatesOnly}
+              variant="outline"
+              className="w-full justify-start text-left h-auto py-2"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                    <circle cx="12" cy="10" r="3"/>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm">Atualizar apenas o alfinete</div>
+                  <div className="text-xs text-muted-foreground">Manter o endereço atual</div>
+                </div>
+              </div>
+            </Button>
+
+            <Button
+              onClick={handleUpdateFullAddress}
+              variant="outline"
+              className="w-full justify-start text-left h-auto py-2"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                    <circle cx="12" cy="10" r="3"/>
+                    <path d="M12 2v8"/>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm">Atualizar endereço completo</div>
+                  <div className="text-xs text-muted-foreground">Buscar novo endereço</div>
+                </div>
+              </div>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => {
+              setShowCoordinateUpdateDialog(false);
+              setPendingCoordinates(null);
+            }}>
+              Cancelar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
