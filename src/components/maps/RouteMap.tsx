@@ -191,6 +191,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
   const previousRoutesDataRef = React.useRef<string>('');
   const previousCountCheckRef = React.useRef<string>('');
   const previousDriverLocationsRef = React.useRef<string>('');
+  const [mapReady, setMapReady] = React.useState(false);
 
   React.useImperativeHandle(ref, () => ({
     openStopInfo: (stopId: string) => {
@@ -321,60 +322,36 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
           activeInfoWindowRef.current = null;
         }
       });
+
+      // Sinalizar que o mapa está pronto
+      setMapReady(true);
     });
 
     return () => { canceled = true; };
   }, []);
 
   React.useEffect(() => {
+    if (!mapReady) return;
+
     const map = mapRef.current;
     if (!map || !(map instanceof google.maps.Map)) {
-      console.warn('⚠️ Map not ready or invalid instance');
       return;
     }
 
-    // Only clear and redraw when data actually changes
-    const currentRoutesDataCheck = JSON.stringify({
-      originLat: origin?.lat,
-      originLng: origin?.lng,
-      stopsCount: stops?.length || 0,
-      routesData: routes?.map(r => ({
-        stopsCount: r.stops.length,
-        visible: r.visible,
-        color: r.color,
-        name: r.name,
-        encodedPolyline: r.encodedPolyline || '', // Incluir polyline para detectar mudanças de rota
-        stops: r.stops.map(s => ({
-          id: s.id,
-          lat: s.lat,
-          lng: s.lng,
-          address: s.address
-        }))
-      })),
-      unassignedCount: unassignedStops?.length || 0,
-      unassignedStops: unassignedStops?.map(s => ({
-        id: s.id,
-        lat: s.lat,
-        lng: s.lng,
-        address: s.address
-      })),
-      highlightedIds: highlightedStopIds.join(',')
-    });
+    // Only clear and redraw when data actually changes - use lightweight check
+    const routesKey = routes?.map(r =>
+      `${r.name}:${r.visible}:${r.stops.length}:${r.encodedPolyline?.slice(0, 20) || ''}:${r.stops.map(s => `${s.id}|${s.lat?.toFixed(4)}|${s.lng?.toFixed(4)}|${s.deliveryStatus || ''}`).join(',')}`
+    ).join(';') || '';
+    const stopsKey = stops?.map(s => `${s.id}|${s.lat?.toFixed(4)}|${s.lng?.toFixed(4)}`).join(',') || '';
+    const unassignedKey = unassignedStops?.map(s => `${s.id}|${s.lat?.toFixed(4)}|${s.lng?.toFixed(4)}`).join(',') || '';
+
+    const currentRoutesDataCheck = `${origin?.lat?.toFixed(4)}:${origin?.lng?.toFixed(4)}|${stopsKey}|${routesKey}|${unassignedKey}|${highlightedStopIds.join(',')}`;
 
     // Skip if data hasn't changed (avoid unnecessary redraws)
     const dataUnchanged = currentRoutesDataCheck === previousRoutesDataRef.current;
     const alreadyInitialized = hasInitializedBoundsRef.current;
 
-    console.log('🗺️ RouteMap useEffect:', {
-      dataUnchanged,
-      alreadyInitialized,
-      willSkip: dataUnchanged && alreadyInitialized,
-      routesCount: routes?.length,
-      boundsWillBeEmpty: !origin && (!routes || routes.length === 0) && (!stops || stops.length === 0)
-    });
-
     if (dataUnchanged && alreadyInitialized) {
-      console.log('⏭️ Skipping redraw - data unchanged');
       return;
     }
 
@@ -406,8 +383,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       });
       markersRef.current.push(originMarker as any); // cast because of type mismatch
       bounds.extend(origin);
-    } else if (origin) {
-      console.warn('⚠️ Invalid origin coordinates:', origin);
     }
     
     // helper para criar marker+info e indexar por id
@@ -416,7 +391,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       if (!stop.lat || !stop.lng ||
           typeof stop.lat !== 'number' || typeof stop.lng !== 'number' ||
           !isFinite(stop.lat) || !isFinite(stop.lng)) {
-        console.warn(`⚠️ Invalid coordinates for stop:`, stop);
         return;
       }
       const sid = String(stop.id ?? stop.placeId ?? index);
@@ -678,11 +652,9 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
                      });
                      polylinesRef.current.push(poly);
                      validPath.forEach(p => bounds.extend(p));
-                   } else {
-                     console.warn(`⚠️ Route ${route.name} has no valid coordinates in polyline`);
                    }
-                 } catch (error) {
-                   console.error(`Error creating polyline for route ${route.name}:`, error);
+                 } catch {
+                   // Silently handle polyline errors
                  }
             }
         });
@@ -694,9 +666,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
 
     // Handle unassigned stops with black pins
     if (unassignedStops) {
-      console.log('🔵 Rendering unassignedStops:', unassignedStops.length, unassignedStops);
       unassignedStops.forEach(stop => {
-        console.log('  🔹 Unassigned stop:', { id: stop.id, isNewlyAdded: stop.isNewlyAdded, address: stop.address });
         addStop(stop, undefined, '#000000', true);
       });
     }
@@ -716,18 +686,9 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Only fit bounds on first load or when the number of stops changes
     const shouldFitBounds = isFirstLoad || countChanged;
 
-    console.log('🎯 FitBounds decision:', {
-      isFirstLoad,
-      dataChanged,
-      countChanged,
-      shouldFitBounds,
-      boundsEmpty: bounds.isEmpty()
-    });
-
     if (!bounds.isEmpty() && shouldFitBounds) {
         // Small delay to ensure map is fully rendered
         requestAnimationFrame(() => {
-          console.log('✅ Executing fitBounds with bounds:', bounds.toJSON());
           map.fitBounds(bounds, 100); // 100px padding
         });
         hasInitializedBoundsRef.current = true;
@@ -737,7 +698,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Always update the full data check to trigger marker re-render
     previousRoutesDataRef.current = currentRoutesDataCheck;
 
-  }, [origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
+  }, [mapReady, origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
 
   // Update driver location marker (single)
   React.useEffect(() => {
@@ -779,10 +740,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       // Update position
       driverMarkerRef.current.position = driverLocation;
     }
-  }, [driverLocation, driverLocations]);
+  }, [mapReady, driverLocation, driverLocations]);
 
     // Update multiple driver locations
   React.useEffect(() => {
+    if (!mapReady) return;
+
     const map = mapRef.current;
     if (!map || !driverLocations || driverLocations.length === 0) {
       // Limpar todos os marcadores múltiplos se não houver dados
@@ -794,7 +757,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       return;
     }
 
-    console.log('🗺️ RouteMap recebeu driverLocations:', driverLocations);
 
     // Deduplicate driver locations by driverId (keep only the most recent)
     const uniqueDriverLocations = new Map<string, DriverLocationWithInfo>();
@@ -803,22 +765,14 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       if (!existing) {
         uniqueDriverLocations.set(loc.driverId, loc);
       } else {
-        console.warn(`⚠️ Motorista duplicado detectado: ${loc.driverId} (${loc.driverName})`);
         // Keep the most recent timestamp
         const existingTime = existing.timestamp instanceof Date ? existing.timestamp : existing.timestamp.toDate();
         const locTime = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
         if (locTime > existingTime) {
           uniqueDriverLocations.set(loc.driverId, loc);
-          console.log(`  → Mantendo versão mais recente (${locTime.toLocaleTimeString()})`);
-        } else {
-          console.log(`  → Mantendo versão existente (${existingTime.toLocaleTimeString()})`);
         }
       }
     });
-
-    if (uniqueDriverLocations.size !== driverLocations.length) {
-      console.warn(`⚠️ Duplicações removidas: ${driverLocations.length} localizações → ${uniqueDriverLocations.size} únicas`);
-    }
 
     const bounds = new google.maps.LatLngBounds();
     const currentMarkerIds = new Set<string>();
@@ -858,7 +812,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
               const refreshBtn = document.querySelector(`[data-action="refresh-location"][data-driver-id="${loc.driverId}"]`);
               if (refreshBtn && onRefreshDriverLocation) {
                 refreshBtn.addEventListener('click', () => {
-                  console.log(`🔄 Solicitando atualização de localização para motorista: ${loc.driverId}`);
                   onRefreshDriverLocation(loc.driverId);
                 });
               }
@@ -911,15 +864,13 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             typeof boundsObj.east === 'number' && typeof boundsObj.west === 'number') {
           map.fitBounds(bounds, 100);
           previousDriverLocationsRef.current = currentDriverLocationsData;
-        } else {
-          console.error('Invalid bounds object:', boundsObj);
         }
-      } catch (error) {
-        console.error('Error fitting bounds for driver locations:', error);
+      } catch {
+        // Silently handle bounds errors
       }
     }
 
-  }, [driverLocations]);
+  }, [mapReady, driverLocations, onRefreshDriverLocation]);
 
   const mapStyle: React.CSSProperties = height === -1 ? { height: '100%', width: '100%' } : { height, width: '100%' };
 

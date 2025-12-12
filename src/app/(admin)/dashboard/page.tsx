@@ -100,7 +100,7 @@ const getStatusLabel = (status: RouteDocument['status']): string => {
 const StatusBadge: React.FC<{ status: RouteDocument['status'] }> = ({ status }) => {
   if (status === 'completed_auto') {
     return (
-      <Badge variant="secondary" className="flex items-center gap-1.5">
+      <Badge className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 text-white">
         <img
           src="/icons/automatic-svgrepo-com.svg"
           alt="Automático"
@@ -112,13 +112,14 @@ const StatusBadge: React.FC<{ status: RouteDocument['status'] }> = ({ status }) 
     );
   }
 
-  const variantMap: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-    'draft': 'outline',
-    'dispatched': 'secondary',
-    'in_progress': 'default',
+  const colorMap: Record<string, string> = {
+    'draft': 'bg-yellow-500 hover:bg-yellow-600 text-white',
+    'dispatched': 'bg-blue-500 hover:bg-blue-600 text-white',
+    'in_progress': 'bg-purple-500 hover:bg-purple-600 text-white',
+    'completed': 'bg-green-500 hover:bg-green-600 text-white',
   };
 
-  return <Badge variant={variantMap[status] || 'secondary'}>{getStatusLabel(status)}</Badge>;
+  return <Badge className={colorMap[status] || 'bg-gray-500 text-white'}>{getStatusLabel(status)}</Badge>;
 };
 
 // Componente Rotograma
@@ -201,11 +202,12 @@ export default function DashboardPage() {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Firestore listener para rotas ativas (sem filtro de data para evitar índice composto)
+    // Firestore listener para rotas do dia (sem filtro de data para evitar índice composto)
     // A filtragem por data será feita no cliente
+    // Incluir rotas concluídas para mostrar métricas de faturamento e entregas realizadas
     const routesQuery = query(
       collection(db, 'routes'),
-      where('status', 'in', ['draft', 'dispatched', 'in_progress'])
+      where('status', 'in', ['draft', 'dispatched', 'in_progress', 'completed', 'completed_auto'])
     );
 
     const unsubscribeRoutes = onSnapshot(routesQuery, (snapshot) => {
@@ -257,8 +259,23 @@ export default function DashboardPage() {
         }
       });
 
-      // Ordenar por data planejada
+      // Ordenar por status (em andamento > despachada > concluída) e depois por data planejada
+      const statusOrder: Record<string, number> = {
+        'in_progress': 0,
+        'dispatched': 1,
+        'draft': 2,
+        'completed': 3,
+        'completed_auto': 4,
+      };
+
       routesData.sort((a, b) => {
+        // Primeiro ordenar por status
+        const statusA = statusOrder[a.status] ?? 5;
+        const statusB = statusOrder[b.status] ?? 5;
+        if (statusA !== statusB) {
+          return statusA - statusB;
+        }
+        // Depois ordenar por data planejada
         const dateA = a.plannedDate?.toMillis() || 0;
         const dateB = b.plannedDate?.toMillis() || 0;
         return dateA - dateB;
@@ -339,13 +356,13 @@ export default function DashboardPage() {
 
   // Preparar rotas para o mapa
   const mapRoutes = React.useMemo(() => {
-    // Encontrar todas as rotas ativas (dispatched ou in_progress)
-    const dispatchedOrInProgress = routes.filter(
-      route => route.status === 'dispatched' || route.status === 'in_progress'
+    // Mostrar apenas rotas em andamento no mapa
+    const inProgressRoutes = routes.filter(
+      route => route.status === 'in_progress'
     );
 
-    // Mapear as rotas ativas - incluir mesmo sem polyline (apenas com stops)
-    return dispatchedOrInProgress
+    // Mapear as rotas em andamento - incluir mesmo sem polyline (apenas com stops)
+    return inProgressRoutes
       .filter(route => route.stops && route.stops.length > 0)
       .map(route => ({
         ...route,
@@ -354,15 +371,15 @@ export default function DashboardPage() {
       }));
   }, [routes]);
 
-  // Origin da primeira rota ativa (para centralizar o mapa)
+  // Origin da primeira rota em andamento (para centralizar o mapa)
   const mapOrigin = React.useMemo(() => {
-    const firstActiveRoute = routes.find(
-      route => (route.status === 'dispatched' || route.status === 'in_progress') &&
+    const firstInProgressRoute = routes.find(
+      route => route.status === 'in_progress' &&
                route.origin &&
                typeof route.origin.lat === 'number' &&
                typeof route.origin.lng === 'number'
     );
-    return firstActiveRoute?.origin || null;
+    return firstInProgressRoute?.origin || null;
   }, [routes]);
 
   const handleRefreshDriverLocation = async (driverId: string) => {
