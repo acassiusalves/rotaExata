@@ -343,6 +343,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         visible: r.visible,
         color: r.color,
         name: r.name,
+        encodedPolyline: r.encodedPolyline || '', // Incluir polyline para detectar mudanças de rota
         stops: r.stops.map(s => ({
           id: s.id,
           lat: s.lat,
