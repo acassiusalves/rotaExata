@@ -69,6 +69,7 @@ type RouteDocument = RouteInfo & {
   } | null;
   code?: string;
   source?: string;
+  origin?: PlaceValue; // Origem da rota
 };
 
 // Função para determinar o período da rota
@@ -263,6 +264,22 @@ export default function DashboardPage() {
         return dateA - dateB;
       });
 
+      // Log detalhado para debug
+      console.log('📊 Dashboard: Rotas carregadas do Firestore:', {
+        total: routesData.length,
+        byStatus: {
+          draft: routesData.filter(r => r.status === 'draft').length,
+          dispatched: routesData.filter(r => r.status === 'dispatched').length,
+          in_progress: routesData.filter(r => r.status === 'in_progress').length,
+        },
+        routesSummary: routesData.map(r => ({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          plannedDate: r.plannedDate?.toDate().toISOString(),
+        })),
+      });
+
       setRoutes(routesData);
       setDriverLocations(Array.from(locationsMap.values()));
       setIsLoading(false);
@@ -338,12 +355,61 @@ export default function DashboardPage() {
 
   // Preparar rotas para o mapa
   const mapRoutes = React.useMemo(() => {
-    return routes
-      .filter(route => route.status === 'dispatched' || route.status === 'in_progress')
+    // Primeiro, encontrar todas as rotas ativas (dispatched ou in_progress)
+    const dispatchedOrInProgress = routes.filter(
+      route => route.status === 'dispatched' || route.status === 'in_progress'
+    );
+
+    // Log detalhado para debug
+    console.log('🗺️ Dashboard mapRoutes debug:', {
+      totalRoutes: routes.length,
+      dispatchedOrInProgress: dispatchedOrInProgress.length,
+      routesDetails: dispatchedOrInProgress.map(r => ({
+        id: r.id,
+        name: r.name,
+        status: r.status,
+        hasEncodedPolyline: !!r.encodedPolyline,
+        polylineLength: r.encodedPolyline?.length || 0,
+        stopsCount: r.stops?.length || 0,
+        hasOrigin: !!r.origin,
+        originLat: r.origin?.lat,
+        originLng: r.origin?.lng,
+        color: r.color,
+      })),
+    });
+
+    // Mapear as rotas ativas - incluir mesmo sem polyline (apenas com stops)
+    const activeRoutes = dispatchedOrInProgress
+      .filter(route => route.stops && route.stops.length > 0)
       .map(route => ({
         ...route,
         visible: true,
+        color: route.color || '#3b82f6', // Cor padrão azul se não tiver
       }));
+
+    console.log('🗺️ Dashboard activeRoutes para mapa:', activeRoutes.length);
+
+    return activeRoutes;
+  }, [routes]);
+
+  // Origin da primeira rota ativa (para centralizar o mapa)
+  const mapOrigin = React.useMemo(() => {
+    const firstActiveRoute = routes.find(
+      route => (route.status === 'dispatched' || route.status === 'in_progress') &&
+               route.origin &&
+               typeof route.origin.lat === 'number' &&
+               typeof route.origin.lng === 'number'
+    );
+
+    const origin = firstActiveRoute?.origin || null;
+
+    console.log('🏠 Dashboard mapOrigin:', {
+      found: !!origin,
+      lat: origin?.lat,
+      lng: origin?.lng,
+    });
+
+    return origin;
   }, [routes]);
 
   const handleRefreshDriverLocation = async (driverId: string) => {
@@ -630,6 +696,7 @@ export default function DashboardPage() {
             <div className="relative aspect-[16/9] w-full overflow-hidden rounded-lg">
               <RouteMap
                 routes={mapRoutes}
+                origin={mapOrigin}
                 driverLocations={driverLocations}
                 onRefreshDriverLocation={handleRefreshDriverLocation}
                 height={-1}
