@@ -46,19 +46,22 @@ const nextConfig: NextConfig = {
   },
 };
 
-// Configuração do PWA - habilitado em produção (incluindo Vercel)
+// Configuração do PWA - desabilitado temporariamente para debug
+// O Service Worker está causando problema com Firebase (client offline)
 const pwaConfig = withPWA({
   dest: 'public',
-  register: false, // Desabilitamos o registro automático, usamos nosso próprio componente
+  register: false,
   skipWaiting: true,
   clientsClaim: true,
-  disable: process.env.NODE_ENV === 'development',
+  // TEMPORÁRIO: Desabilitar PWA até resolver conflito com Firebase
+  disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1',
   sw: 'sw.js',
   reloadOnOnline: true,
   fallbacks: {
     document: '/offline.html',
   },
   buildExcludes: [/middleware-manifest\.json$/],
+  publicExcludes: ['!firebase-messaging-sw.js'],
 });
 
 export default pwaConfig(nextConfig);

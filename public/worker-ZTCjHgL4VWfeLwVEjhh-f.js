@@ -1,0 +1,1 @@
+self.addEventListener("fetch",e=>{const o=e.request.url;["firestore.googleapis.com","firebase.googleapis.com","identitytoolkit.googleapis.com","securetoken.googleapis.com","www.googleapis.com","firebaseinstallations.googleapis.com","fcmregistrations.googleapis.com",".firebaseapp.com",".firebasestorage.app",".cloudfunctions.net"].some(e=>o.includes(e))});
