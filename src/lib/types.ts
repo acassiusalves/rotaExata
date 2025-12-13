@@ -150,6 +150,33 @@ export type Order = {
 
 export type DriverStatus = 'offline' | 'available' | 'busy' | 'online';
 
+export type DeviceInfo = {
+  // Informacoes do dispositivo
+  userAgent?: string;
+  platform?: string;
+  deviceModel?: string;
+  osName?: string;
+  osVersion?: string;
+  browserName?: string;
+  browserVersion?: string;
+  screenWidth?: number;
+  screenHeight?: number;
+  devicePixelRatio?: number;
+  language?: string;
+  // Status de rede
+  connectionType?: string;
+  connectionEffectiveType?: string;
+  downlink?: number | null;
+  rtt?: number | null;
+  saveData?: boolean;
+  online?: boolean;
+  // Status da bateria
+  batteryLevel?: number | null;
+  batteryCharging?: boolean | null;
+  // Timestamp
+  lastUpdated?: Timestamp | Date;
+};
+
 export type Driver = {
   id: string;
   name: string;
@@ -164,6 +191,7 @@ export type Driver = {
   totalDeliveries: number;
   rating: number;
   avatarUrl: string;
+  deviceInfo?: DeviceInfo;
 };
 
 export type User = {

@@ -24,8 +24,35 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Driver, DriverStatus } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { MoreHorizontal, Star, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { DeviceInfo } from '@/lib/types';
+
+// Helper para obter icone de bateria
+function getBatteryIcon(level: number | null | undefined, charging: boolean | null | undefined) {
+  if (level === null || level === undefined) return Battery;
+  if (charging) return BatteryCharging;
+  if (level <= 20) return BatteryLow;
+  if (level <= 50) return BatteryMedium;
+  return BatteryFull;
+}
+
+// Helper para cor da bateria
+function getBatteryColor(level: number | null | undefined) {
+  if (level === null || level === undefined) return 'text-muted-foreground';
+  if (level <= 20) return 'text-red-500';
+  if (level <= 50) return 'text-yellow-500';
+  return 'text-green-500';
+}
+
+// Helper para cor da conexao
+function getConnectionColor(type: string | undefined) {
+  if (!type || type === 'unknown') return 'text-muted-foreground';
+  if (type === '4g' || type === '5g') return 'text-green-500';
+  if (type === '3g') return 'text-yellow-500';
+  return 'text-orange-500';
+}
 
 const statusMap: Record<
   DriverStatus,
@@ -102,6 +129,85 @@ const getDriverColumns = (onDeleteClick: (driver: Driver) => void): ColumnDef<Dr
     header: () => <div className="text-right">Total de Entregas</div>,
     cell: ({ row }) => {
       return <div className="text-right font-medium">{row.getValue('totalDeliveries')}</div>;
+    },
+  },
+  {
+    accessorKey: 'deviceInfo',
+    header: 'Dispositivo',
+    cell: ({ row }) => {
+      const deviceInfo = row.original.deviceInfo as DeviceInfo | undefined;
+
+      if (!deviceInfo) {
+        return (
+          <div className="text-xs text-muted-foreground">
+            Sem dados
+          </div>
+        );
+      }
+
+      const BatteryIcon = getBatteryIcon(deviceInfo.batteryLevel, deviceInfo.batteryCharging);
+      const batteryColor = getBatteryColor(deviceInfo.batteryLevel);
+      const connectionColor = getConnectionColor(deviceInfo.connectionEffectiveType);
+
+      return (
+        <TooltipProvider>
+          <div className="flex flex-col gap-1">
+            {/* Modelo do dispositivo */}
+            <div className="flex items-center gap-1.5">
+              <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium truncate max-w-[120px]">
+                {deviceInfo.deviceModel || 'Desconhecido'}
+              </span>
+            </div>
+
+            {/* OS e indicadores */}
+            <div className="flex items-center gap-2">
+              {/* OS Version */}
+              <span className="text-xs text-muted-foreground">
+                {deviceInfo.osName} {deviceInfo.osVersion?.split('.')[0]}
+              </span>
+
+              {/* Bateria */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`flex items-center gap-0.5 ${batteryColor}`}>
+                    <BatteryIcon className="h-3.5 w-3.5" />
+                    {deviceInfo.batteryLevel !== null && deviceInfo.batteryLevel !== undefined && (
+                      <span className="text-xs">{deviceInfo.batteryLevel}%</span>
+                    )}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Bateria: {deviceInfo.batteryLevel ?? 'N/A'}%</p>
+                  <p>{deviceInfo.batteryCharging ? 'Carregando' : 'Descarregando'}</p>
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Conexao */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`flex items-center gap-0.5 ${connectionColor}`}>
+                    {deviceInfo.online === false ? (
+                      <WifiOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Wifi className="h-3.5 w-3.5" />
+                    )}
+                    <span className="text-xs uppercase">
+                      {deviceInfo.connectionEffectiveType || '?'}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Conexao: {deviceInfo.connectionEffectiveType?.toUpperCase() || 'Desconhecido'}</p>
+                  <p>Velocidade: {deviceInfo.downlink ? `${deviceInfo.downlink} Mbps` : 'N/A'}</p>
+                  <p>Latencia: {deviceInfo.rtt ? `${deviceInfo.rtt}ms` : 'N/A'}</p>
+                  <p>Status: {deviceInfo.online ? 'Online' : 'Offline'}</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        </TooltipProvider>
+      );
     },
   },
    {

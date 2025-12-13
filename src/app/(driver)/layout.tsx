@@ -4,6 +4,7 @@ import React, { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { DriverNavigationDrawer } from '@/components/driver/driver-navigation-drawer';
 import { useAuth } from '@/hooks/use-auth';
+import { useDeviceInfo } from '@/hooks/use-device-info';
 import { Loader2, Bell, Home } from 'lucide-react';
 import { NotificationPermissionPrompt } from '@/components/notifications/notification-permission-prompt';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,6 +23,9 @@ export default function DriverLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = React.useState(0);
+
+  // Coletar informacoes do dispositivo do motorista
+  useDeviceInfo(userRole === 'driver');
 
   useEffect(() => {
     if (!loading && mustChangePassword) {

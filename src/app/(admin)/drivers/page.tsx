@@ -50,6 +50,7 @@ export default function DriversPage() {
             totalDeliveries: data.totalDeliveries || 0,
             rating: data.rating || 0,
             avatarUrl: data.photoURL,
+            deviceInfo: data.deviceInfo || undefined,
           });
         });
 
