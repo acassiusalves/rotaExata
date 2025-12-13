@@ -710,6 +710,7 @@ export default function OrganizeRoutePage() {
           totalDeliveries: data.totalDeliveries || 0,
           rating: data.rating || 0,
           avatarUrl: data.photoURL,
+          deviceInfo: data.deviceInfo || undefined,
         })
       });
       setAvailableDrivers(driversData);
@@ -757,6 +758,9 @@ export default function OrganizeRoutePage() {
             console.warn(`⚠️ Localização desatualizada: ${routeData.driverInfo.name} (${minutesAgo} minutos atrás)`);
           }
 
+          // Buscar deviceInfo do motorista em availableDrivers
+          const driverData = availableDrivers.find(d => d.id === routeData.driverId);
+
           const location: DriverLocationWithInfo = {
             driverId: routeData.driverId, // Usar driverId real, não o ID da rota
             driverName: routeData.driverInfo.name,
@@ -766,6 +770,7 @@ export default function OrganizeRoutePage() {
             heading: currentLoc.heading,
             speed: currentLoc.speed,
             timestamp: timestamp,
+            deviceInfo: driverData?.deviceInfo,
           };
 
           // Manter apenas a localização mais recente de cada motorista

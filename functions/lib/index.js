@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAuthUsers = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -533,6 +533,47 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
             });
         }
     });
+});
+/* ========== forceLogoutDriver (callable) ========== */
+exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+    // Verificar autenticação
+    const authContext = req.auth;
+    if (!authContext) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    if (!uid) {
+        throw new https_1.HttpsError("invalid-argument", "UID do motorista é obrigatório");
+    }
+    try {
+        const auth = (0, auth_1.getAuth)();
+        const db = (0, firestore_1.getFirestore)();
+        // Verificar permissão (admin, socio ou gestor)
+        const userDoc = await db.collection("users").doc(authContext.uid).get();
+        const userData = userDoc.data();
+        const userRole = userData?.role || "";
+        if (!["admin", "socio", "gestor"].includes(userRole)) {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem forçar logout de motoristas");
+        }
+        // Revogar todos os tokens de refresh do usuário
+        await auth.revokeRefreshTokens(uid);
+        // Atualizar documento do usuário com timestamp de logout forçado e limpar deviceInfo
+        await db.collection("users").doc(uid).update({
+            forceLogoutAt: firestore_1.FieldValue.serverTimestamp(),
+            status: "offline",
+            deviceInfo: firestore_1.FieldValue.delete(),
+        });
+        return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
+    }
+    catch (err) {
+        const error = err;
+        const msg = error.message || "Falha ao forçar logout";
+        if (error.code === "auth/user-not-found") {
+            throw new https_1.HttpsError("not-found", `Usuário ${uid} não encontrado`);
+        }
+        throw new https_1.HttpsError("internal", msg);
+    }
 });
 /* ========== syncAuthUsers (callable) ========== */
 exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {

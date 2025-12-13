@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { Loader } from "@googlemaps/js-api-loader";
-import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from "@/lib/types";
+import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo, DeviceInfo } from "@/lib/types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DriverLocationPulse } from "./DriverLocationPulse";
@@ -87,11 +87,37 @@ const createInfoWindowContent = (
   `;
 };
 
+// Helper para cor da bateria
+const getBatteryColor = (level: number | null | undefined): string => {
+  if (level === null || level === undefined) return '#9ca3af'; // gray
+  if (level <= 20) return '#ef4444'; // red
+  if (level <= 50) return '#f59e0b'; // yellow
+  return '#22c55e'; // green
+};
+
+// Helper para icone da bateria (SVG inline)
+const getBatteryIcon = (level: number | null | undefined, charging: boolean | null | undefined): string => {
+  const color = getBatteryColor(level);
+  if (charging) {
+    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><rect x="1" y="6" width="18" height="12" rx="2" ry="2"></rect><line x1="23" y1="13" x2="23" y2="11"></line><polyline points="11 11 13 8 11 13 13 16"></polyline></svg>`;
+  }
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><rect x="1" y="6" width="18" height="12" rx="2" ry="2"></rect><line x1="23" y1="13" x2="23" y2="11"></line></svg>`;
+};
+
+// Helper para cor da conexão
+const getConnectionColor = (type: string | undefined): string => {
+  if (!type || type === 'unknown') return '#9ca3af'; // gray
+  if (type === '4g' || type === '5g') return '#22c55e'; // green
+  if (type === '3g') return '#f59e0b'; // yellow
+  return '#f97316'; // orange
+};
+
 // Função para gerar o conteúdo HTML do InfoWindow do motorista
 const createDriverInfoWindowContent = (
   driverName: string,
   timestamp: Date,
-  driverId: string
+  driverId: string,
+  deviceInfo?: DeviceInfo
 ): string => {
   const formattedDate = format(timestamp, "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR });
   const minutesAgo = Math.floor((Date.now() - timestamp.getTime()) / 1000 / 60);
@@ -113,6 +139,48 @@ const createDriverInfoWindowContent = (
     </div>
   ` : '';
 
+  // Device info section
+  let deviceInfoSection = '';
+  if (deviceInfo) {
+    const batteryColor = getBatteryColor(deviceInfo.batteryLevel);
+    const batteryIcon = getBatteryIcon(deviceInfo.batteryLevel, deviceInfo.batteryCharging);
+    const connectionColor = getConnectionColor(deviceInfo.connectionEffectiveType);
+    const connectionType = deviceInfo.connectionEffectiveType?.toUpperCase() || '?';
+    const isOnline = deviceInfo.online !== false;
+
+    deviceInfoSection = `
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+        <div style="font-weight: 600; font-size: 12px; color: #666; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Dispositivo</div>
+        <div style="display: grid; grid-template-columns: 90px 1fr; gap: 6px; font-size: 13px;">
+          <span style="color: #666;">Modelo:</span>
+          <span style="color: #000; font-weight: 500;">${deviceInfo.deviceModel || 'Desconhecido'}</span>
+
+          <span style="color: #666;">Sistema:</span>
+          <span style="color: #000;">${deviceInfo.osName || '?'} ${deviceInfo.osVersion?.split('.')[0] || ''}</span>
+
+          <span style="color: #666;">Bateria:</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${batteryIcon}
+            <span style="color: ${batteryColor}; font-weight: 500;">${deviceInfo.batteryLevel !== null && deviceInfo.batteryLevel !== undefined ? `${deviceInfo.batteryLevel}%` : 'N/A'}</span>
+            ${deviceInfo.batteryCharging ? '<span style="color: #22c55e; font-size: 11px;">⚡</span>' : ''}
+          </div>
+
+          <span style="color: #666;">Conexão:</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${isOnline ? connectionColor : '#ef4444'}" stroke-width="2">
+              ${isOnline
+                ? '<path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line>'
+                : '<line x1="1" y1="1" x2="23" y2="23"></line><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path><path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line>'
+              }
+            </svg>
+            <span style="color: ${connectionColor}; font-weight: 500;">${connectionType}</span>
+            ${!isOnline ? '<span style="color: #ef4444; font-size: 11px;">(offline)</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 300px; padding: 4px;">
       <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 8px 0;">🚚 Motorista</h4>
@@ -127,11 +195,13 @@ const createDriverInfoWindowContent = (
           <div style="color: #999; font-size: 12px;">${formattedDate}</div>
         </div>
       </div>
+      ${deviceInfoSection}
       <button
         data-action="refresh-location"
         data-driver-id="${driverId}"
         style="
           width: 100%;
+          margin-top: 12px;
           padding: 8px 12px;
           background: #3b82f6;
           color: white;
@@ -803,7 +873,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
             // Criar InfoWindow para o motorista
             const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
             infoWindow = new google.maps.InfoWindow({
-                content: createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId),
+                content: createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId, loc.deviceInfo),
             });
             driverInfoWindowsRef.current.set(markerId, infoWindow);
 
@@ -826,7 +896,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         } else {
             // Atualizar o conteúdo da InfoWindow existente
             const timestamp = loc.timestamp instanceof Date ? loc.timestamp : loc.timestamp.toDate();
-            infoWindow!.setContent(createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId));
+            infoWindow!.setContent(createDriverInfoWindowContent(loc.driverName, timestamp, loc.driverId, loc.deviceInfo));
         }
 
         marker.position = { lat: loc.lat, lng: loc.lng };

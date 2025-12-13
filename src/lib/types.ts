@@ -74,6 +74,7 @@ export type DriverLocation = {
 export type DriverLocationWithInfo = DriverLocation & {
   driverName: string;
   driverId: string;
+  deviceInfo?: DeviceInfo;
 };
 
 export type RouteChangeNotification = {
