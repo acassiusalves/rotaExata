@@ -124,8 +124,6 @@ export function DeliveryConfirmationDialog({
   // Load existing data when reopening a completed delivery
   React.useEffect(() => {
     if (isOpen && existingData) {
-      console.log('📝 Carregando dados existentes para edição:', existingData);
-
       // Carregar foto existente (URL do Firebase Storage)
       if (existingData.photoUrl) {
         setPhoto(existingData.photoUrl);
@@ -199,8 +197,6 @@ export function DeliveryConfirmationDialog({
   // Camera handling
   const startCamera = async () => {
     try {
-      console.log('Solicitando acesso à câmera...');
-
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('API de câmera não suportada neste navegador');
       }
@@ -213,9 +209,6 @@ export function DeliveryConfirmationDialog({
         },
         audio: false,
       });
-
-      console.log('Stream obtida:', stream);
-      console.log('Tracks da stream:', stream.getTracks());
 
       streamRef.current = stream;
       setIsCameraActive(true);
@@ -230,9 +223,7 @@ export function DeliveryConfirmationDialog({
 
       try {
         await videoRef.current.play();
-        console.log('Vídeo reproduzindo via play() direto');
       } catch (playError) {
-        console.log('Erro no play() direto, tentando com evento:', playError);
         await new Promise<void>((resolve, reject) => {
           if (!videoRef.current) {
             reject(new Error('Referência do vídeo perdida'));
@@ -247,8 +238,6 @@ export function DeliveryConfirmationDialog({
           }, 5000);
         });
       }
-
-      console.log('Câmera ativada com sucesso');
     } catch (err) {
       console.error('Erro ao acessar câmera:', err);
       let errorMessage = 'Não foi possível acessar a câmera.';

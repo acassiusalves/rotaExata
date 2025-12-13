@@ -224,7 +224,6 @@ export default function MonitoringPage() {
             status: 'completed_auto',
             autoCompletedAt: Timestamp.now(),
           });
-          console.log(`Rota ${route.name} auto-concluída após 48h`);
         } catch (error) {
           console.error(`Erro ao auto-concluir rota ${route.name}:`, error);
         }

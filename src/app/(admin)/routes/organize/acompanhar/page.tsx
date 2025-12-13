@@ -479,7 +479,6 @@ export default function OrganizeRoutePage() {
   const addDebugLog = React.useCallback((type: string, message: string, data?: any) => {
     const timestamp = new Date().toISOString();
     const logEntry = { timestamp, type, message, data };
-    console.log(`[${type}] ${message}`, data || '');
     setDebugLogs(prev => [...prev.slice(-199), logEntry]); // Keep last 200 logs
   }, []);
 
@@ -721,11 +720,6 @@ export default function OrganizeRoutePage() {
 
   // Buscar localizações dos motoristas em tempo real a partir das rotas ativas
   React.useEffect(() => {
-    console.log('🚦 Listener de localizações:', {
-      availableDriversCount: availableDrivers.length,
-      willStart: availableDrivers.length > 0
-    });
-
     if (availableDrivers.length === 0) {
       console.warn('⚠️ Listener de localizações NÃO iniciado - nenhum motorista disponível');
       return;
@@ -741,18 +735,8 @@ export default function OrganizeRoutePage() {
       const locationsMap = new Map<string, DriverLocationWithInfo>();
       const now = new Date();
 
-      console.log('🔍 Total de rotas ativas encontradas:', snapshot.size);
-
       snapshot.forEach((routeDoc) => {
         const routeData = routeDoc.data();
-        console.log(`📋 Rota ${routeDoc.id}:`, {
-          hasCurrentLocation: !!routeData.currentLocation,
-          hasDriverInfo: !!routeData.driverInfo,
-          status: routeData.status,
-          driverId: routeData.driverId,
-          currentLocation: routeData.currentLocation,
-          driverInfo: routeData.driverInfo
-        });
 
         // Verificar se há localização atual, informações do motorista e driverId
         if (routeData.currentLocation && routeData.driverInfo && routeData.driverId) {
@@ -760,12 +744,6 @@ export default function OrganizeRoutePage() {
 
           const timestamp = currentLoc.timestamp?.toDate?.() || new Date(0);
           const minutesAgo = Math.floor((Date.now() - timestamp.getTime()) / 1000 / 60);
-
-          console.log(`⏰ Timestamp da localização (rota ${routeDoc.id}):`, {
-            timestamp: timestamp.toLocaleString('pt-BR'),
-            minutesAgo: `${minutesAgo} minutos atrás`,
-            status: routeData.status
-          });
 
           // Filtrar localizações muito antigas (mais de 4 horas para rotas em progresso, 30 min para despachadas)
           const maxMinutes = routeData.status === 'in_progress' ? 240 : 30; // 4 horas ou 30 min
@@ -800,14 +778,12 @@ export default function OrganizeRoutePage() {
               : existing.timestamp.toDate();
             if (timestamp > existingTime) {
               locationsMap.set(routeData.driverId, location);
-              console.log(`🔄 Atualizando localização mais recente de ${routeData.driverInfo.name}`);
             }
           }
         }
       });
 
       const locations = Array.from(locationsMap.values());
-      console.log('🚚 Localizações únicas de motoristas (após filtro):', locations);
       setDriverLocations(locations);
     });
 
@@ -865,7 +841,6 @@ export default function OrganizeRoutePage() {
         querySnapshot.forEach((doc) => {
           // Skip the current route (the one being viewed)
           if (routeData.currentRouteId && doc.id === routeData.currentRouteId) {
-            console.log('🚫 Pulando rota atual:', doc.id);
             return;
           }
 
@@ -873,7 +848,6 @@ export default function OrganizeRoutePage() {
 
           // Skip completed or finished routes
           if (routeDoc.status === 'completed' || routeDoc.status === 'completed_auto' || routeDoc.status === 'finished') {
-            console.log('🚫 Pulando rota finalizada:', doc.id, 'Status:', routeDoc.status);
             return;
           }
 
@@ -882,7 +856,6 @@ export default function OrganizeRoutePage() {
             const routePlannedDate = routeDoc.plannedDate.toDate();
             const routePeriod = getRoutePeriodFromDate(routePlannedDate);
             if (routePeriod !== selectedPeriod) {
-              console.log('🚫 Pulando rota de outro período:', doc.id, 'Período:', routePeriod, 'Esperado:', selectedPeriod);
               return;
             }
           }
@@ -919,7 +892,6 @@ export default function OrganizeRoutePage() {
           visibility[doc.id] = false; // Hidden by default
         });
 
-        console.log('📍 Rotas adicionais carregadas:', routes.length);
         setAdditionalRoutes(routes);
         setRouteVisibility(visibility);
       } catch (error) {
@@ -971,12 +943,6 @@ export default function OrganizeRoutePage() {
             const filtered = prev.filter(loc => loc.driverId !== data.driverId);
             return [...filtered, driverLocationWithInfo];
           });
-
-          console.log('📍 Localização do motorista atualizada:', {
-            driverId: data.driverId,
-            driverName: data.driverInfo.name,
-            location
-          });
         }
       }
     }, (error) => {
@@ -1002,11 +968,6 @@ export default function OrganizeRoutePage() {
 
             if (routeSnap.exists()) {
               const routeData = routeSnap.data();
-              console.log('📥 Dados carregados do Firestore:', {
-                stops: routeData.stops.length,
-                distanceMeters: routeData.distanceMeters,
-                duration: routeData.duration
-              });
 
               // Usar dados do Firestore ao invés do sessionStorage
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
@@ -1057,14 +1018,9 @@ export default function OrganizeRoutePage() {
         const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
         const MAX_STOPS_PER_ROUTE = 25;
 
-        console.log(`📍 Origem: lat=${parsedData.origin.lat}, lng=${parsedData.origin.lng}`);
-        console.log(`📦 Total de paradas: ${allStops.length}`);
-
         // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
         const stopsNorte = allStops.filter(stop => stop.lat >= parsedData.origin.lat);
         const stopsSul = allStops.filter(stop => stop.lat < parsedData.origin.lat);
-
-        console.log(`🧭 Divisão geográfica: Norte (${stopsNorte.length}), Sul (${stopsSul.length})`);
 
         // Função para ordenar paradas por proximidade (nearest neighbor)
         const sortByProximity = (stops: PlaceValue[], origin: PlaceValue): PlaceValue[] => {
@@ -1108,7 +1064,6 @@ export default function OrganizeRoutePage() {
           // Divisão perfeita - Norte na Rota A, Sul na Rota B
           stopsA = stopsNorteOrdenadas;
           stopsB = stopsSulOrdenadas;
-          console.log(`✅ Divisão perfeita: Rota A (Norte: ${stopsA.length}), Rota B (Sul: ${stopsB.length})`);
         } else {
           // Alguma região excede o limite - precisamos redistribuir
           console.warn(`⚠️ Região excede limite: Norte=${stopsNorteOrdenadas.length}, Sul=${stopsSulOrdenadas.length}`);
@@ -1152,8 +1107,6 @@ export default function OrganizeRoutePage() {
               console.error(`❌ ${excess} paradas do Sul não puderam ser atribuídas`);
             }
           }
-
-          console.log(`✅ Divisão ajustada: Rota A (${stopsA.length} paradas), Rota B (${stopsB.length} paradas)`);
         }
 
         // Avisar se alguma parada não foi atribuída
@@ -1562,7 +1515,6 @@ export default function OrganizeRoutePage() {
                 distanceMeters: newRouteInfo.distanceMeters,
                 duration: newRouteInfo.duration,
               });
-              console.log('✅ Rota atualizada no Firestore com ponto editado');
             } catch (error) {
               console.error('Erro ao atualizar rota no Firestore:', error);
               toast({
@@ -1676,7 +1628,6 @@ export default function OrganizeRoutePage() {
                 distanceMeters: newRouteInfo.distanceMeters,
                 duration: newRouteInfo.duration,
               });
-              console.log('✅ Rota atualizada no Firestore com novo ponto');
             } catch (error) {
               console.error('Erro ao atualizar rota no Firestore:', error);
               toast({
@@ -2298,12 +2249,6 @@ export default function OrganizeRoutePage() {
   const handleRemoveStop = async (stopId: string) => {
     if (!routeData) return;
 
-    console.log('🔍 handleRemoveStop chamado:', {
-      stopId,
-      isExistingRoute: routeData.isExistingRoute,
-      currentRouteId: routeData.currentRouteId
-    });
-
     // Find which route contains this stop
     let targetRoute: RouteInfo | null = null;
     let routeKey: string | null = null;
@@ -2339,11 +2284,6 @@ export default function OrganizeRoutePage() {
 
     if (!targetRoute || !routeKey) return;
 
-    console.log('📍 Rota encontrada:', {
-      routeKey,
-      stopsCount: targetRoute.stops.length
-    });
-
     // Find the stop to move to unassigned
     const stopToMove = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
     if (!stopToMove) return;
@@ -2367,10 +2307,6 @@ export default function OrganizeRoutePage() {
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
-          console.log('💾 Tentando atualizar Firestore:', {
-            routeId: routeData.currentRouteId,
-            newStopsCount: 0
-          });
           const routeRef = doc(db, 'routes', routeData.currentRouteId);
           await updateDoc(routeRef, {
             stops: [],
@@ -2378,7 +2314,6 @@ export default function OrganizeRoutePage() {
             distanceMeters: 0,
             duration: '0s',
           });
-          console.log('✅ Rota atualizada no Firestore (todos pontos removidos)');
         } catch (error) {
           console.error('❌ Erro ao atualizar Firestore:', error);
           toast({
@@ -2401,12 +2336,6 @@ export default function OrganizeRoutePage() {
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            console.log('💾 Tentando atualizar Firestore:', {
-              routeId: routeData.currentRouteId,
-              newStopsCount: newStops.length,
-              distanceMeters: newRouteInfo.distanceMeters,
-              duration: newRouteInfo.duration
-            });
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newStops,
@@ -2414,7 +2343,6 @@ export default function OrganizeRoutePage() {
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
             });
-            console.log('✅ Rota atualizada no Firestore (ponto removido)');
           } catch (error) {
             console.error('❌ Erro ao atualizar Firestore:', error);
             toast({
@@ -2585,7 +2513,6 @@ export default function OrganizeRoutePage() {
             distanceMeters: 0,
             duration: '0s',
           });
-          console.log('✅ Rota atualizada no Firestore (todos pontos removidos)');
         } catch (error) {
           console.error('Erro ao atualizar Firestore:', error);
         }
@@ -2609,7 +2536,6 @@ export default function OrganizeRoutePage() {
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
             });
-            console.log('✅ Rota atualizada no Firestore (ponto removido)');
           } catch (error) {
             console.error('Erro ao atualizar Firestore:', error);
           }
@@ -2937,8 +2863,6 @@ export default function OrganizeRoutePage() {
         routesUpdated: routeUpdates.length
       });
 
-      console.log(`✅ ${routeUpdates.length} rotas atualizadas atomicamente no Firestore`);
-
     } catch (error) {
       console.error('❌ Erro ao salvar edições no Firestore (batch):', error);
       addDebugLog('FIRESTORE_ERROR', 'Batch commit FAILED', { error });
@@ -3025,14 +2949,9 @@ export default function OrganizeRoutePage() {
         ...prev,
         [routeId]: !prev[routeId]
       };
-      console.log('🔄 Toggle rota', routeId, '- Nova visibilidade:', newVisibility);
       return newVisibility;
     });
   };
-
-  console.log('🗺️ Combined routes:', combinedRoutes.length);
-  console.log('🗺️ Additional routes:', additionalRoutes.length);
-  console.log('🗺️ Route visibility:', routeVisibility);
 
   const routesForTable = [
       { key: 'A' as const, name: routeNames.A, data: routeA },
@@ -3044,8 +2963,6 @@ export default function OrganizeRoutePage() {
 
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
-      console.log(`🔄 Forçando atualização de localização para motorista: ${driverId}`);
-
       // Criar documento de solicitação de atualização
       const requestRef = doc(db, 'locationUpdateRequests', driverId);
       await setDoc(requestRef, {

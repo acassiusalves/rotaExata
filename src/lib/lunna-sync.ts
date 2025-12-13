@@ -13,7 +13,6 @@ export async function syncLunnaOrderStatus(
 ) {
   // Verifica se a rota é do Lunna
   if (routeInfo.source !== 'lunna') {
-    console.log('Rota não é do Lunna, sincronização ignorada');
     return;
   }
 
@@ -42,8 +41,6 @@ export async function syncLunnaOrderStatus(
       logisticsStatus: newStatus,
       updatedAt: serverTimestamp(),
     });
-
-    console.log(`✅ Status do pedido ${orderNumber} atualizado para "${newStatus}" no Lunna`);
   } catch (error) {
     console.error(`❌ Erro ao sincronizar status do pedido ${orderNumber}:`, error);
     throw error;
@@ -68,8 +65,6 @@ export async function removeLunnaOrderFromRoute(orderNumber: string) {
         rotaExataRouteCode: null,
         updatedAt: serverTimestamp(),
       });
-
-      console.log(`✅ Pedido ${orderNumber} removido da rota, status voltou para "pendente"`);
     }
   } catch (error) {
     console.error(`❌ Erro ao remover associação do pedido ${orderNumber}:`, error);
@@ -102,8 +97,6 @@ export async function updateLunnaOrdersRoute(
         });
       }
     }
-
-    console.log(`✅ ${orderNumbers.length} pedidos atualizados com nova rota ${newRouteCode}`);
   } catch (error) {
     console.error('❌ Erro ao atualizar pedidos com nova rota:', error);
     throw error;

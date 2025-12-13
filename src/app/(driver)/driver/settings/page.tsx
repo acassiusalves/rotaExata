@@ -82,7 +82,6 @@ export default function DriverSettingsPage() {
     try {
       if ('wakeLock' in navigator) {
         wakeLockRef.current = await navigator.wakeLock.request('screen');
-        console.log('Wake Lock ativado');
       }
     } catch (error) {
       console.error('Erro ao ativar Wake Lock:', error);
@@ -93,7 +92,6 @@ export default function DriverSettingsPage() {
     if (wakeLockRef.current) {
       await wakeLockRef.current.release();
       wakeLockRef.current = null;
-      console.log('Wake Lock desativado');
     }
   };
 

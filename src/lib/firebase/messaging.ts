@@ -85,7 +85,6 @@ async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | undefi
   if (!registration) {
     try {
       registration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
-      console.log('Service Worker registrado:', swUrl);
     } catch (err) {
       console.error('Falha ao registrar service worker de push', err);
       throw new Error('Não foi possível registrar o service worker de notificações. Verifique se /firebase-messaging-sw.js está acessível.');

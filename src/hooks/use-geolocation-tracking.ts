@@ -70,15 +70,6 @@ export function useGeolocationTracking({
     }
 
     try {
-      console.log('📍 Atualizando localização no Firebase:', {
-        routeId,
-        lat: latitude,
-        lng: longitude,
-        accuracy,
-        heading,
-        speed
-      });
-
       const routeRef = doc(db, 'routes', routeId);
       await updateDoc(routeRef, {
         currentLocation: {
@@ -92,7 +83,6 @@ export function useGeolocationTracking({
         lastUpdated: serverTimestamp(),
       });
 
-      console.log('✅ Localização atualizada com sucesso!');
       lastLocationRef.current = { lat: latitude, lng: longitude };
       lastUpdateRef.current = now;
       lastSuccessfulUpdateRef.current = now;
@@ -105,7 +95,6 @@ export function useGeolocationTracking({
       // Retry após falha de conexão
       if (retryCountRef.current < 3) {
         retryCountRef.current++;
-        console.log(`🔄 Tentando novamente em 5 segundos (tentativa ${retryCountRef.current}/3)...`);
         retryTimeoutRef.current = setTimeout(() => {
           updateLocationInFirebase(position);
         }, 5000);
@@ -118,11 +107,6 @@ export function useGeolocationTracking({
     if ('wakeLock' in navigator) {
       try {
         wakeLockRef.current = await navigator.wakeLock.request('screen');
-        console.log('🔒 Wake Lock ativado');
-
-        wakeLockRef.current.addEventListener('release', () => {
-          console.log('🔓 Wake Lock liberado');
-        });
       } catch (err) {
         console.error('❌ Erro ao ativar Wake Lock:', err);
       }
@@ -204,7 +188,6 @@ export function useGeolocationTracking({
 
         // Se timeout ou erro, tenta novamente com baixa precisão após 5 segundos
         if (err.code === err.TIMEOUT) {
-          console.log('⏱️ Timeout detectado. Tentando com baixa precisão...');
           setTimeout(() => {
             if (watchIdRef.current !== null) {
               navigator.geolocation.clearWatch(watchIdRef.current);
@@ -255,11 +238,8 @@ export function useGeolocationTracking({
 
   // Função para forçar atualização imediata da localização
   const forceLocationUpdate = () => {
-    console.log('🔄 Forçando atualização imediata de localização...');
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        console.log('✅ Localização obtida via getCurrentPosition');
         setLocation(position);
         setError(null);
         // Força atualização ignorando filtros de distância e tempo
@@ -289,23 +269,17 @@ export function useGeolocationTracking({
       return;
     }
 
-    console.log('👂 Iniciando listener para solicitações de atualização de localização');
-
     const requestRef = doc(db, 'locationUpdateRequests', currentUser.uid);
     const unsubscribe = onSnapshot(
       requestRef,
       async (snapshot) => {
         if (snapshot.exists()) {
-          const data = snapshot.data();
-          console.log('🔔 Solicitação de atualização recebida:', data);
-
           // Força atualização imediata
           forceLocationUpdate();
 
           // Deleta a solicitação após processar
           try {
             await deleteDoc(requestRef);
-            console.log('🗑️ Solicitação processada e removida');
           } catch (err) {
             console.error('❌ Erro ao deletar solicitação:', err);
           }
@@ -317,7 +291,6 @@ export function useGeolocationTracking({
     );
 
     return () => {
-      console.log('👋 Parando listener de solicitações');
       unsubscribe();
     };
   }, [isTracking]);
@@ -326,7 +299,6 @@ export function useGeolocationTracking({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isTracking && !wakeLockRef.current) {
-        console.log('🔄 Página visível novamente. Reativando Wake Lock...');
         requestWakeLock();
       }
     };

@@ -674,11 +674,6 @@ export default function NewRoutePage() {
                 if (systemField !== 'Ignorar') {
                     const value = getRowValue(header);
 
-                    // Debug para campo Número
-                    if (systemField === 'Número' && index < 5) {
-                        console.log(`[DEBUG Linha ${index + 1}] Header: "${header}", Valor: "${value}", Tipo: ${typeof value}`);
-                    }
-
                     if (value != null && String(value).trim() !== '') {
                         if (fieldOrder.includes(systemField)) {
                             // Apenas adiciona se o campo ainda não foi preenchido
@@ -689,11 +684,6 @@ export default function NewRoutePage() {
                         }
                     }
                 }
-            }
-
-            // Debug: mostrar o que foi extraído
-            if (index < 5) {
-                console.log(`[DEBUG Linha ${index + 1}] addressParts:`, addressParts);
             }
 
             // Tentativa de extrair número do complemento se não houver número explícito
@@ -709,10 +699,6 @@ export default function NewRoutePage() {
 
                     // Usa a primeira correspondência encontrada (prioriza lote > casa > apto > quadra)
                     const extractedNumber = loteMatch?.[1] || casaMatch?.[1] || aptoMatch?.[1] || quadraMatch?.[1];
-
-                    if (extractedNumber && index < 5) {
-                        console.log(`[DEBUG Linha ${index + 1}] Número extraído do complemento "${complemento}": ${extractedNumber}`);
-                    }
 
                     if (extractedNumber) {
                         addressParts['Número'] = extractedNumber;

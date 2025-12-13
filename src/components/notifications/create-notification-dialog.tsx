@@ -160,7 +160,6 @@ export function CreateNotificationDialog({
             priority,
             type,
           });
-          console.log('✅ Push notifications enviadas');
         } catch (pushError) {
           console.error('❌ Erro ao enviar push notifications:', pushError);
           // Não falhar a operação inteira se apenas o push falhar

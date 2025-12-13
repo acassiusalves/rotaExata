@@ -1,6 +1,15 @@
 // Firebase Cloud Messaging Service Worker
 // Este arquivo é necessário para receber notificações push do Firebase
 
+// Skip waiting e assume controle imediatamente para atualizações automáticas
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 

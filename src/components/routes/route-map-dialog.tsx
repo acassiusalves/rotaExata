@@ -81,11 +81,6 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
           visibility[doc.id] = doc.id === route.id;
         });
 
-        console.log('📍 Rotas carregadas:', routes.length);
-        console.log('📍 Rota principal ID:', route.id);
-        console.log('📍 Visibilidade:', visibility);
-        console.log('📍 Rotas:', routes.map(r => ({ id: r.id, name: r.name })));
-
         setAllRoutes(routes);
         setRouteVisibility(visibility);
       } catch (error) {
@@ -104,19 +99,10 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
       return;
     }
 
-    console.log('🎯 Iniciando monitoramento da rota:', route.id);
-
     const routeRef = doc(db, 'routes', route.id);
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
-        console.log('📡 Dados da rota recebidos:', {
-          hasCurrentLocation: !!data.currentLocation,
-          currentLocation: data.currentLocation,
-          currentStopIndex: data.currentStopIndex,
-          status: data.status
-        });
-
         if (data.currentLocation && data.driverInfo && data.driverId) {
           const location = data.currentLocation;
           const timestamp = location.timestamp?.toDate?.() || new Date();
@@ -137,13 +123,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
           };
 
           setDriverLocations([driverLocationWithInfo]);
-          console.log('✅ Localização do motorista atualizada:', {
-            driverId: data.driverId,
-            driverName: data.driverInfo.name,
-            location
-          });
         } else {
-          console.log('⚠️ Nenhuma localização disponível');
           setDriverLocations([]);
         }
 
@@ -154,7 +134,6 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     });
 
     return () => {
-      console.log('🛑 Parando monitoramento da rota:', route.id);
       unsubscribe();
     };
   }, [route?.id, isOpen]);
@@ -193,7 +172,6 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
         });
       } catch (err) {
         // User cancelled or error occurred
-        console.log('Share cancelled or failed:', err);
       }
     } else {
       // Fallback to copy
@@ -244,14 +222,6 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     currentLocation: r.id === route.id ? (driverLocation || undefined) : undefined,
     currentStopIndex: r.id === route.id ? currentStopIndex : undefined,
   }));
-
-  console.log('🗺️ Total de rotas no estado:', allRoutes.length);
-  console.log('🗺️ Rotas para renderizar no mapa:', mapRoutes.length);
-  console.log('🗺️ Visibilidade das rotas:', mapRoutes.map(r => ({
-    stops: r.stops.length,
-    color: r.color,
-    visible: r.visible
-  })));
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

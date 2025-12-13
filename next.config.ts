@@ -51,8 +51,10 @@ const pwaConfig = withPWA({
   dest: 'public',
   register: true,
   skipWaiting: true,
+  clientsClaim: true, // Assume controle imediatamente após ativação
   disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1',
   sw: 'sw.js',
+  reloadOnOnline: true, // Recarrega quando voltar online
   fallbacks: {
     document: '/offline.html',
   },

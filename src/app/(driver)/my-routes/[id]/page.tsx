@@ -368,14 +368,6 @@ export default function RouteDetailsPage() {
       return;
     }
 
-    console.log('🔄 Iniciando confirmação de entrega:', {
-      stopIndex: selectedStopIndex,
-      status: data.status,
-      hasPhoto: !!data.photo,
-      hasNotes: !!data.notes,
-      hasPayments: !!data.payments,
-    });
-
     try {
       const updatedStops = [...route.stops];
       const updatedStop: any = {
@@ -384,12 +376,9 @@ export default function RouteDetailsPage() {
         completedAt: Timestamp.now(),
       };
 
-      console.log('📦 Stop atualizado (antes da foto):', updatedStop);
-
       // Upload da foto para o Storage se houver
       if (data.photo) {
         try {
-          console.log('📸 Iniciando upload da foto...');
           // Cria referência única para a foto
           const photoRef = ref(
             storage,
@@ -404,8 +393,6 @@ export default function RouteDetailsPage() {
 
           // Salva apenas a URL no documento
           updatedStop.photoUrl = photoURL;
-
-          console.log('✅ Foto enviada para Storage:', photoURL);
         } catch (photoError) {
           console.error('❌ Erro ao fazer upload da foto:', photoError);
           // Se falhar o upload, continua sem a foto
@@ -419,25 +406,20 @@ export default function RouteDetailsPage() {
 
       if (data.notes) {
         updatedStop.notes = data.notes;
-        console.log('📝 Notas adicionadas:', data.notes);
       }
       if (data.failureReason) {
         updatedStop.failureReason = data.failureReason;
-        console.log('⚠️ Motivo da falha:', data.failureReason);
       }
       if (data.wentToLocation !== undefined) {
         updatedStop.wentToLocation = data.wentToLocation;
-        console.log('📍 Foi até o local:', data.wentToLocation);
       }
       if (data.payments) {
         updatedStop.payments = data.payments;
-        console.log('💰 Pagamentos:', data.payments);
       }
 
       // Upload da foto da tentativa de entrega se houver
       if (data.attemptPhoto) {
         try {
-          console.log('📸 Iniciando upload da foto de tentativa...');
           const attemptPhotoRef = ref(
             storage,
             `delivery-attempt-photos/${routeId}/${selectedStopIndex}-${Date.now()}.jpg`
@@ -445,7 +427,6 @@ export default function RouteDetailsPage() {
           await uploadString(attemptPhotoRef, data.attemptPhoto, 'data_url');
           const attemptPhotoURL = await getDownloadURL(attemptPhotoRef);
           updatedStop.attemptPhotoUrl = attemptPhotoURL;
-          console.log('✅ Foto de tentativa enviada para Storage:', attemptPhotoURL);
         } catch (photoError) {
           console.error('❌ Erro ao fazer upload da foto de tentativa:', photoError);
           toast({
@@ -458,19 +439,11 @@ export default function RouteDetailsPage() {
 
       updatedStops[selectedStopIndex] = updatedStop;
 
-      console.log('📤 Salvando no Firestore...', {
-        routeId,
-        stopIndex: selectedStopIndex,
-        updatedStop,
-      });
-
       const routeRef = doc(db, 'routes', routeId);
       await updateDoc(routeRef, {
         stops: updatedStops,
         currentStopIndex: selectedStopIndex + 1,
       });
-
-      console.log('✅ Salvo com sucesso no Firestore!');
 
       // Incrementar contador de entregas do motorista se for entrega bem-sucedida
       if (data.status === 'completed' && route.driverId) {
@@ -479,7 +452,6 @@ export default function RouteDetailsPage() {
           await updateDoc(driverRef, {
             totalDeliveries: increment(1),
           });
-          console.log('✅ Contador de entregas do motorista incrementado!');
         } catch (counterError) {
           console.error('⚠️ Erro ao incrementar contador (não crítico):', counterError);
         }
@@ -488,13 +460,11 @@ export default function RouteDetailsPage() {
       // Sincronizar status com pedidos do Lunna se a rota for importada
       if (route.source === 'lunna') {
         try {
-          console.log('🔄 Sincronizando status com Lunna...');
           await syncLunnaOrderStatus(
             route,
             updatedStop,
             data.status === 'completed' ? 'entregue' : 'falha'
           );
-          console.log('✅ Status sincronizado com Lunna!');
         } catch (syncError) {
           console.error('⚠️ Erro ao sincronizar com Lunna (não crítico):', syncError);
           // Não bloqueia a operação se a sincronização falhar
@@ -511,7 +481,6 @@ export default function RouteDetailsPage() {
       setIsConfirmDialogOpen(false);
       setSelectedStopIndex(null);
     } catch (error) {
-      console.error('❌ ERRO ao confirmar entrega:', error);
       toast({
         variant: 'destructive',
         title: 'Erro ao confirmar',

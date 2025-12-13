@@ -12,7 +12,6 @@ export function useFCMToken() {
   useEffect(() => {
     // Verificar se está no navegador e suporta notificações
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      console.log('Este navegador não suporta notificações');
       return;
     }
 
@@ -31,8 +30,6 @@ export function useFCMToken() {
         try {
           const messaging = getMessaging(app);
           unsubscribe = onMessage(messaging, (payload) => {
-            console.log('Mensagem recebida em foreground:', payload);
-
             // Mostrar toast para notificação em foreground
             toast({
               title: payload.notification?.title || 'Nova Notificação',
@@ -65,7 +62,6 @@ export function useFCMToken() {
   const retrieveToken = async () => {
     try {
       if (!('serviceWorker' in navigator)) {
-        console.log('Service Worker não suportado');
         return null;
       }
 
@@ -77,11 +73,9 @@ export function useFCMToken() {
       });
 
       if (currentToken) {
-        console.log('FCM Token obtido:', currentToken);
         setToken(currentToken);
         return currentToken;
       } else {
-        console.log('Nenhum token disponível. Solicite permissão para gerar um.');
         return null;
       }
     } catch (error) {
@@ -93,7 +87,6 @@ export function useFCMToken() {
   const requestPermission = async () => {
     try {
       if (typeof window === 'undefined' || !('Notification' in window)) {
-        console.log('Notificações não suportadas');
         return null;
       }
 
@@ -104,7 +97,6 @@ export function useFCMToken() {
         const token = await retrieveToken();
         return token;
       } else {
-        console.log('Permissão de notificação negada');
         return null;
       }
     } catch (error) {

@@ -89,11 +89,8 @@ export default function DriverNotificationsPage() {
   // Marcar notificação como aberta quando visualizada
   const handleMarkAsOpened = async (notificationId: string, alreadyOpened: boolean) => {
     if (alreadyOpened) {
-      console.log('📱 [DriverNotifications] Notificação já foi aberta:', notificationId);
       return;
     }
-
-    console.log('📱 [DriverNotifications] Marcando notificação como aberta:', notificationId);
 
     try {
       const notificationRef = doc(db, 'notifications', notificationId);
@@ -101,9 +98,8 @@ export default function DriverNotificationsPage() {
         opened: true,
         openedAt: serverTimestamp(),
       });
-      console.log('✅ [DriverNotifications] Notificação marcada como aberta com sucesso');
     } catch (error) {
-      console.error('❌ [DriverNotifications] Erro ao marcar notificação como aberta:', error);
+      console.error('Erro ao marcar notificação como aberta:', error);
     }
   };
 

@@ -90,13 +90,10 @@ async function saveApiKeyToFirestore(key: string): Promise<void> {
   }
 
   try {
-    console.log('Getting access token...');
     const accessToken = await getAccessToken();
-    console.log('Access token obtained successfully');
 
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/settings/googleMaps`;
 
-    console.log('Attempting to save API key to Firestore...');
     const response = await fetch(firestoreUrl, {
       method: 'PATCH',
       headers: {
@@ -115,8 +112,6 @@ async function saveApiKeyToFirestore(key: string): Promise<void> {
       const error = await response.text();
       throw new Error(`Firestore API error: ${error}`);
     }
-
-    console.log('API key saved successfully to Firestore');
   } catch (error: any) {
     console.error('Failed to save API key to Firestore:', {
       message: error?.message,

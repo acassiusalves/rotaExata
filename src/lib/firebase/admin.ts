@@ -11,16 +11,6 @@ const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-const isDev = process.env.NODE_ENV === 'development';
-
-if (isDev) {
-  console.log('Firebase Admin initialization check:', {
-    hasProjectId: !!projectId,
-    hasClientEmail: !!clientEmail,
-    hasPrivateKey: !!privateKey,
-  });
-}
-
 if (projectId && clientEmail && privateKey) {
   try {
     // Check if app already exists
@@ -44,9 +34,6 @@ if (projectId && clientEmail && privateKey) {
 
     adminDb = getFirestore(adminApp);
     adminAuth = getAuth(adminApp);
-    if (isDev) {
-      console.log('Firebase Admin initialized successfully');
-    }
   } catch (error: unknown) {
     const err = error as Error;
     console.error('Failed to initialize Firebase Admin:', err.message);
