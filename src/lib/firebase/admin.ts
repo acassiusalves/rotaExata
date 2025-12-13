@@ -1,37 +1,33 @@
 import { initializeApp, getApps, cert, App } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth, Auth } from 'firebase-admin/auth';
 
 // Initialize Firebase Admin only if credentials are available
 let adminDb: FirebaseFirestore.Firestore | null = null;
 let adminApp: App | null = null;
+let adminAuth: Auth | null = null;
 
 const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-console.log('Firebase Admin initialization check:', {
-  hasProjectId: !!projectId,
-  hasClientEmail: !!clientEmail,
-  hasPrivateKey: !!privateKey,
-  privateKeyLength: privateKey?.length,
-  projectIdValue: projectId
-});
+const isDev = process.env.NODE_ENV === 'development';
+
+if (isDev) {
+  console.log('Firebase Admin initialization check:', {
+    hasProjectId: !!projectId,
+    hasClientEmail: !!clientEmail,
+    hasPrivateKey: !!privateKey,
+  });
+}
 
 if (projectId && clientEmail && privateKey) {
   try {
     // Check if app already exists
     const apps = getApps();
     if (apps.length === 0) {
-      console.log('Initializing new Firebase Admin app...');
-
       // Replace escaped newlines with actual newlines
       const formattedKey = privateKey.replace(/\\n/g, '\n');
-
-      console.log('Key format check:', {
-        startsCorrectly: formattedKey.startsWith('-----BEGIN PRIVATE KEY-----'),
-        endsCorrectly: formattedKey.endsWith('-----END PRIVATE KEY-----'),
-        hasNewlines: formattedKey.includes('\n')
-      });
 
       adminApp = initializeApp({
         credential: cert({
@@ -43,25 +39,20 @@ if (projectId && clientEmail && privateKey) {
         databaseURL: `https://${projectId}.firebaseio.com`
       });
     } else {
-      console.log('Using existing Firebase Admin app');
       adminApp = apps[0];
     }
 
     adminDb = getFirestore(adminApp);
-    console.log('Firebase Admin initialized successfully');
-  } catch (error: any) {
-    console.error('Failed to initialize Firebase Admin:', {
-      message: error?.message,
-      code: error?.code,
-      stack: error?.stack
-    });
+    adminAuth = getAuth(adminApp);
+    if (isDev) {
+      console.log('Firebase Admin initialized successfully');
+    }
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Failed to initialize Firebase Admin:', err.message);
   }
 } else {
-  console.warn('Firebase Admin credentials not found. Missing:', {
-    projectId: !projectId,
-    clientEmail: !clientEmail,
-    privateKey: !privateKey
-  });
+  console.warn('Firebase Admin credentials not found');
 }
 
 /**
@@ -137,17 +128,14 @@ async function getAccessToken(): Promise<string> {
 
 export async function getGoogleMapsApiKey(): Promise<string | null> {
   if (!projectId) {
-    console.warn('Firebase project ID not found');
     return null;
   }
 
   try {
-    console.log('Getting access token to read API key...');
     const accessToken = await getAccessToken();
 
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/settings/googleMaps`;
 
-    console.log('Fetching API key from Firestore...');
     const response = await fetch(firestoreUrl, {
       method: 'GET',
       headers: {
@@ -158,7 +146,6 @@ export async function getGoogleMapsApiKey(): Promise<string | null> {
 
     if (!response.ok) {
       if (response.status === 404) {
-        console.log('No API key found in Firestore');
         return null;
       }
       const error = await response.text();
@@ -168,15 +155,55 @@ export async function getGoogleMapsApiKey(): Promise<string | null> {
     const data = await response.json();
     const apiKey = data.fields?.apiKey?.stringValue || null;
 
-    console.log('API key fetched successfully:', !!apiKey);
     return apiKey;
-  } catch (error: any) {
-    console.error('Failed to fetch API key from Firestore:', {
-      message: error?.message,
-      stack: error?.stack
-    });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Failed to fetch API key from Firestore:', err.message);
     return null;
   }
 }
 
-export { adminDb };
+/**
+ * Verifica o token de autenticação e retorna os dados do usuário
+ * @param authHeader - Header Authorization (Bearer token)
+ * @returns Dados do usuário decodificado ou null se inválido
+ */
+export async function verifyAuthToken(authHeader: string | null): Promise<{
+  uid: string;
+  email?: string;
+  role?: string;
+} | null> {
+  if (!authHeader?.startsWith('Bearer ')) {
+    return null;
+  }
+
+  if (!adminAuth || !adminDb) {
+    return null;
+  }
+
+  try {
+    const token = authHeader.split('Bearer ')[1];
+    const decodedToken = await adminAuth.verifyIdToken(token);
+
+    // Buscar role do usuário no Firestore
+    const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
+    const userData = userDoc.data();
+
+    return {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      role: userData?.role,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifica se o usuário tem uma das roles permitidas
+ */
+export function hasAllowedRole(userRole: string | undefined, allowedRoles: string[]): boolean {
+  return userRole ? allowedRoles.includes(userRole) : false;
+}
+
+export { adminDb, adminAuth };

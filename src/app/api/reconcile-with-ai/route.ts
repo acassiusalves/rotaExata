@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzePaymentReceipt } from "@/ai/flows/analyze-payment-receipt";
+import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 
 // Tolerância de valor para conciliação automática (em reais)
 const VALUE_TOLERANCE = 0.50;
@@ -226,6 +227,17 @@ function parseFirestoreDocument(doc: any): any {
 
 export async function POST(req: Request) {
   try {
+    // Rate limiting (mais restritivo para AI - consome mais recursos)
+    const clientIP = getClientIP(req);
+    const rateLimitResult = rateLimit(clientIP, rateLimitConfigs.write);
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: "RATE_LIMIT_EXCEEDED", detail: "Muitas requisições. Tente novamente em alguns segundos." },
+        { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+      );
+    }
+
     const { items } = await req.json() as { items: ReconciliationItem[] };
 
     if (!items || !Array.isArray(items) || items.length === 0) {

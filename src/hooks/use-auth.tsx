@@ -2,17 +2,20 @@
 "use client";
 
 import React, { useState, useEffect, createContext, useContext } from 'react';
-import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { User, UserCredential, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { Toaster } from '@/components/ui/toaster';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('AuthProvider');
 
 interface AuthContextType {
   user: User | null;
   userRole: string | null;
   mustChangePassword?: boolean;
   loading: boolean;
-  signIn: (email: string, pass: string) => Promise<any>;
+  signIn: (email: string, pass: string) => Promise<UserCredential>;
   signOut: () => Promise<void>;
 }
 
@@ -21,8 +24,8 @@ const AuthContext = createContext<AuthContextType>({
     userRole: null,
     mustChangePassword: false,
     loading: true,
-    signIn: async () => {},
-    signOut: async () => {},
+    signIn: async () => { throw new Error('AuthProvider not initialized'); },
+    signOut: async () => { throw new Error('AuthProvider not initialized'); },
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -59,7 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           role = data?.role || 'socio';
           setUserRole(role);
           setMustChangePassword(data?.mustChangePassword || false);
-          console.log('👤 [use-auth] Usuário autenticado:', {
+          log.debug('Usuário autenticado:', {
             uid: user.uid,
             email: user.email,
             role: role,
@@ -67,15 +70,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           });
         } else {
           // Handle case where user exists in Auth but not in Firestore
-          console.warn(`User ${user.uid} found in Auth but not in Firestore.`);
+          log.warn(`User ${user.uid} found in Auth but not in Firestore.`);
           setUserRole('socio'); // default role
           setMustChangePassword(false);
         }
         setUser(user);
-        console.log('✅ [use-auth] Usuário configurado, role:', role);
+        log.debug('Usuário configurado, role:', role);
 
         // --- Firestore Presence System (Heartbeat) ---
-        console.log('🔍 [use-auth] Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
+        log.debug('Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
         if (role === 'driver') {
             const userFirestoreRef = doc(db, 'users', user.uid);
 
@@ -85,14 +88,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                     status: 'online',
                     lastSeenAt: serverTimestamp(),
                 });
-                console.log('✅ [use-auth] Status do motorista atualizado para ONLINE no Firestore', {
+                log.debug('Status do motorista atualizado para ONLINE no Firestore', {
                     userId: user.uid,
                     email: user.email,
                     status: 'online',
-                    timestamp: new Date().toISOString()
                 });
             } catch (err) {
-                console.error('❌ [use-auth] Falha ao registrar presença do motorista', err);
+                log.error('Falha ao registrar presença do motorista', err);
             }
 
             // Configurar heartbeat para manter o status online
@@ -102,23 +104,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                         status: 'online',
                         lastSeenAt: serverTimestamp(),
                     });
-                    console.log('💓 [use-auth] Heartbeat enviado - motorista online');
+                    log.debug('Heartbeat enviado - motorista online');
                 } catch (err) {
-                    console.error('❌ [use-auth] Falha no heartbeat', err);
+                    log.error('Falha no heartbeat', err);
                 }
             }, 30000); // Atualiza a cada 30 segundos
 
             // Marcar offline quando a aba fica visível novamente
             visibilityHandler = async () => {
                 if (!document.hidden) {
-                    console.log('✅ [use-auth] Aba visível - garantindo status online');
+                    log.debug('Aba visível - garantindo status online');
                     try {
                         await updateDoc(userFirestoreRef, {
                             status: 'online',
                             lastSeenAt: serverTimestamp(),
                         });
                     } catch (err) {
-                        console.error('❌ [use-auth] Erro ao atualizar status', err);
+                        log.error('Erro ao atualizar status', err);
                     }
                 }
             };
@@ -132,7 +134,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUserRole(null);
         setMustChangePassword(false);
       }
-      console.log('🔄 [use-auth] Finalizando onAuthStateChanged, definindo loading = false');
+      log.debug('Finalizando onAuthStateChanged, definindo loading = false');
       setLoading(false);
     });
 
@@ -160,9 +162,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           status: 'offline',
           lastSeenAt: serverTimestamp(),
         });
-        console.log('✅ [use-auth] Status atualizado para OFFLINE no signOut');
+        log.debug('Status atualizado para OFFLINE no signOut');
       } catch (err) {
-        console.error('❌ [use-auth] Falha ao registrar status offline no signOut', err);
+        log.error('Falha ao registrar status offline no signOut', err);
       }
     }
     await firebaseSignOut(auth);

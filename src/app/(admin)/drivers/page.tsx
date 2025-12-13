@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { PlusCircle, Loader2 } from 'lucide-react';
+import { PlusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import {
   Card,
   CardContent,
@@ -124,9 +125,7 @@ export default function DriversPage() {
         <Card>
           <CardContent className="pt-6">
             {isLoading ? (
-              <div className="flex h-64 items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
+              <DriverTableSkeleton />
             ) : (
               <DriverTable drivers={drivers} onDeleteClick={(driver) => setDriverToDelete(driver)} />
             )}

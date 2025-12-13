@@ -6,13 +6,12 @@ import { Button } from '@/components/ui/button';
 import {
   MapPin,
   Route as RouteIcon,
-  Loader2,
-  Package,
   Car,
   CheckCircle,
   Clock,
   Weight,
 } from 'lucide-react';
+import { MyRoutesPageSkeleton } from '@/components/skeletons/route-card-skeleton';
 import { db } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/use-auth';
@@ -197,11 +196,7 @@ export default function MyRoutesPage() {
   }, [routes]);
 
   if (isLoading) {
-    return (
-      <div className="flex h-[400px] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <MyRoutesPageSkeleton />;
   }
 
   if (routes.length === 0) {

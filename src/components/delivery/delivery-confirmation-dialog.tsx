@@ -466,12 +466,15 @@ export function DeliveryConfirmationDialog({
     }
   };
 
+  // Cleanup camera when dialog closes or component unmounts
   React.useEffect(() => {
-    // Cleanup camera when dialog closes
+    if (!isOpen) {
+      stopCamera();
+    }
     return () => {
       stopCamera();
     };
-  }, []);
+  }, [isOpen]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

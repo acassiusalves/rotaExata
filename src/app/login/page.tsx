@@ -16,12 +16,13 @@ import { Logo } from "@/components/ui/logo"
 import { useAuth } from '@/hooks/use-auth';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import { FirebaseError } from 'firebase/app';
 
 export default function LoginPage() {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
-  const { signIn, userRole } = useAuth();
+  const { signIn, userRole, loading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -34,19 +35,27 @@ export default function LoginPage() {
       // We just need to wait for it to propagate. A small delay or a more robust
       // state management solution could handle this. For now, we rely on the
       // redirect logic within the layouts.
-    } catch (error: any) {
+    } catch (error) {
       let title = 'Erro no Login';
       let description = 'Ocorreu um erro desconhecido. Tente novamente.';
 
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        title = 'Credenciais Incorretas';
-        description = 'Email ou senha incorretos. Por favor, revise suas informações e tente novamente.';
-      } else if (error.code === 'auth/invalid-email') {
-        title = 'Email Inválido';
-        description = 'O formato do email é inválido. Por favor, verifique e tente novamente.';
-      } else if (error.code === 'auth/too-many-requests') {
-        title = 'Muitas Tentativas';
-        description = 'Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.';
+      if (error instanceof FirebaseError) {
+        switch (error.code) {
+          case 'auth/user-not-found':
+          case 'auth/wrong-password':
+          case 'auth/invalid-credential':
+            title = 'Credenciais Incorretas';
+            description = 'Email ou senha incorretos. Por favor, revise suas informações e tente novamente.';
+            break;
+          case 'auth/invalid-email':
+            title = 'Email Inválido';
+            description = 'O formato do email é inválido. Por favor, verifique e tente novamente.';
+            break;
+          case 'auth/too-many-requests':
+            title = 'Muitas Tentativas';
+            description = 'Muitas tentativas de login. Por favor, aguarde alguns minutos e tente novamente.';
+            break;
+        }
       }
 
       toast({
@@ -60,15 +69,16 @@ export default function LoginPage() {
   };
 
   // This effect will run when the userRole is determined after login
+  // Aguarda o loading terminar para evitar race condition
   React.useEffect(() => {
-    if (userRole) {
+    if (!loading && userRole) {
       if (['admin', 'socio', 'gestor'].includes(userRole)) {
-        router.push('/');
+        router.push('/dashboard');
       } else if (userRole === 'driver') {
         router.push('/my-routes');
       }
     }
-  }, [userRole, router]);
+  }, [userRole, loading, router]);
 
 
   return (

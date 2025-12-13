@@ -1,4 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAuthToken, hasAllowedRole } from '@/lib/firebase/admin';
+import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
+
+const ALLOWED_ROLES = ['admin', 'gestor', 'socio'];
 
 /**
  * Generates a JWT for Firebase Authentication using service account credentials
@@ -123,14 +127,44 @@ async function saveApiKeyToFirestore(key: string): Promise<void> {
 }
 
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // Rate limiting (mais restritivo para escrita)
+    const clientIP = getClientIP(req);
+    const rateLimitResult = rateLimit(clientIP, rateLimitConfigs.write);
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: "RATE_LIMIT_EXCEEDED", detail: "Muitas requisições. Tente novamente em alguns segundos." },
+        { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+      );
+    }
+
+    // Verificar autenticação
+    const authHeader = req.headers.get('Authorization');
+    const user = await verifyAuthToken(authHeader);
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "UNAUTHORIZED", detail: "Token de autenticação inválido ou ausente" },
+        { status: 401 }
+      );
+    }
+
+    // Verificar se tem permissão
+    if (!hasAllowedRole(user.role, ALLOWED_ROLES)) {
+      return NextResponse.json(
+        { error: "FORBIDDEN", detail: "Você não tem permissão para acessar este recurso" },
+        { status: 403 }
+      );
+    }
+
     const { key } = await req.json() as { key: string };
 
     if (!key || typeof key !== 'string') {
       return NextResponse.json({ error: "API key is required and must be a string." }, { status: 400 });
     }
-    
+
     // Attempt to validate the key by making a simple request to a Google Maps API endpoint
     // We use the Directions API here as it's a server-side API.
     const validationUrl = `https://routes.googleapis.com/directions/v2:computeRoutes`;

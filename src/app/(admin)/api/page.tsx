@@ -18,6 +18,7 @@ import { Terminal, CheckCircle, UserCog } from 'lucide-react';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '@/hooks/use-auth';
+import { auth } from '@/lib/firebase/client';
 
 export default function ApiPage() {
   const [apiKey, setApiKey] = React.useState('');
@@ -28,12 +29,33 @@ export default function ApiPage() {
   const { toast } = useToast();
   const { user } = useAuth();
 
+  // Helper para obter token de autenticação
+  const getAuthToken = async (): Promise<string | null> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return null;
+    try {
+      return await currentUser.getIdToken();
+    } catch {
+      return null;
+    }
+  };
+
   // Load existing API key on mount
   React.useEffect(() => {
     const loadApiKey = async () => {
       try {
         setIsLoadingKey(true);
-        const response = await fetch('/api/get-api-key');
+        const token = await getAuthToken();
+        if (!token) {
+          setIsLoadingKey(false);
+          return;
+        }
+
+        const response = await fetch('/api/get-api-key', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
 
         if (response.ok) {
           const data = await response.json();
@@ -49,8 +71,11 @@ export default function ApiPage() {
       }
     };
 
-    loadApiKey();
-  }, []);
+    // Aguardar o usuário estar autenticado antes de carregar
+    if (user) {
+      loadApiKey();
+    }
+  }, [user]);
 
 
   const handleSave = async () => {
@@ -62,6 +87,17 @@ export default function ApiPage() {
       });
       return;
     }
+
+    const token = await getAuthToken();
+    if (!token) {
+      toast({
+        variant: 'destructive',
+        title: "Não autenticado",
+        description: "Você precisa estar logado para salvar a chave.",
+      });
+      return;
+    }
+
     setIsLoading(true);
     setIsSaved(false);
     try {
@@ -69,6 +105,7 @@ export default function ApiPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ key: apiKey }),
       });

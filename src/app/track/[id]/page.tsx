@@ -25,6 +25,40 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
 
+// Funções para mascarar dados sensíveis em página pública
+const maskPhone = (phone: string | undefined): string => {
+  if (!phone) return '';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length >= 10) {
+    return `(${cleaned.slice(0, 2)}) *****-${cleaned.slice(-4)}`;
+  }
+  return '***';
+};
+
+const maskPlate = (plate: string | undefined): string => {
+  if (!plate) return '';
+  // Formato brasileiro: ABC-1234 ou ABC1D23 (Mercosul)
+  if (plate.length >= 7) {
+    return `${plate.slice(0, 3)}-****`;
+  }
+  return '***';
+};
+
+// Formatar telefone para WhatsApp de forma segura
+const formatPhoneForWhatsApp = (phone: string | undefined): string => {
+  if (!phone) return '';
+  const cleaned = phone.replace(/\D/g, '');
+  // Se já começa com 55, não adiciona
+  if (cleaned.startsWith('55') && cleaned.length >= 12) {
+    return cleaned;
+  }
+  // Se tem 10-11 dígitos (DDD + número), adiciona 55
+  if (cleaned.length >= 10 && cleaned.length <= 11) {
+    return `55${cleaned}`;
+  }
+  return cleaned;
+};
+
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
@@ -255,22 +289,29 @@ export default function PublicTrackingPage() {
                       {route.driverInfo.vehicle}
                     </p>
                     <p className="text-xs text-muted-foreground font-mono">
-                      {route.driverInfo.plate}
+                      {maskPlate(route.driverInfo.plate)}
                     </p>
                   </div>
 
                   {route.driverInfo.phone && (
-                    <Button
-                      variant="outline"
-                      className="w-full text-green-600 border-green-600/50 hover:bg-green-50"
-                      onClick={() => {
-                        const phone = route.driverInfo?.phone?.replace(/\D/g, '');
-                        window.open(`https://wa.me/55${phone}`, '_blank');
-                      }}
-                    >
-                      <WhatsAppIcon className="mr-2 h-4 w-4" />
-                      Falar com motorista
-                    </Button>
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Tel: {maskPhone(route.driverInfo.phone)}
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="w-full text-green-600 border-green-600/50 hover:bg-green-50"
+                        onClick={() => {
+                          const phone = formatPhoneForWhatsApp(route.driverInfo?.phone);
+                          if (phone) {
+                            window.open(`https://wa.me/${phone}`, '_blank');
+                          }
+                        }}
+                      >
+                        <WhatsAppIcon className="mr-2 h-4 w-4" />
+                        Falar com motorista
+                      </Button>
+                    </>
                   )}
                 </CardContent>
               </Card>

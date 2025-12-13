@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo } from '@/lib/types';
+import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 
 // Função para geocodificar um endereço usando Google Maps API
 async function geocodeAddress(address: string): Promise<PlaceValue | null> {
@@ -93,6 +94,17 @@ async function validateUserPermissions(userId: string): Promise<boolean> {
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting (mais restritivo para importação)
+    const clientIP = getClientIP(request);
+    const rateLimitResult = rateLimit(clientIP, rateLimitConfigs.write);
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: 'RATE_LIMIT_EXCEEDED', detail: 'Muitas requisições. Tente novamente em alguns segundos.' },
+        { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+      );
+    }
+
     if (!adminDb) {
       return NextResponse.json(
         { error: 'Firebase Admin não inicializado' },

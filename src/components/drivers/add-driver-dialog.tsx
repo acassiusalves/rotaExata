@@ -28,11 +28,25 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase/client';
 import { Loader2 } from 'lucide-react';
 
+// Função para formatar telefone brasileiro
+const formatPhone = (value: string): string => {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+};
+
+// Validação de telefone brasileiro
+const phoneRegex = /^\(\d{2}\)\s?\d{4,5}-?\d{4}$/;
+
 const driverSchema = z.object({
   firstName: z.string().min(2, 'O nome é obrigatório.'),
   lastName: z.string().min(2, 'O sobrenome é obrigatório.'),
   email: z.string().email('O email fornecido é inválido.'),
-  phone: z.string().min(10, 'O celular é obrigatório.'),
+  phone: z.string()
+    .min(14, 'O celular deve ter pelo menos 10 dígitos.')
+    .regex(phoneRegex, 'Formato inválido. Use (XX) XXXXX-XXXX'),
 });
 
 type DriverFormValues = z.infer<typeof driverSchema>;
@@ -55,15 +69,24 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
     },
   });
 
+  interface InviteUserResponse {
+    ok: boolean;
+    error?: string;
+  }
+
   const onSubmit = async (data: DriverFormValues) => {
     setIsLoading(true);
     try {
-      const inviteUser = httpsCallable(functions, 'inviteUser');
-      const result: any = await inviteUser({
+      const inviteUser = httpsCallable<
+        { email: string; role: string; displayName: string; phone: string },
+        InviteUserResponse
+      >(functions, 'inviteUser');
+
+      const result = await inviteUser({
         email: data.email,
         role: 'driver',
         displayName: `${data.firstName} ${data.lastName}`,
-        phone: data.phone,
+        phone: data.phone.replace(/\D/g, ''), // Enviar apenas dígitos
       });
 
       if (result.data.ok) {
@@ -76,12 +99,12 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
       } else {
         throw new Error(result.data.error || 'Falha ao convidar motorista.');
       }
-    } catch (error: any) {
-      console.error('Error inviting driver:', error);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Não foi possível completar o cadastro.';
       toast({
         variant: 'destructive',
         title: 'Erro ao Convidar',
-        description: error.message || 'Não foi possível completar o cadastro.',
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -152,7 +175,15 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
                 <FormItem>
                   <FormLabel>Celular</FormLabel>
                   <FormControl>
-                    <Input placeholder="(62) 99999-9999" {...field} />
+                    <Input
+                      placeholder="(62) 99999-9999"
+                      {...field}
+                      onChange={(e) => {
+                        const formatted = formatPhone(e.target.value);
+                        field.onChange(formatted);
+                      }}
+                      maxLength={16}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
