@@ -100,7 +100,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         try {
           debugLog('Chamando getDoc para users/' + user.uid);
-          const userDocSnap = await getDoc(userDocRef);
+
+          // Adiciona timeout de 10s para evitar travamento
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Firestore timeout após 10s')), 10000);
+          });
+
+          const userDocSnap = await Promise.race([
+            getDoc(userDocRef),
+            timeoutPromise
+          ]);
+
           debugLog('getDoc retornou', { exists: userDocSnap.exists() });
 
           if (userDocSnap.exists()) {
