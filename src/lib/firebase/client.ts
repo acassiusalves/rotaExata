@@ -14,14 +14,20 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Debug: Log Firebase config (sem expor valores sensíveis)
+// Debug: Log Firebase config
 if (typeof window !== 'undefined') {
   console.log('[Firebase Client] Initializing with config:', {
-    hasApiKey: !!firebaseConfig.apiKey,
-    authDomain: firebaseConfig.authDomain,
-    projectId: firebaseConfig.projectId,
-    hasStorageBucket: !!firebaseConfig.storageBucket,
+    apiKey: firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0, 10) + '...' : 'MISSING!',
+    authDomain: firebaseConfig.authDomain || 'MISSING!',
+    projectId: firebaseConfig.projectId || 'MISSING!',
+    storageBucket: firebaseConfig.storageBucket || 'MISSING!',
   });
+
+  // Alerta crítico se projectId estiver faltando
+  if (!firebaseConfig.projectId) {
+    console.error('[Firebase Client] ERRO CRÍTICO: NEXT_PUBLIC_FIREBASE_PROJECT_ID não está definido!');
+    console.error('[Firebase Client] Verifique as variáveis de ambiente na Vercel.');
+  }
 }
 
 // Initialize Firebase - singleton pattern
