@@ -16,6 +16,7 @@ import { Driver } from '@/lib/types';
 import { DriverTable } from '@/components/drivers/driver-table';
 import { AddDriverDialog } from '@/components/drivers/add-driver-dialog';
 import { DeleteDriverDialog } from '@/components/drivers/delete-driver-dialog';
+import { ForceLogoutDialog } from '@/components/drivers/force-logout-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
@@ -27,6 +28,8 @@ export default function DriversPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+  const [driverToLogout, setDriverToLogout] = React.useState<Driver | null>(null);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -92,6 +95,31 @@ export default function DriversPage() {
     }
   };
 
+  const handleForceLogout = async () => {
+    if (!driverToLogout) return;
+    setIsLoggingOut(true);
+
+    try {
+      const forceLogoutFn = httpsCallable(functions, 'forceLogoutDriver');
+      await forceLogoutFn({ uid: driverToLogout.id });
+
+      toast({
+        title: 'Motorista Deslogado!',
+        description: `O motorista ${driverToLogout.name} foi deslogado com sucesso.`,
+      });
+
+      setDriverToLogout(null);
+    } catch (error: any) {
+      console.error('Error forcing logout:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Deslogar',
+        description: error.message || 'Não foi possível deslogar o motorista.',
+      });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <>
@@ -113,7 +141,11 @@ export default function DriversPage() {
             {isLoading ? (
               <DriverTableSkeleton />
             ) : (
-              <DriverTable drivers={drivers} onDeleteClick={(driver) => setDriverToDelete(driver)} />
+              <DriverTable
+                drivers={drivers}
+                onDeleteClick={(driver) => setDriverToDelete(driver)}
+                onForceLogoutClick={(driver) => setDriverToLogout(driver)}
+              />
             )}
           </CardContent>
         </Card>
@@ -125,6 +157,13 @@ export default function DriversPage() {
         onConfirm={handleDeleteDriver}
         driverName={driverToDelete?.name}
         isDeleting={isDeleting}
+      />
+      <ForceLogoutDialog
+        isOpen={!!driverToLogout}
+        onClose={() => setDriverToLogout(null)}
+        onConfirm={handleForceLogout}
+        driverName={driverToLogout?.name}
+        isLoading={isLoggingOut}
       />
     </>
   );

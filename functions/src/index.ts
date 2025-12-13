@@ -606,6 +606,61 @@ export const authUserMirror=functionsV1.region("southamerica-east1")
     });
   });
 
+/* ========== forceLogoutDriver (callable) ========== */
+export const forceLogoutDriver = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+
+    // Verificar autenticação
+    const authContext = req.auth;
+    if (!authContext) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+
+    if (!uid) {
+      throw new HttpsError("invalid-argument", "UID do motorista é obrigatório");
+    }
+
+    try {
+      const auth = getAuth();
+      const db = getFirestore();
+
+      // Verificar permissão (admin, socio ou gestor)
+      const userDoc = await db.collection("users").doc(authContext.uid).get();
+      const userData = userDoc.data();
+      const userRole = userData?.role || "";
+
+      if (!["admin", "socio", "gestor"].includes(userRole)) {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas administradores podem forçar logout de motoristas"
+        );
+      }
+
+      // Revogar todos os tokens de refresh do usuário
+      await auth.revokeRefreshTokens(uid);
+
+      // Atualizar documento do usuário com timestamp de logout forçado
+      await db.collection("users").doc(uid).update({
+        forceLogoutAt: FieldValue.serverTimestamp(),
+        status: "offline",
+      });
+
+      return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
+    } catch (err) {
+      const error = err as any;
+      const msg = error.message || "Falha ao forçar logout";
+
+      if (error.code === "auth/user-not-found") {
+        throw new HttpsError("not-found", `Usuário ${uid} não encontrado`);
+      }
+      throw new HttpsError("internal", msg);
+    }
+  }
+);
+
 /* ========== syncAuthUsers (callable) ========== */
 export const syncAuthUsers=onCall(
   {region:"southamerica-east1"},

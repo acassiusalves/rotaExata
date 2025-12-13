@@ -4,7 +4,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { User, UserCredential, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
 import { Toaster } from '@/components/ui/toaster';
 import { createLogger } from '@/lib/logger';
 
@@ -37,7 +37,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let visibilityHandler: (() => void) | null = null;
+    let forceLogoutUnsubscribe: (() => void) | null = null;
     let listenerActive = true;
+    let lastForceLogoutAt: number | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!listenerActive) {
@@ -54,6 +56,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
         visibilityHandler = null;
+      }
+
+      // Limpar listener de logout forçado
+      if (forceLogoutUnsubscribe) {
+        forceLogoutUnsubscribe();
+        forceLogoutUnsubscribe = null;
       }
 
       if (user) {
@@ -161,6 +169,38 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             };
 
             document.addEventListener('visibilitychange', visibilityHandler);
+
+            // --- Listener para logout forçado ---
+            // Captura o timestamp inicial do forceLogoutAt ao fazer login
+            const initialForceLogoutAt = await getDoc(userFirestoreRef);
+            const initialData = initialForceLogoutAt.data();
+            lastForceLogoutAt = initialData?.forceLogoutAt?.toMillis?.() || null;
+
+            forceLogoutUnsubscribe = onSnapshot(userFirestoreRef, async (snapshot) => {
+              if (snapshot.exists()) {
+                const data = snapshot.data();
+                const currentForceLogoutAt = data?.forceLogoutAt?.toMillis?.() || null;
+
+                // Se forceLogoutAt mudou desde o login, significa que o admin forçou logout
+                if (currentForceLogoutAt && lastForceLogoutAt !== null && currentForceLogoutAt > lastForceLogoutAt) {
+                  log.warn('Logout forçado detectado pelo administrador');
+
+                  // Fazer logout local
+                  try {
+                    await firebaseSignOut(auth);
+                  } catch {
+                    // Ignora erro
+                  }
+
+                  setUser(null);
+                  setUserRole(null);
+                  setMustChangePassword(false);
+
+                  alert('Sua sessão foi encerrada pelo administrador. Faça login novamente.');
+                  window.location.href = '/login';
+                }
+              }
+            });
         }
         // --- End Presence ---
 
@@ -180,6 +220,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
+      }
+      if (forceLogoutUnsubscribe) {
+        forceLogoutUnsubscribe();
       }
     };
   }, []);

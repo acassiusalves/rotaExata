@@ -24,7 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Driver, DriverStatus } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull } from 'lucide-react';
+import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull, LogOut } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DeviceInfo } from '@/lib/types';
@@ -64,7 +64,10 @@ const statusMap: Record<
   offline: { label: 'Offline', className: 'bg-gray-500' },
 };
 
-const getDriverColumns = (onDeleteClick: (driver: Driver) => void): ColumnDef<Driver>[] => [
+const getDriverColumns = (
+  onDeleteClick: (driver: Driver) => void,
+  onForceLogoutClick: (driver: Driver) => void
+): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
     header: 'Motorista',
@@ -227,6 +230,10 @@ const getDriverColumns = (onDeleteClick: (driver: Driver) => void): ColumnDef<Dr
                     <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
                     <DropdownMenuItem>Editar</DropdownMenuItem>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => onForceLogoutClick(driver)}>
+                       <LogOut className="mr-2 h-4 w-4" />
+                       Deslogar Motorista
+                    </DropdownMenuItem>
                     <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
                        <Trash2 className="mr-2 h-4 w-4" />
                        Remover
@@ -239,10 +246,18 @@ const getDriverColumns = (onDeleteClick: (driver: Driver) => void): ColumnDef<Dr
   },
 ];
 
-export function DriverTable({ drivers, onDeleteClick }: { drivers: Driver[], onDeleteClick: (driver: Driver) => void }) {
+export function DriverTable({
+  drivers,
+  onDeleteClick,
+  onForceLogoutClick
+}: {
+  drivers: Driver[],
+  onDeleteClick: (driver: Driver) => void,
+  onForceLogoutClick: (driver: Driver) => void
+}) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  
-  const columns = React.useMemo(() => getDriverColumns(onDeleteClick), [onDeleteClick]);
+
+  const columns = React.useMemo(() => getDriverColumns(onDeleteClick, onForceLogoutClick), [onDeleteClick, onForceLogoutClick]);
 
   const table = useReactTable({
     data: drivers,
