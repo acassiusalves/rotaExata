@@ -642,10 +642,11 @@ export const forceLogoutDriver = onCall(
       // Revogar todos os tokens de refresh do usuário
       await auth.revokeRefreshTokens(uid);
 
-      // Atualizar documento do usuário com timestamp de logout forçado
+      // Atualizar documento do usuário com timestamp de logout forçado e limpar deviceInfo
       await db.collection("users").doc(uid).update({
         forceLogoutAt: FieldValue.serverTimestamp(),
         status: "offline",
+        deviceInfo: FieldValue.delete(),
       });
 
       return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
