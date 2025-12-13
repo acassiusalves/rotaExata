@@ -22,46 +22,22 @@ export default function LoginPage() {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
-  const [debugLogs, setDebugLogs] = React.useState<string[]>([]);
-  const { signIn, userRole, loading, user } = useAuth();
+  const { signIn, userRole, loading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
-
-  const addLog = (message: string) => {
-    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-    const logMessage = `[${timestamp}] ${message}`;
-    console.log('[LOGIN DEBUG]', logMessage);
-    setDebugLogs(prev => [...prev.slice(-19), logMessage]);
-  };
-
-  // Log inicial
-  React.useEffect(() => {
-    addLog(`Página carregada - loading: ${loading}, userRole: ${userRole}, user: ${user?.email || 'null'}`);
-  }, []);
-
-  // Log quando estados mudam
-  React.useEffect(() => {
-    addLog(`Estado mudou - loading: ${loading}, userRole: ${userRole}, user: ${user?.email || 'null'}`);
-  }, [loading, userRole, user]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    addLog(`Iniciando login para: ${email}`);
 
     try {
-      addLog('Chamando signIn...');
-      const userCredential = await signIn(email, password);
-      addLog(`SignIn bem-sucedido! UID: ${userCredential.user.uid}`);
-      addLog(`Email verificado: ${userCredential.user.emailVerified}`);
-      addLog('Aguardando AuthProvider processar o usuário...');
+      await signIn(email, password);
       // The auth state listener in AuthProvider will handle fetching the role.
     } catch (error) {
       let title = 'Erro no Login';
       let description = 'Ocorreu um erro desconhecido. Tente novamente.';
 
       if (error instanceof FirebaseError) {
-        addLog(`FirebaseError: ${error.code} - ${error.message}`);
         switch (error.code) {
           case 'auth/user-not-found':
           case 'auth/wrong-password':
@@ -82,8 +58,6 @@ export default function LoginPage() {
             description = 'Falha na conexão. Verifique sua internet.';
             break;
         }
-      } else {
-        addLog(`Erro desconhecido: ${error}`);
       }
 
       toast({
@@ -93,21 +67,15 @@ export default function LoginPage() {
       });
     } finally {
       setIsLoading(false);
-      addLog('Login finalizado (finally)');
     }
   };
 
-  // This effect will run when the userRole is determined after login
-  // Aguarda o loading terminar para evitar race condition
+  // Redirect when userRole is determined after login
   React.useEffect(() => {
-    addLog(`useEffect redirect - loading: ${loading}, userRole: ${userRole}`);
     if (!loading && userRole) {
-      addLog(`Redirecionando... userRole: ${userRole}`);
       if (['admin', 'socio', 'gestor'].includes(userRole)) {
-        addLog('Redirecionando para /dashboard');
         router.push('/dashboard');
       } else if (userRole === 'driver') {
-        addLog('Redirecionando para /my-routes');
         router.push('/my-routes');
       }
     }
@@ -115,7 +83,7 @@ export default function LoginPage() {
 
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 gap-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
             <div className="flex justify-center items-center mb-4">
@@ -160,42 +128,6 @@ export default function LoginPage() {
               </Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
-
-      {/* Debug Panel - Remover após resolver o problema */}
-      <Card className="w-full max-w-md">
-        <CardHeader className="py-2">
-          <CardTitle className="text-sm">Debug Logs (Login Page)</CardTitle>
-        </CardHeader>
-        <CardContent className="py-2">
-          <div className="text-xs space-y-1 font-mono bg-muted p-2 rounded max-h-48 overflow-y-auto">
-            <div className="text-muted-foreground mb-2">
-              loading: {String(loading)} | userRole: {userRole || 'null'} | user: {user?.email || 'null'}
-            </div>
-            {debugLogs.length === 0 ? (
-              <div className="text-muted-foreground">Nenhum log ainda...</div>
-            ) : (
-              debugLogs.map((log, i) => (
-                <div key={i} className="border-b border-muted-foreground/20 pb-1">{log}</div>
-              ))
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Instruções para debug no console */}
-      <Card className="w-full max-w-md">
-        <CardHeader className="py-2">
-          <CardTitle className="text-sm">Instruções Debug</CardTitle>
-        </CardHeader>
-        <CardContent className="py-2">
-          <div className="text-xs font-mono bg-muted p-2 rounded">
-            <p className="text-muted-foreground">Abra o Console (F12) e filtre por:</p>
-            <p className="text-primary">[AUTH DEBUG] ou [Firebase Client]</p>
-            <p className="text-muted-foreground mt-2">Após login, execute:</p>
-            <p className="text-primary">window.__authDebugLogs</p>
-          </div>
         </CardContent>
       </Card>
     </div>
