@@ -96,7 +96,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // User is signed in, fetch role from Firestore
         const userDocRef = doc(db, "users", user.uid);
-        let role = 'socio'; // default - declarado fora do try para usar depois
+        let role: string | null = null; // null até buscar com sucesso
+        let firestoreSuccess = false;
 
         try {
           debugLog('Chamando getDoc para users/' + user.uid);
@@ -129,25 +130,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             // Handle case where user exists in Auth but not in Firestore
             debugLog('Usuário NÃO encontrado no Firestore, usando role padrão');
             log.warn(`User ${user.uid} found in Auth but not in Firestore.`);
-            setUserRole('socio'); // default role
+            role = 'socio'; // default role
+            setUserRole(role);
             setMustChangePassword(false);
           }
           setUser(user);
+          firestoreSuccess = true;
           debugLog('setUser chamado, role final:', role);
           log.debug('Usuário configurado, role:', role);
         } catch (firestoreError) {
           debugLog('ERRO ao buscar dados do Firestore!', firestoreError);
           console.error('Firestore error:', firestoreError);
-          // Mesmo com erro, configura o usuário para não ficar travado
-          setUser(user);
-          setUserRole('socio');
+
+          // SEGURANÇA: NÃO dar role de admin quando Firestore falha!
+          // Isso evita que usuários ganhem acesso indevido por problema de conexão.
+          // Fazemos logout para forçar nova tentativa.
+          debugLog('Fazendo logout por segurança devido a erro de Firestore');
+
+          try {
+            await firebaseSignOut(auth);
+          } catch {
+            // Ignora erro de logout
+          }
+
+          setUser(null);
+          setUserRole(null);
           setMustChangePassword(false);
+          role = null;
+
+          // Mostrar erro para o usuário
+          alert('Erro de conexão com o servidor. Por favor, verifique sua internet e tente novamente.');
         }
 
         // --- Firestore Presence System (Heartbeat) ---
-        debugLog('Verificando presença. Role atual:', role);
+        // Só configura presença se o Firestore funcionou E o usuário é driver
+        debugLog('Verificando presença. Role atual:', role, 'firestoreSuccess:', firestoreSuccess);
         log.debug('Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
-        if (role === 'driver') {
+        if (firestoreSuccess && role === 'driver') {
             const userFirestoreRef = doc(db, 'users', user.uid);
 
             // Atualizar status para online imediatamente
