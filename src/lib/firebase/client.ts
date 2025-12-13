@@ -14,19 +14,28 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Debug: Log Firebase config
+// Debug: Log Firebase config - valores explícitos para diagnóstico
 if (typeof window !== 'undefined') {
-  console.log('[Firebase Client] Initializing with config:', {
-    apiKey: firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0, 10) + '...' : 'MISSING!',
-    authDomain: firebaseConfig.authDomain || 'MISSING!',
-    projectId: firebaseConfig.projectId || 'MISSING!',
-    storageBucket: firebaseConfig.storageBucket || 'MISSING!',
-  });
+  const configDebug = {
+    apiKey: firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0, 15) + '...' : '❌ MISSING!',
+    authDomain: firebaseConfig.authDomain || '❌ MISSING!',
+    projectId: firebaseConfig.projectId || '❌ MISSING!',
+    storageBucket: firebaseConfig.storageBucket || '❌ MISSING!',
+  };
+
+  console.log('[Firebase Client] ====== CONFIG DEBUG ======');
+  console.log('[Firebase Client] apiKey:', configDebug.apiKey);
+  console.log('[Firebase Client] authDomain:', configDebug.authDomain);
+  console.log('[Firebase Client] projectId:', configDebug.projectId);
+  console.log('[Firebase Client] storageBucket:', configDebug.storageBucket);
+  console.log('[Firebase Client] ===========================');
 
   // Alerta crítico se projectId estiver faltando
   if (!firebaseConfig.projectId) {
-    console.error('[Firebase Client] ERRO CRÍTICO: NEXT_PUBLIC_FIREBASE_PROJECT_ID não está definido!');
-    console.error('[Firebase Client] Verifique as variáveis de ambiente na Vercel.');
+    console.error('[Firebase Client] ❌❌❌ ERRO CRÍTICO: NEXT_PUBLIC_FIREBASE_PROJECT_ID não está definido! ❌❌❌');
+    console.error('[Firebase Client] O Firestore NÃO vai funcionar sem esta variável!');
+    console.error('[Firebase Client] Adicione nas Environment Variables da Vercel:');
+    console.error('[Firebase Client] NEXT_PUBLIC_FIREBASE_PROJECT_ID = studio-7321304121-9aa4d');
   }
 }
 
