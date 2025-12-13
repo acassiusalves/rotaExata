@@ -10,6 +10,12 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AuthProvider');
 
+// Debug logger para produção
+const debugLog = (message: string, data?: unknown) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[AUTH DEBUG ${timestamp}]`, message, data !== undefined ? data : '');
+};
+
 interface AuthContextType {
   user: User | null;
   userRole: string | null;
@@ -38,7 +44,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let visibilityHandler: (() => void) | null = null;
 
+    debugLog('onAuthStateChanged listener configurado');
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      debugLog('onAuthStateChanged disparado', { userExists: !!user, email: user?.email });
+
       // Limpar interval anterior se existir
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
@@ -52,32 +62,50 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (user) {
+        debugLog('Usuário encontrado, buscando dados no Firestore...', { uid: user.uid });
+
         // User is signed in, fetch role from Firestore
         const userDocRef = doc(db, "users", user.uid);
-        const userDocSnap = await getDoc(userDocRef);
+        let role = 'socio'; // default - declarado fora do try para usar depois
 
-        let role = 'socio'; // default
-        if (userDocSnap.exists()) {
-          const data = userDocSnap.data();
-          role = data?.role || 'socio';
-          setUserRole(role);
-          setMustChangePassword(data?.mustChangePassword || false);
-          log.debug('Usuário autenticado:', {
-            uid: user.uid,
-            email: user.email,
-            role: role,
-            currentStatus: data?.status,
-          });
-        } else {
-          // Handle case where user exists in Auth but not in Firestore
-          log.warn(`User ${user.uid} found in Auth but not in Firestore.`);
-          setUserRole('socio'); // default role
+        try {
+          debugLog('Chamando getDoc para users/' + user.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          debugLog('getDoc retornou', { exists: userDocSnap.exists() });
+
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            role = data?.role || 'socio';
+            debugLog('Dados do usuário obtidos', { role, mustChangePassword: data?.mustChangePassword });
+            setUserRole(role);
+            setMustChangePassword(data?.mustChangePassword || false);
+            log.debug('Usuário autenticado:', {
+              uid: user.uid,
+              email: user.email,
+              role: role,
+              currentStatus: data?.status,
+            });
+          } else {
+            // Handle case where user exists in Auth but not in Firestore
+            debugLog('Usuário NÃO encontrado no Firestore, usando role padrão');
+            log.warn(`User ${user.uid} found in Auth but not in Firestore.`);
+            setUserRole('socio'); // default role
+            setMustChangePassword(false);
+          }
+          setUser(user);
+          debugLog('setUser chamado, role final:', role);
+          log.debug('Usuário configurado, role:', role);
+        } catch (firestoreError) {
+          debugLog('ERRO ao buscar dados do Firestore!', firestoreError);
+          console.error('Firestore error:', firestoreError);
+          // Mesmo com erro, configura o usuário para não ficar travado
+          setUser(user);
+          setUserRole('socio');
           setMustChangePassword(false);
         }
-        setUser(user);
-        log.debug('Usuário configurado, role:', role);
 
         // --- Firestore Presence System (Heartbeat) ---
+        debugLog('Verificando presença. Role atual:', role);
         log.debug('Verificando se deve configurar presença. Role:', role, 'É motorista?', role === 'driver');
         if (role === 'driver') {
             const userFirestoreRef = doc(db, 'users', user.uid);
@@ -130,12 +158,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // --- End Presence ---
 
       } else {
+        debugLog('Nenhum usuário encontrado, limpando estado');
         setUser(null);
         setUserRole(null);
         setMustChangePassword(false);
       }
+      debugLog('Finalizando onAuthStateChanged, definindo loading = false');
       log.debug('Finalizando onAuthStateChanged, definindo loading = false');
       setLoading(false);
+      debugLog('Loading definido como false');
     });
 
     return () => {
