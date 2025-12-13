@@ -6,6 +6,9 @@ import React from 'react';
 export function ServiceWorkerRegistration() {
   React.useEffect(() => {
     if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'development') {
+      // Flag para evitar reload duplicado
+      let refreshing = false;
+
       const registerServiceWorker = async () => {
         try {
           const registration = await navigator.serviceWorker.register('/sw.js');
@@ -15,27 +18,17 @@ export function ServiceWorkerRegistration() {
             registration.update();
           }, 60 * 60 * 1000);
 
-          // Quando uma nova versão estiver disponível
-          registration.addEventListener('updatefound', () => {
-            const newWorker = registration.installing;
-            if (newWorker) {
-              newWorker.addEventListener('statechange', () => {
-                // Quando o novo SW estiver instalado e pronto
-                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  // Nova versão disponível - recarregar automaticamente
-                  window.location.reload();
-                }
-              });
-            }
-          });
         } catch (error) {
           console.error('Service Worker registration failed:', error);
         }
       };
 
-      // Quando o controlador mudar (novo SW assumiu), recarregar
+      // Quando o controlador mudar (novo SW assumiu), recarregar UMA vez
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
       });
 
       window.addEventListener('load', registerServiceWorker);
