@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { User, UserCredential, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
@@ -10,10 +10,17 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AuthProvider');
 
-// Debug logger para produção
+// Debug logger para produção - visível no console do navegador
 const debugLog = (message: string, data?: unknown) => {
   const timestamp = new Date().toISOString();
-  console.log(`[AUTH DEBUG ${timestamp}]`, message, data !== undefined ? data : '');
+  const logMessage = `[AUTH DEBUG ${timestamp}] ${message}`;
+  console.log(logMessage, data !== undefined ? data : '');
+
+  // Também armazena em window para debug
+  if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown[]>).__authDebugLogs = (window as unknown as Record<string, unknown[]>).__authDebugLogs || [];
+    (window as unknown as Record<string, unknown[]>).__authDebugLogs.push({ timestamp, message, data });
+  }
 };
 
 interface AuthContextType {
@@ -43,11 +50,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let visibilityHandler: (() => void) | null = null;
+    let listenerActive = true;
 
-    debugLog('onAuthStateChanged listener configurado');
+    debugLog('=== INICIANDO AUTH LISTENER ===');
+    debugLog('Auth object info:', {
+      appName: auth.app?.name,
+      currentUser: auth.currentUser?.email || 'null',
+      tenantId: auth.tenantId,
+    });
+
+    // Verificar se já existe um usuário logado
+    if (auth.currentUser) {
+      debugLog('IMPORTANTE: Já existe currentUser no auth!', {
+        email: auth.currentUser.email,
+        uid: auth.currentUser.uid,
+      });
+    }
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      debugLog('onAuthStateChanged disparado', { userExists: !!user, email: user?.email });
+      debugLog('>>> onAuthStateChanged DISPARADO <<<', {
+        userExists: !!user,
+        email: user?.email,
+        listenerActive,
+      });
+
+      if (!listenerActive) {
+        debugLog('AVISO: Listener foi marcado como inativo, ignorando callback');
+        return;
+      }
 
       // Limpar interval anterior se existir
       if (heartbeatInterval) {
@@ -169,7 +199,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       debugLog('Loading definido como false');
     });
 
+    debugLog('Auth listener configurado com sucesso');
+
     return () => {
+      debugLog('=== CLEANUP: Removendo auth listener ===');
+      listenerActive = false;
       unsubscribe();
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
@@ -181,7 +215,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, pass: string) => {
-    return signInWithEmailAndPassword(auth, email, pass);
+    debugLog('signIn chamado', {
+      email,
+      authAppName: auth.app?.name,
+      currentUserBefore: auth.currentUser?.email || 'null',
+    });
+
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, pass);
+      debugLog('signInWithEmailAndPassword SUCESSO', {
+        uid: result.user.uid,
+        email: result.user.email,
+        currentUserAfter: auth.currentUser?.email || 'null',
+      });
+
+      // Verificar manualmente se o onAuthStateChanged vai disparar
+      debugLog('Aguardando 2s para verificar se onAuthStateChanged dispara...');
+      setTimeout(() => {
+        debugLog('Verificação após 2s:', {
+          currentUser: auth.currentUser?.email || 'null',
+          authAppName: auth.app?.name,
+        });
+      }, 2000);
+
+      return result;
+    } catch (error) {
+      debugLog('signInWithEmailAndPassword ERRO', error);
+      throw error;
+    }
   }
 
   const signOut = async () => {

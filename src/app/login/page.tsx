@@ -166,7 +166,7 @@ export default function LoginPage() {
       {/* Debug Panel - Remover após resolver o problema */}
       <Card className="w-full max-w-md">
         <CardHeader className="py-2">
-          <CardTitle className="text-sm">Debug Logs</CardTitle>
+          <CardTitle className="text-sm">Debug Logs (Login Page)</CardTitle>
         </CardHeader>
         <CardContent className="py-2">
           <div className="text-xs space-y-1 font-mono bg-muted p-2 rounded max-h-48 overflow-y-auto">
@@ -180,6 +180,21 @@ export default function LoginPage() {
                 <div key={i} className="border-b border-muted-foreground/20 pb-1">{log}</div>
               ))
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Instruções para debug no console */}
+      <Card className="w-full max-w-md">
+        <CardHeader className="py-2">
+          <CardTitle className="text-sm">Instruções Debug</CardTitle>
+        </CardHeader>
+        <CardContent className="py-2">
+          <div className="text-xs font-mono bg-muted p-2 rounded">
+            <p className="text-muted-foreground">Abra o Console (F12) e filtre por:</p>
+            <p className="text-primary">[AUTH DEBUG] ou [Firebase Client]</p>
+            <p className="text-muted-foreground mt-2">Após login, execute:</p>
+            <p className="text-primary">window.__authDebugLogs</p>
           </div>
         </CardContent>
       </Card>

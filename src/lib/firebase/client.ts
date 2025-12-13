@@ -1,9 +1,9 @@
 // Import the functions you need from the SDKs you need
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
-import { getStorage } from "firebase/storage";
+import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
+import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, Firestore } from "firebase/firestore";
+import { getFunctions, Functions } from "firebase/functions";
+import { getStorage, FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,13 +14,44 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// Debug: Log Firebase config (sem expor valores sensíveis)
+if (typeof window !== 'undefined') {
+  console.log('[Firebase Client] Initializing with config:', {
+    hasApiKey: !!firebaseConfig.apiKey,
+    authDomain: firebaseConfig.authDomain,
+    projectId: firebaseConfig.projectId,
+    hasStorageBucket: !!firebaseConfig.storageBucket,
+  });
+}
 
-// Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Initialize Firebase - singleton pattern
+let app: FirebaseApp;
+let auth: Auth;
+let db: Firestore;
+let functions: Functions;
+let storage: FirebaseStorage;
 
-const auth = getAuth(app);
-const db = getFirestore(app);
-const functions = getFunctions(app, 'southamerica-east1');
-const storage = getStorage(app);
+const existingApps = getApps();
+if (existingApps.length > 0) {
+  app = getApp();
+  if (typeof window !== 'undefined') {
+    console.log('[Firebase Client] Using existing app instance, total apps:', existingApps.length);
+  }
+} else {
+  app = initializeApp(firebaseConfig);
+  if (typeof window !== 'undefined') {
+    console.log('[Firebase Client] Created new app instance');
+  }
+}
+
+auth = getAuth(app);
+db = getFirestore(app);
+functions = getFunctions(app, 'southamerica-east1');
+storage = getStorage(app);
+
+// Log auth instance ID for debugging
+if (typeof window !== 'undefined') {
+  console.log('[Firebase Client] Auth instance created, app name:', app.name);
+}
 
 export { app, auth, db, functions, storage };

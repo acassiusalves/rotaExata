@@ -10,6 +10,12 @@ export function ServiceWorkerRegistration() {
       return;
     }
 
+    // Verifica se está na Vercel (onde o PWA está desabilitado)
+    // A variável NEXT_PUBLIC_VERCEL é automaticamente definida pela Vercel
+    const isVercel = process.env.NEXT_PUBLIC_VERCEL === '1' ||
+                     window.location.hostname.includes('vercel.app') ||
+                     window.location.hostname.includes('rotaexata');
+
     // Flag para evitar reload duplicado
     let refreshing = false;
 
@@ -18,11 +24,18 @@ export function ServiceWorkerRegistration() {
         // Primeiro verifica se o sw.js existe
         const swResponse = await fetch('/sw.js', { method: 'HEAD' });
         if (!swResponse.ok) {
-          // SW não existe, não tenta registrar
+          console.log('[SW] Service Worker não encontrado, pulando registro');
+          // Se há um SW antigo registrado, remove ele
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const registration of registrations) {
+            console.log('[SW] Removendo SW antigo:', registration.scope);
+            await registration.unregister();
+          }
           return;
         }
 
         const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('[SW] Service Worker registrado com sucesso');
 
         // Verificar atualizações periodicamente (a cada 1 hora)
         setInterval(() => {
@@ -31,8 +44,25 @@ export function ServiceWorkerRegistration() {
           });
         }, 60 * 60 * 1000);
 
-      } catch {
+      } catch (error) {
+        console.log('[SW] Erro ao registrar Service Worker:', error);
         // Falha silenciosa - o app continua funcionando sem SW
+      }
+    };
+
+    // Se está na Vercel, apenas limpa SWs antigos (não registra novo)
+    const cleanupOldServiceWorkers = async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          // Não remove o firebase-messaging-sw.js
+          if (!registration.active?.scriptURL?.includes('firebase-messaging')) {
+            console.log('[SW] Removendo SW antigo na Vercel:', registration.scope);
+            await registration.unregister();
+          }
+        }
+      } catch (error) {
+        console.log('[SW] Erro ao limpar SWs antigos:', error);
       }
     };
 
@@ -46,11 +76,22 @@ export function ServiceWorkerRegistration() {
 
     navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
 
-    // Registra após o load da página
+    // Na Vercel, apenas limpa SWs antigos
+    // Em outros ambientes, registra o SW
     if (document.readyState === 'complete') {
-      registerServiceWorker();
+      if (isVercel) {
+        cleanupOldServiceWorkers();
+      } else {
+        registerServiceWorker();
+      }
     } else {
-      window.addEventListener('load', registerServiceWorker);
+      window.addEventListener('load', () => {
+        if (isVercel) {
+          cleanupOldServiceWorkers();
+        } else {
+          registerServiceWorker();
+        }
+      });
     }
 
     return () => {
