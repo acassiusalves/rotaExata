@@ -46,18 +46,19 @@ const nextConfig: NextConfig = {
   },
 };
 
-// Desabilita PWA na Vercel temporariamente devido a incompatibilidade com Next.js 15
+// Configuração do PWA - habilitado em produção (incluindo Vercel)
 const pwaConfig = withPWA({
   dest: 'public',
-  register: true,
+  register: false, // Desabilitamos o registro automático, usamos nosso próprio componente
   skipWaiting: true,
-  clientsClaim: true, // Assume controle imediatamente após ativação
-  disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1',
+  clientsClaim: true,
+  disable: process.env.NODE_ENV === 'development',
   sw: 'sw.js',
-  reloadOnOnline: true, // Recarrega quando voltar online
+  reloadOnOnline: true,
   fallbacks: {
     document: '/offline.html',
   },
+  buildExcludes: [/middleware-manifest\.json$/],
 });
 
 export default pwaConfig(nextConfig);
