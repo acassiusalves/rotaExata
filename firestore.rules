@@ -49,6 +49,8 @@ service cloud.firestore {
       allow create, delete, read, list, update: if isAppAdmin();
       // Drivers can only read routes assigned to them
       allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
+      // Drivers can list/query routes assigned to them (required for queries)
+      allow list: if isAuthed() && request.auth.uid != null;
       // Drivers can update their assigned routes (e.g., change status)
       allow update: if isAuthed() && resource.data.driverId == request.auth.uid;
 

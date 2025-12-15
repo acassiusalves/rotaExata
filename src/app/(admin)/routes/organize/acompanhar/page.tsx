@@ -959,23 +959,45 @@ export default function OrganizeRoutePage() {
 
   React.useEffect(() => {
     const storedData = sessionStorage.getItem('newRouteData');
+    console.log('📦 [useEffect:loadRouteData] sessionStorage "newRouteData":', storedData ? 'ENCONTRADO' : 'NÃO ENCONTRADO');
+
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
+      console.log('📦 [useEffect:loadRouteData] Dados parseados:', {
+        isExistingRoute: parsedData.isExistingRoute,
+        currentRouteId: parsedData.currentRouteId,
+        draftRouteId: parsedData.draftRouteId,
+        stopsCount: parsedData.stops?.length || 0,
+        hasOrigin: !!parsedData.origin,
+        routeDate: parsedData.routeDate,
+        period: parsedData.period,
+      });
       setRouteData(parsedData);
 
       // Se for uma rota existente, buscar dados atualizados do Firestore
       if (parsedData.isExistingRoute && parsedData.currentRouteId) {
+        console.log('🔄 [useEffect:loadRouteData] É rota existente! Carregando do Firestore...');
         const loadRouteFromFirestore = async () => {
           setIsLoading(true);
           try {
             const routeRef = doc(db, 'routes', parsedData.currentRouteId!);
+            console.log('🔄 [useEffect:loadRouteData] Buscando rota:', parsedData.currentRouteId);
             const routeSnap = await getDoc(routeRef);
 
             if (routeSnap.exists()) {
               const routeData = routeSnap.data();
+              console.log('✅ [useEffect:loadRouteData] Rota carregada do Firestore:', {
+                id: routeSnap.id,
+                status: routeData.status,
+                stopsCount: routeData.stops?.length || 0,
+                hasPolyline: !!routeData.encodedPolyline,
+                driverId: routeData.driverId,
+                driverName: routeData.driverInfo?.name,
+              });
 
               // Usar dados do Firestore ao invés do sessionStorage
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+              console.log('✅ [useEffect:loadRouteData] Stops válidos após filtro:', allStops.length);
               setRouteA({
                 stops: allStops,
                 distanceMeters: routeData.distanceMeters,
@@ -986,7 +1008,7 @@ export default function OrganizeRoutePage() {
               });
               setRouteB(null); // Não tem segunda rota
             } else {
-              console.error('❌ Rota não encontrada no Firestore');
+              console.error('❌ [useEffect:loadRouteData] Rota não encontrada no Firestore - ID:', parsedData.currentRouteId);
               // Fallback para dados do sessionStorage
               const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
               setRouteA({
@@ -1019,6 +1041,7 @@ export default function OrganizeRoutePage() {
 
         loadRouteFromFirestore();
       } else {
+        console.log('ℹ️ [useEffect:loadRouteData] NÃO é rota existente - processando como rota nova');
         // Rota nova - dividir geograficamente usando origem como referência
         const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
         const MAX_STOPS_PER_ROUTE = 25;
@@ -1564,8 +1587,19 @@ export default function OrganizeRoutePage() {
   };
 
   const handleAddService = async () => {
+    console.log('🚀 [handleAddService] INICIANDO adição de serviço');
+    console.log('📋 [handleAddService] Dados do formulário:', JSON.stringify(manualService, null, 2));
+    console.log('🎯 [handleAddService] Rota selecionada:', selectedRouteForNewService);
+    console.log('📊 [handleAddService] routeData:', {
+      isExistingRoute: routeData?.isExistingRoute,
+      currentRouteId: routeData?.currentRouteId,
+      draftRouteId: routeData?.draftRouteId,
+      hasOrigin: !!routeData?.origin,
+    });
+
     const { rua, numero, bairro, cidade, cep } = manualService;
     if (!rua || !bairro || !cidade) {
+      console.warn('⚠️ [handleAddService] Campos obrigatórios faltando:', { rua, bairro, cidade });
       toast({
         variant: 'destructive',
         title: 'Campos Obrigatórios',
@@ -1578,7 +1612,9 @@ export default function OrganizeRoutePage() {
       ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
       : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
 
+    console.log('📍 [handleAddService] Geocodificando endereço:', addressString);
     const geocoded = await geocodeAddress(addressString);
+    console.log('📍 [handleAddService] Resultado geocodificação:', geocoded);
 
     if (geocoded) {
       const newStop: PlaceValue = {
@@ -1593,9 +1629,11 @@ export default function OrganizeRoutePage() {
         complemento: manualService.complemento,
         notes: manualService.notes,
       };
+      console.log('✅ [handleAddService] Novo stop criado:', JSON.stringify(newStop, null, 2));
 
       // Add to selected route or unassigned
       if (selectedRouteForNewService === 'unassigned') {
+        console.log('📦 [handleAddService] Adicionando aos não alocados');
         setUnassignedStops(prev => [...prev, newStop]);
         toast({
           title: 'Serviço Adicionado!',
@@ -1606,7 +1644,15 @@ export default function OrganizeRoutePage() {
         const targetRoute = selectedRouteForNewService === 'A' ? routeA : routeB;
         const setter = selectedRouteForNewService === 'A' ? setRouteA : setRouteB;
 
+        console.log('🛤️ [handleAddService] Rota alvo:', {
+          routeKey: selectedRouteForNewService,
+          targetRouteExists: !!targetRoute,
+          targetRouteStops: targetRoute?.stops?.length || 0,
+          routeDataExists: !!routeData,
+        });
+
         if (!targetRoute || !routeData) {
+          console.error('❌ [handleAddService] Rota não encontrada!', { targetRoute: !!targetRoute, routeData: !!routeData });
           toast({
             variant: 'destructive',
             title: 'Erro',
@@ -1616,32 +1662,59 @@ export default function OrganizeRoutePage() {
         }
 
         const newStops = [...targetRoute.stops, newStop];
+        console.log('📝 [handleAddService] Nova lista de stops:', newStops.length, 'paradas');
         setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
 
         // Recalculate route
+        console.log('🔄 [handleAddService] Recalculando rota com', newStops.length, 'paradas');
         const newRouteInfo = await computeRoute(routeData.origin, newStops);
+        console.log('🔄 [handleAddService] Resultado do computeRoute:', {
+          success: !!newRouteInfo,
+          distance: newRouteInfo?.distanceMeters,
+          duration: newRouteInfo?.duration,
+          hasPolyline: !!newRouteInfo?.encodedPolyline,
+        });
+
         if (newRouteInfo) {
           setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops, color: targetRoute.color, visible: targetRoute.visible } : null);
 
           // If this is an existing route, update Firestore so driver app receives the update
+          console.log('💾 [handleAddService] Verificando se deve atualizar Firestore:', {
+            isExistingRoute: routeData.isExistingRoute,
+            currentRouteId: routeData.currentRouteId,
+          });
+
           if (routeData.isExistingRoute && routeData.currentRouteId) {
+            console.log('💾 [handleAddService] ATUALIZANDO FIRESTORE - Route ID:', routeData.currentRouteId);
             try {
               const routeRef = doc(db, 'routes', routeData.currentRouteId);
-              await updateDoc(routeRef, {
+              const updateData = {
                 stops: newStops,
                 encodedPolyline: newRouteInfo.encodedPolyline,
                 distanceMeters: newRouteInfo.distanceMeters,
                 duration: newRouteInfo.duration,
+              };
+              console.log('💾 [handleAddService] Dados para update:', {
+                stopsCount: updateData.stops.length,
+                hasPolyline: !!updateData.encodedPolyline,
+                distance: updateData.distanceMeters,
+                duration: updateData.duration,
               });
+              await updateDoc(routeRef, updateData);
+              console.log('✅ [handleAddService] Firestore ATUALIZADO com sucesso!');
             } catch (error) {
-              console.error('Erro ao atualizar rota no Firestore:', error);
+              console.error('❌ [handleAddService] Erro ao atualizar rota no Firestore:', error);
               toast({
                 variant: 'destructive',
                 title: 'Aviso',
                 description: 'O ponto foi adicionado localmente, mas pode não sincronizar com o app do motorista.',
               });
             }
+          } else {
+            console.log('ℹ️ [handleAddService] NÃO é rota existente, não atualizando Firestore');
           }
+        } else {
+          console.error('❌ [handleAddService] computeRoute retornou null/undefined');
         }
 
         toast({
@@ -1667,7 +1740,9 @@ export default function OrganizeRoutePage() {
       });
       setSelectedRouteForNewService('unassigned');
       setIsAddServiceDialogOpen(false);
+      console.log('✅ [handleAddService] FINALIZADO com sucesso');
     } else {
+      console.error('❌ [handleAddService] Geocodificação falhou para:', addressString);
       toast({
         variant: 'destructive',
         title: 'Falha na Geocodificação',
