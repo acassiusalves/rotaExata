@@ -721,10 +721,14 @@ export default function OrganizeRoutePage() {
 
   // Buscar localizações dos motoristas em tempo real a partir das rotas ativas
   React.useEffect(() => {
+    console.log('🚗 [useEffect:driverLocations] Iniciando... availableDrivers:', availableDrivers.length);
+
     if (availableDrivers.length === 0) {
-      console.warn('⚠️ Listener de localizações NÃO iniciado - nenhum motorista disponível');
+      console.warn('⚠️ [useEffect:driverLocations] Listener NÃO iniciado - aguardando motoristas disponíveis');
       return;
     }
+
+    console.log('🚗 [useEffect:driverLocations] Motoristas disponíveis:', availableDrivers.map(d => ({ id: d.id, name: d.name })));
 
     // Buscar rotas que estão em progresso ou despachadas
     const routesQuery = query(
@@ -732,12 +736,31 @@ export default function OrganizeRoutePage() {
       where('status', 'in', ['in_progress', 'dispatched'])
     );
 
+    console.log('🚗 [useEffect:driverLocations] Configurando listener para rotas in_progress/dispatched');
+
     const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
+      console.log('🚗 [onSnapshot:routes] Rotas encontradas:', snapshot.size);
       const locationsMap = new Map<string, DriverLocationWithInfo>();
       const now = new Date();
 
       snapshot.forEach((routeDoc) => {
         const routeData = routeDoc.data();
+        const hasLocation = !!routeData.currentLocation;
+        const driverName = routeData.driverInfo?.name || 'Desconhecido';
+
+        if (!hasLocation) {
+          console.warn(`⚠️ [onSnapshot:routes] Rota SEM localização: ${driverName} (routeId: ${routeDoc.id}) - status: ${routeData.status}`);
+        } else {
+          console.log('🚗 [onSnapshot:routes] Processando rota COM localização:', {
+            id: routeDoc.id,
+            status: routeData.status,
+            driverId: routeData.driverId,
+            driverName: driverName,
+            lat: routeData.currentLocation.lat,
+            lng: routeData.currentLocation.lng,
+            timestamp: routeData.currentLocation.timestamp?.toDate?.()?.toISOString(),
+          });
+        }
 
         // Verificar se há localização atual, informações do motorista e driverId
         if (routeData.currentLocation && routeData.driverInfo && routeData.driverId) {
@@ -789,6 +812,17 @@ export default function OrganizeRoutePage() {
       });
 
       const locations = Array.from(locationsMap.values());
+      console.log('🚗 [onSnapshot:routes] Localizações válidas encontradas:', locations.length);
+      if (locations.length > 0) {
+        console.log('🚗 [onSnapshot:routes] Detalhes das localizações:', locations.map(l => ({
+          driverId: l.driverId,
+          driverName: l.driverName,
+          lat: l.lat,
+          lng: l.lng,
+        })));
+      } else {
+        console.warn('⚠️ [onSnapshot:routes] Nenhuma localização válida encontrada nas rotas');
+      }
       setDriverLocations(locations);
     });
 

@@ -116,6 +116,17 @@ export default function RouteDetailsPage() {
     return () => unsubscribe();
   }, [routeId]);
 
+  // Auto-restart tracking if route is in_progress and tracking is not active
+  React.useEffect(() => {
+    if (!route) return;
+
+    // Se a rota está em progresso mas o tracking não está ativo, reinicia automaticamente
+    if (route.status === 'in_progress' && !isTracking) {
+      console.log('🔄 [Auto-restart] Rota em progresso detectada, reiniciando tracking...');
+      startTracking();
+    }
+  }, [route?.status, isTracking, startTracking]);
+
   // Monitor tracking health and show alerts
   React.useEffect(() => {
     if (!isTracking) return;
