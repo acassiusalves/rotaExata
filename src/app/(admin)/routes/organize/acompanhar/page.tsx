@@ -1807,12 +1807,25 @@ export default function OrganizeRoutePage() {
 
     // Case: Moving from unassigned to a route
     if (activeRouteKey === 'unassigned' && overRouteKey && overRouteKey !== 'unassigned') {
-      if (!routeData) return;
+      console.log('🔄 [handleDragEnd] Movendo de não alocados para rota:', overRouteKey);
+      if (!routeData) {
+        console.error('❌ [handleDragEnd] routeData não encontrado!');
+        return;
+      }
 
       const targetRoute = getRoute(overRouteKey);
       const stopToMove = active.data.current?.stop as PlaceValue;
 
-      if (!stopToMove) return;
+      if (!stopToMove) {
+        console.error('❌ [handleDragEnd] stopToMove não encontrado!');
+        return;
+      }
+
+      console.log('📍 [handleDragEnd] Stop a mover:', {
+        id: stopToMove.id,
+        customerName: stopToMove.customerName,
+        address: stopToMove.address,
+      });
 
       // Remove from unassigned by matching the stop ID
       const stopId = String(stopToMove.id ?? stopToMove.placeId);
@@ -1820,12 +1833,20 @@ export default function OrganizeRoutePage() {
 
       // Add to target route
       const newTargetStops = targetRoute ? [...targetRoute.stops, stopToMove] : [stopToMove];
+      console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
 
       setRoute(overRouteKey, prev => prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null);
 
       // Recalculate route
+      console.log('🔄 [handleDragEnd] Recalculando rota...');
       const newRouteInfo = await computeRoute(routeData.origin, newTargetStops);
       if (newRouteInfo) {
+        console.log('✅ [handleDragEnd] Rota recalculada:', {
+          distance: newRouteInfo.distanceMeters,
+          duration: newRouteInfo.duration,
+          hasPolyline: !!newRouteInfo.encodedPolyline,
+        });
+
         setRoute(overRouteKey, prev => prev ? {
           ...prev,
           ...newRouteInfo,
@@ -1838,12 +1859,42 @@ export default function OrganizeRoutePage() {
           color: overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200',
           visible: true
         });
+
+        // Se for uma rota existente (A) e tiver currentRouteId, salvar no Firestore
+        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
+          console.log('💾 [handleDragEnd] SALVANDO NO FIRESTORE - Route ID:', routeData.currentRouteId);
+          try {
+            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            await updateDoc(routeRef, {
+              stops: newTargetStops,
+              encodedPolyline: newRouteInfo.encodedPolyline,
+              distanceMeters: newRouteInfo.distanceMeters,
+              duration: newRouteInfo.duration,
+            });
+            console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso!');
+          } catch (error) {
+            console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Aviso',
+              description: 'O ponto foi adicionado localmente, mas pode não sincronizar com o app do motorista.',
+            });
+          }
+        } else {
+          console.log('ℹ️ [handleDragEnd] Não salvando no Firestore:', {
+            isExistingRoute: routeData.isExistingRoute,
+            currentRouteId: routeData.currentRouteId,
+            overRouteKey,
+          });
+        }
+      } else {
+        console.error('❌ [handleDragEnd] computeRoute retornou null');
       }
 
       const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
       toast({
         title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.`,
+        description: `O serviço foi adicionado à ${routeName}.${routeData.isExistingRoute && overRouteKey === 'A' ? ' Motorista receberá atualização.' : ''}`,
       });
 
       return;
