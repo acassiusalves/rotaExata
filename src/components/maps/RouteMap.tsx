@@ -918,22 +918,23 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         }
     });
 
-    // Only fit bounds if driver locations actually changed (not on resize)
-    const currentDriverLocationsData = JSON.stringify(
-      driverLocations?.map(loc => ({ driverId: loc.driverId, lat: loc.lat, lng: loc.lng }))
+    // Only fit bounds when NEW drivers appear (not when positions update)
+    // Compare only driverIds, not lat/lng, to avoid re-centering on every location update
+    const currentDriverIds = JSON.stringify(
+      driverLocations?.map(loc => loc.driverId).sort()
     );
 
-    const shouldFitBounds = currentDriverLocationsData !== previousDriverLocationsRef.current;
+    const hasNewDrivers = currentDriverIds !== previousDriverLocationsRef.current;
 
-    // Validate bounds before calling fitBounds
-    if (!bounds.isEmpty() && shouldFitBounds) {
+    // Validate bounds before calling fitBounds - only when new drivers appear
+    if (!bounds.isEmpty() && hasNewDrivers) {
       try {
         const boundsObj = bounds.toJSON();
         // Ensure bounds has valid north, south, east, west properties
         if (boundsObj && typeof boundsObj.north === 'number' && typeof boundsObj.south === 'number' &&
             typeof boundsObj.east === 'number' && typeof boundsObj.west === 'number') {
           map.fitBounds(bounds, 100);
-          previousDriverLocationsRef.current = currentDriverLocationsData;
+          previousDriverLocationsRef.current = currentDriverIds;
         }
       } catch {
         // Silently handle bounds errors
