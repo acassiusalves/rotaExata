@@ -396,6 +396,7 @@ export default function RoutesPage() {
       isExistingRoute: true, // Flag para indicar que é uma rota já organizada
       currentRouteId: route.id, // ID da rota atual para filtrar das adicionais
       period, // Período da rota para filtrar na página de acompanhamento
+      routeName: route.name, // Nome da rota para exibir na página de acompanhamento
       existingRouteData: {
         distanceMeters: route.distanceMeters,
         duration: route.duration,

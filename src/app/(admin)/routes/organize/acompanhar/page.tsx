@@ -121,6 +121,7 @@ interface RouteData {
   isExistingRoute?: boolean;
   currentRouteId?: string; // ID da rota atual para filtrar
   period?: 'Matutino' | 'Vespertino' | 'Noturno'; // Período para filtrar rotas
+  routeName?: string; // Nome da rota para exibir
   existingRouteData?: {
     distanceMeters: number;
     duration: string;
@@ -1022,12 +1023,17 @@ export default function OrganizeRoutePage() {
               const routeData = routeSnap.data();
               console.log('✅ [useEffect:loadRouteData] Rota carregada do Firestore:', {
                 id: routeSnap.id,
+                name: routeData.name,
                 status: routeData.status,
                 stopsCount: routeData.stops?.length || 0,
                 hasPolyline: !!routeData.encodedPolyline,
                 driverId: routeData.driverId,
                 driverName: routeData.driverInfo?.name,
               });
+
+              // Definir nome da rota (prioridade: Firestore > sessionStorage > fallback)
+              const routeName = routeData.name || parsedData.routeName || 'Rota 1';
+              setRouteNames(prev => ({ ...prev, A: routeName }));
 
               // Usar dados do Firestore ao invés do sessionStorage
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
@@ -1044,6 +1050,9 @@ export default function OrganizeRoutePage() {
             } else {
               console.error('❌ [useEffect:loadRouteData] Rota não encontrada no Firestore - ID:', parsedData.currentRouteId);
               // Fallback para dados do sessionStorage
+              if (parsedData.routeName) {
+                setRouteNames(prev => ({ ...prev, A: parsedData.routeName! }));
+              }
               const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
               setRouteA({
                 stops: allStops,
@@ -1058,6 +1067,9 @@ export default function OrganizeRoutePage() {
           } catch (error) {
             console.error('❌ Erro ao carregar rota do Firestore:', error);
             // Fallback para dados do sessionStorage
+            if (parsedData.routeName) {
+              setRouteNames(prev => ({ ...prev, A: parsedData.routeName! }));
+            }
             const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
             setRouteA({
               stops: allStops,
@@ -3118,13 +3130,26 @@ export default function OrganizeRoutePage() {
     });
   };
 
-  const routesForTable = [
-      { key: 'A' as const, name: routeNames.A, data: routeA },
-      { key: 'B' as const, name: routeNames.B, data: routeB },
-  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo } => !!r.data)
+  // Rotas principais (A/B) + rotas dinâmicas
+  const mainRoutes = [
+      { key: 'A' as const, name: routeNames.A, data: routeA, isMainRoute: true },
+      { key: 'B' as const, name: routeNames.B, data: routeB, isMainRoute: true },
+  ].filter((r): r is { key: 'A' | 'B'; name: string; data: RouteInfo; isMainRoute: boolean } => !!r.data)
    .concat(
-     dynamicRoutes as any[]
+     dynamicRoutes.map(r => ({ ...r, isMainRoute: true })) as any[]
    );
+
+  // Rotas adicionais do período convertidas para o mesmo formato
+  const additionalRoutesForTable = additionalRoutes.map(route => ({
+    key: route.id,
+    name: route.name,
+    data: route.data,
+    isMainRoute: false,
+    additionalRouteData: route, // Mantém referência aos dados originais
+  }));
+
+  // Tabela unificada: rotas principais primeiro, depois as adicionais
+  const routesForTable = [...mainRoutes, ...additionalRoutesForTable] as any[];
 
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
@@ -3342,32 +3367,57 @@ export default function OrganizeRoutePage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                            {routesForTable.map(routeItem => (
+                            {routesForTable.map(routeItem => {
+                                const isAdditionalRoute = !routeItem.isMainRoute;
+                                const handleVisibilityToggle = isAdditionalRoute
+                                  ? () => toggleAdditionalRoute(routeItem.key)
+                                  : () => toggleRouteVisibility(routeItem.key);
+                                const isVisible = isAdditionalRoute
+                                  ? routeVisibility[routeItem.key] === true
+                                  : routeItem.data.visible;
+                                const handleRemove = isAdditionalRoute
+                                  ? (stop: PlaceValue, index: number) => handleTransferStopToAnotherRoute(stop, index, routeItem.key)
+                                  : (stop: PlaceValue, index: number) => handleRemoveFromRouteTimeline(stop, index, routeItem.key);
+
+                                // Período para rotas adicionais
+                                const additionalRoutePeriod = routeItem.additionalRouteData?.plannedDate ? (() => {
+                                  const hour = routeItem.additionalRouteData.plannedDate.getHours();
+                                  if (hour >= 8 && hour < 12) return 'Matutino';
+                                  if (hour >= 12 && hour < 19) return 'Vespertino';
+                                  return 'Noturno';
+                                })() : null;
+                                const period = isAdditionalRoute ? additionalRoutePeriod : routeData?.period;
+
+                                return (
                                 <TableRow key={routeItem.key} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                     <TableCell className="py-4 px-4 align-middle">
-                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleRouteVisibility(routeItem.key)}>
-                                            {routeItem.data.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleVisibilityToggle}>
+                                            {isVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                         </Button>
                                     </TableCell>
                                     <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
                                         <div className="flex items-center gap-2">
                                           <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                                          <EditableRouteName
-                                            name={routeItem.name}
-                                            onChange={(newName) =>
-                                                setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
-                                            }
-                                          />
+                                          {isAdditionalRoute ? (
+                                            <span>{routeItem.name}</span>
+                                          ) : (
+                                            <EditableRouteName
+                                              name={routeItem.name}
+                                              onChange={(newName) =>
+                                                  setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
+                                              }
+                                            />
+                                          )}
                                         </div>
                                     </TableCell>
                                     <TableCell className="py-4 px-4">
-                                      {routeData?.period && (
+                                      {period && (
                                         <Badge className={`${
-                                          routeData.period === 'Matutino' ? 'bg-blue-500 hover:bg-blue-600' :
-                                          routeData.period === 'Vespertino' ? 'bg-orange-500 hover:bg-orange-600' :
+                                          period === 'Matutino' ? 'bg-blue-500 hover:bg-blue-600' :
+                                          period === 'Vespertino' ? 'bg-orange-500 hover:bg-orange-600' :
                                           'bg-purple-500 hover:bg-purple-600'
                                         } text-white text-xs`}>
-                                          {routeData.period}
+                                          {period}
                                         </Badge>
                                       )}
                                     </TableCell>
@@ -3387,7 +3437,7 @@ export default function OrganizeRoutePage() {
                                             const id = String(stop.id ?? stop.placeId ?? "");
                                             if (id) mapApiRef.current?.openStopInfo(id);
                                         }}
-                                        onRemoveFromRoute={(stop, index) => handleRemoveFromRouteTimeline(stop, index, routeItem.key)}
+                                        onRemoveFromRoute={handleRemove}
                                         onDeleteStop={(stop, index) => handleDeleteStopFromTimeline(stop, index, routeItem.key)}
                                         onShowInfo={handleShowStopInfo}
                                         />
@@ -3415,7 +3465,8 @@ export default function OrganizeRoutePage() {
                                         )}
                                     </TableCell>
                                 </TableRow>
-                            ))}
+                                );
+                            })}
 
                             </TableBody>
                         </Table>
@@ -3426,133 +3477,6 @@ export default function OrganizeRoutePage() {
                      )
                   )}
                 </div>
-
-                {/* Additional Routes Section */}
-                {additionalRoutes.length > 0 && (
-                  <div className="bg-white dark:bg-slate-900 rounded-lg shadow-sm overflow-hidden mt-6">
-                    <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Outras Rotas do Período</h2>
-                        <Badge variant="secondary" className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold px-2 py-1">
-                          {additionalRoutes.length}
-                        </Badge>
-                      </div>
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-b border-slate-200 dark:border-slate-800 hover:bg-transparent">
-                          <TableHead className='w-12 py-3 px-4'></TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Rota</TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Período</TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Paradas</TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Distância</TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Tempo</TableHead>
-                          <TableHead className="py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400">Frete R$</TableHead>
-                          <TableHead style={{ width: `${timelineWidth}%` }} className='py-3 px-4 text-sm font-semibold text-slate-600 dark:text-slate-400 relative'>
-                            <div className="flex items-center justify-between">
-                              <div
-                                className="absolute left-0 top-0 bottom-0 w-1 bg-border hover:bg-primary hover:w-1.5 transition-all cursor-ew-resize flex items-center justify-center group z-10"
-                                onMouseDown={handleTimelineResizeStart}
-                              >
-                                <div className="absolute inset-y-0 -left-2 -right-2" />
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <svg width="8" height="24" viewBox="0 0 8 24" fill="none" className="text-muted-foreground">
-                                    <path d="M2 3v18M6 3v18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                                  </svg>
-                                </div>
-                              </div>
-                              <span>Linha do Tempo</span>
-                            </div>
-                          </TableHead>
-                          <TableHead className='w-32 py-3 px-4 text-right text-sm font-semibold text-slate-600 dark:text-slate-400'>Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {additionalRoutes.map((route, idx) => (
-                          <TableRow key={route.id} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                            <TableCell className="py-4 px-4 align-middle">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => toggleAdditionalRoute(route.id)}
-                              >
-                                {routeVisibility[route.id] ? (
-                                  <Eye className="h-4 w-4" />
-                                ) : (
-                                  <EyeOff className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TableCell>
-                            <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
-                              <div className="flex items-center gap-2">
-                                <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                                <span>{route.name}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-4 px-4">
-                              {route.plannedDate && (
-                                <Badge className={`${
-                                  (() => {
-                                    const hour = route.plannedDate.getHours();
-                                    if (hour >= 8 && hour < 12) return 'bg-blue-500 hover:bg-blue-600';
-                                    if (hour >= 12 && hour < 19) return 'bg-orange-500 hover:bg-orange-600';
-                                    return 'bg-purple-500 hover:bg-purple-600';
-                                  })()
-                                } text-white text-xs`}>
-                                  {(() => {
-                                    const hour = route.plannedDate.getHours();
-                                    if (hour >= 8 && hour < 12) return 'Matutino';
-                                    if (hour >= 12 && hour < 19) return 'Vespertino';
-                                    return 'Noturno';
-                                  })()}
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[route.id] || route.data.stops).length}</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(route.data.distanceMeters)} km</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(route.data.duration)}</TableCell>
-                            <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(route.data.distanceMeters)}</TableCell>
-                            <TableCell className="py-4 px-4">
-                              <RouteTimeline
-                                key={`timeline-${route.id}-${(pendingEdits[route.id] || route.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
-                                routeKey={route.id}
-                                stops={pendingEdits[route.id] || route.data.stops}
-                                originalStops={pendingEdits[route.id] ? route.data.stops : undefined}
-                                color={route.data.color}
-                                dragDelay={DRAG_DELAY}
-                                onStopClick={(stop) => {
-                                  const id = String(stop.id ?? stop.placeId ?? "");
-                                  if (id) mapApiRef.current?.openStopInfo(id);
-                                }}
-                                onRemoveFromRoute={(stop, index) => handleTransferStopToAnotherRoute(stop, index, route.id)}
-                                onDeleteStop={(stop, index) => handleDeleteStopFromTimeline(stop, index, route.id)}
-                                onShowInfo={handleShowStopInfo}
-                              />
-                            </TableCell>
-                            <TableCell className="py-4 px-4 text-right">
-                              {pendingEdits[route.id] ? (
-                                <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
-                                  {pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[route.id]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
-                                </Badge>
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled
-                                  className="border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
-                                >
-                                  <Wand2 className="mr-2 h-4 w-4" />
-                                  Otimizar
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
             </TabsContent>
 
             <TabsContent value="assign" className="m-0">
