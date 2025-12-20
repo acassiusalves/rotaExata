@@ -105,7 +105,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db, functions } from '@/lib/firebase/client';
 import { generateRouteCode } from '@/lib/firebase/route-code';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -1633,12 +1633,33 @@ export default function OrganizeRoutePage() {
           color: overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200',
           visible: true
         });
+
+        // Se for uma rota existente, persistir no Firestore
+        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
+          try {
+            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            await updateDoc(routeRef, {
+              stops: newTargetStops,
+              encodedPolyline: newRouteInfo.encodedPolyline,
+              distanceMeters: newRouteInfo.distanceMeters,
+              duration: newRouteInfo.duration,
+            });
+            console.log('✅ [handleDragEnd] Firestore atualizado com sucesso!');
+          } catch (error) {
+            console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Aviso',
+              description: 'O ponto foi adicionado localmente, mas pode não sincronizar com o app do motorista.',
+            });
+          }
+        }
       }
 
       const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
       toast({
         title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.`,
+        description: `O serviço foi adicionado à ${routeName}.${routeData.isExistingRoute ? ' O motorista receberá a atualização.' : ''}`,
       });
 
       return;
@@ -1898,6 +1919,8 @@ export default function OrganizeRoutePage() {
     if (!routeData) return;
 
     const routeToSave = routeKey === 'A' ? routeA : routeB;
+    const otherRoute = routeKey === 'A' ? routeB : routeA;
+    const otherRouteKey = routeKey === 'A' ? 'B' : 'A';
     const routeName = routeNames[routeKey];
     const driverId = assignedDrivers[routeKey];
 
@@ -1915,55 +1938,58 @@ export default function OrganizeRoutePage() {
     try {
         const driver = availableDrivers.find(d => d.id === driverId);
         const routeCode = await generateRouteCode();
+        const isDraft = routeData.isDraft && routeData.draftRouteId;
 
-        // Se for um rascunho E for a rota A, atualizar o documento existente
-        // Rota B sempre cria um novo documento, pois só existe um rascunho
-        const shouldUpdateDraft = routeData.isDraft && routeData.draftRouteId && routeKey === 'A';
+        // Sempre criar um novo documento para a rota despachada
+        const routeDoc = {
+            code: routeCode,
+            name: routeName,
+            status: 'dispatched',
+            createdAt: serverTimestamp(),
+            plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+            origin: routeData.origin,
+            stops: routeToSave.stops,
+            distanceMeters: routeToSave.distanceMeters,
+            duration: routeToSave.duration,
+            encodedPolyline: routeToSave.encodedPolyline,
+            color: routeToSave.color,
+            driverId: driverId,
+            driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+        };
 
-        if (shouldUpdateDraft) {
-            const draftRef = doc(db, 'routes', routeData.draftRouteId);
-            await updateDoc(draftRef, {
-                code: routeCode,
-                name: routeName,
-                status: 'dispatched',
-                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
-                origin: routeData.origin,
-                stops: routeToSave.stops,
-                distanceMeters: routeToSave.distanceMeters,
-                duration: routeToSave.duration,
-                encodedPolyline: routeToSave.encodedPolyline,
-                color: routeToSave.color,
-                driverId: driverId,
-                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
-            });
+        await addDoc(collection(db, "routes"), routeDoc);
 
-            toast({
-                title: 'Rota Despachada!',
-                description: `A ${routeName} foi enviada para ${driver?.name}.`,
-            });
-        } else {
-            const routeDoc = {
-                code: routeCode,
-                name: routeName,
-                status: 'dispatched',
-                createdAt: serverTimestamp(),
-                plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
-                origin: routeData.origin,
-                stops: routeToSave.stops,
-                distanceMeters: routeToSave.distanceMeters,
-                duration: routeToSave.duration,
-                encodedPolyline: routeToSave.encodedPolyline,
-                color: routeToSave.color,
-                driverId: driverId,
-                driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
-            };
+        toast({
+            title: 'Rota Despachada!',
+            description: `A ${routeName} foi enviada para ${driver?.name}.`,
+        });
 
-            await addDoc(collection(db, "routes"), routeDoc);
+        // Se era um draft, precisamos lidar com o draft original
+        if (isDraft) {
+            // Se ainda existe outra rota pendente, atualizar o draft para conter apenas ela
+            if (otherRoute) {
+                const draftRef = doc(db, 'routes', routeData.draftRouteId!);
+                await updateDoc(draftRef, {
+                    name: routeNames[otherRouteKey],
+                    stops: otherRoute.stops,
+                    distanceMeters: otherRoute.distanceMeters,
+                    duration: otherRoute.duration,
+                    encodedPolyline: otherRoute.encodedPolyline,
+                    color: otherRoute.color,
+                });
 
-            toast({
-                title: 'Rota Despachada!',
-                description: `A ${routeName} foi enviada para ${driver?.name}.`,
-            });
+                // Atualizar sessionStorage para refletir que agora só tem uma rota
+                const updatedRouteData = {
+                    ...routeData,
+                    stops: otherRoute.stops, // Agora só tem os stops da rota restante
+                };
+                sessionStorage.setItem('newRouteData', JSON.stringify(updatedRouteData));
+            } else {
+                // Não há outra rota, deletar o draft
+                const draftRef = doc(db, 'routes', routeData.draftRouteId!);
+                await deleteDoc(draftRef);
+                sessionStorage.removeItem('newRouteData');
+            }
         }
 
         // Remove the dispatched route from state
