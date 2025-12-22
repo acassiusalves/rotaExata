@@ -1919,8 +1919,6 @@ export default function OrganizeRoutePage() {
     if (!routeData) return;
 
     const routeToSave = routeKey === 'A' ? routeA : routeB;
-    const otherRoute = routeKey === 'A' ? routeB : routeA;
-    const otherRouteKey = routeKey === 'A' ? 'B' : 'A';
     const routeName = routeNames[routeKey];
     const driverId = assignedDrivers[routeKey];
 
@@ -1940,7 +1938,7 @@ export default function OrganizeRoutePage() {
         const routeCode = await generateRouteCode();
         const isDraft = routeData.isDraft && routeData.draftRouteId;
 
-        // Sempre criar um novo documento para a rota despachada
+        // Criar um novo documento para a rota despachada
         const routeDoc = {
             code: routeCode,
             name: routeName,
@@ -1964,32 +1962,24 @@ export default function OrganizeRoutePage() {
             description: `A ${routeName} foi enviada para ${driver?.name}.`,
         });
 
-        // Se era um draft, precisamos lidar com o draft original
+        // Se era um draft, deletar o documento original do draft
+        // Cada rota despachada cria seu próprio documento, então o draft original deve ser removido
         if (isDraft) {
-            // Se ainda existe outra rota pendente, atualizar o draft para conter apenas ela
-            if (otherRoute) {
+            try {
                 const draftRef = doc(db, 'routes', routeData.draftRouteId!);
-                await updateDoc(draftRef, {
-                    name: routeNames[otherRouteKey],
-                    stops: otherRoute.stops,
-                    distanceMeters: otherRoute.distanceMeters,
-                    duration: otherRoute.duration,
-                    encodedPolyline: otherRoute.encodedPolyline,
-                    color: otherRoute.color,
-                });
-
-                // Atualizar sessionStorage para refletir que agora só tem uma rota
-                const updatedRouteData = {
-                    ...routeData,
-                    stops: otherRoute.stops, // Agora só tem os stops da rota restante
-                };
-                sessionStorage.setItem('newRouteData', JSON.stringify(updatedRouteData));
-            } else {
-                // Não há outra rota, deletar o draft
-                const draftRef = doc(db, 'routes', routeData.draftRouteId!);
-                await deleteDoc(draftRef);
-                sessionStorage.removeItem('newRouteData');
+                // Verificar se o draft ainda existe antes de tentar deletar
+                const draftSnap = await getDoc(draftRef);
+                if (draftSnap.exists()) {
+                    await deleteDoc(draftRef);
+                    console.log('✅ [handleDispatchRoute] Draft deletado:', routeData.draftRouteId);
+                }
+            } catch (deleteError) {
+                // Se falhar ao deletar (pode já ter sido deletado pela outra rota), apenas logar
+                console.log('ℹ️ [handleDispatchRoute] Draft já foi deletado ou não existe');
             }
+
+            // Limpar sessionStorage - as rotas agora são documentos separados
+            sessionStorage.removeItem('newRouteData');
         }
 
         // Remove the dispatched route from state
