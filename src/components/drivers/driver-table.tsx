@@ -24,7 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Driver, DriverStatus } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull, LogOut } from 'lucide-react';
+import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull, LogOut, Clock } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DeviceInfo } from '@/lib/types';
@@ -54,6 +54,38 @@ function getConnectionColor(type: string | undefined) {
   return 'text-orange-500';
 }
 
+// Helper para formatar tempo relativo
+function formatRelativeTime(date: Date | undefined | null): string {
+  if (!date) return 'N/A';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSecs < 60) return 'agora';
+  if (diffMins < 60) return `${diffMins}min atrás`;
+  if (diffHours < 24) return `${diffHours}h atrás`;
+  if (diffDays < 7) return `${diffDays}d atrás`;
+
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+// Helper para cor do tempo baseado na idade
+function getTimeColor(date: Date | undefined | null): string {
+  if (!date) return 'text-muted-foreground';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 1000 / 60);
+
+  if (diffMins <= 2) return 'text-green-500';  // Atualizado há menos de 2 min
+  if (diffMins <= 10) return 'text-yellow-500'; // Atualizado há menos de 10 min
+  return 'text-muted-foreground';  // Mais antigo
+}
+
 const statusMap: Record<
   DriverStatus,
   { label: string; className: string }
@@ -62,6 +94,14 @@ const statusMap: Record<
   online: { label: 'Online', className: 'bg-emerald-500' },
   busy: { label: 'Ocupado', className: 'bg-yellow-500' },
   offline: { label: 'Offline', className: 'bg-gray-500' },
+};
+
+// Prioridade para ordenação: online/available primeiro, offline por último
+const statusPriority: Record<DriverStatus, number> = {
+  online: 1,
+  available: 2,
+  busy: 3,
+  offline: 4,
 };
 
 const getDriverColumns = (
@@ -86,7 +126,15 @@ const getDriverColumns = (
   },
   {
     accessorKey: 'status',
-    header: 'Status',
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+      >
+        Status
+        <ChevronsUpDown className="ml-2 h-4 w-4" />
+      </Button>
+    ),
     cell: ({ row }) => {
       const status = row.getValue('status') as DriverStatus;
       const { label, className } = statusMap[status] || { label: 'Offline', className: 'bg-gray-400' };
@@ -97,6 +145,13 @@ const getDriverColumns = (
           <span>{label}</span>
         </div>
       );
+    },
+    sortingFn: (rowA, rowB) => {
+      const statusA = rowA.getValue('status') as DriverStatus;
+      const statusB = rowB.getValue('status') as DriverStatus;
+      const priorityA = statusPriority[statusA] || 99;
+      const priorityB = statusPriority[statusB] || 99;
+      return priorityA - priorityB;
     },
   },
   {
@@ -139,11 +194,21 @@ const getDriverColumns = (
     header: 'Dispositivo',
     cell: ({ row }) => {
       const deviceInfo = row.original.deviceInfo as DeviceInfo | undefined;
+      const lastSeenAt = row.original.lastSeenAt;
 
       if (!deviceInfo) {
         return (
-          <div className="text-xs text-muted-foreground">
-            Sem dados
+          <div className="flex flex-col gap-1">
+            <div className="text-xs text-muted-foreground">
+              Sem dados
+            </div>
+            {/* Última atualização mesmo sem deviceInfo */}
+            {lastSeenAt && (
+              <div className={`flex items-center gap-1 ${getTimeColor(lastSeenAt)}`}>
+                <Clock className="h-3 w-3" />
+                <span className="text-xs">{formatRelativeTime(lastSeenAt)}</span>
+              </div>
+            )}
           </div>
         );
       }
@@ -151,6 +216,7 @@ const getDriverColumns = (
       const BatteryIcon = getBatteryIcon(deviceInfo.batteryLevel, deviceInfo.batteryCharging);
       const batteryColor = getBatteryColor(deviceInfo.batteryLevel);
       const connectionColor = getConnectionColor(deviceInfo.connectionEffectiveType);
+      const timeColor = getTimeColor(lastSeenAt);
 
       return (
         <TooltipProvider>
@@ -208,6 +274,19 @@ const getDriverColumns = (
                 </TooltipContent>
               </Tooltip>
             </div>
+
+            {/* Última atualização */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={`flex items-center gap-1 ${timeColor}`}>
+                  <Clock className="h-3 w-3" />
+                  <span className="text-xs">{formatRelativeTime(lastSeenAt)}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Última atualização: {lastSeenAt?.toLocaleString('pt-BR') || 'N/A'}</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </TooltipProvider>
       );
@@ -255,7 +334,10 @@ export function DriverTable({
   onDeleteClick: (driver: Driver) => void,
   onForceLogoutClick: (driver: Driver) => void
 }) {
-  const [sorting, setSorting] = React.useState<SortingState>([]);
+  // Ordenação padrão: status ascendente (online/available primeiro, offline por último)
+  const [sorting, setSorting] = React.useState<SortingState>([
+    { id: 'status', desc: false }
+  ]);
 
   const columns = React.useMemo(() => getDriverColumns(onDeleteClick, onForceLogoutClick), [onDeleteClick, onForceLogoutClick]);
 

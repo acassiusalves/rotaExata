@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import {
@@ -30,6 +30,7 @@ export default function DriversPage() {
   const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const [driverToLogout, setDriverToLogout] = React.useState<Driver | null>(null);
+  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -121,6 +122,32 @@ export default function DriversPage() {
     }
   };
 
+  const handleRefreshStatus = async () => {
+    setIsRefreshingStatus(true);
+
+    try {
+      const forceCleanupFn = httpsCallable<void, { ok: boolean; updated: number; message: string }>(
+        functions,
+        'forceCleanupOfflineDrivers'
+      );
+      const result = await forceCleanupFn();
+
+      toast({
+        title: 'Status Atualizado!',
+        description: result.data.message,
+      });
+    } catch (error: any) {
+      console.error('Error refreshing status:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Atualizar',
+        description: error.message || 'Não foi possível atualizar o status dos motoristas.',
+      });
+    } finally {
+      setIsRefreshingStatus(false);
+    }
+  };
+
   return (
     <>
       <div className="space-y-4">
@@ -131,10 +158,20 @@ export default function DriversPage() {
               Gerencie sua equipe de motoristas.
             </p>
           </div>
-          <Button onClick={() => setIsAddDialogOpen(true)}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Adicionar Motorista
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleRefreshStatus}
+              disabled={isRefreshingStatus}
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
+              {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
+            </Button>
+            <Button onClick={() => setIsAddDialogOpen(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Adicionar Motorista
+            </Button>
+          </div>
         </div>
         <Card>
           <CardContent className="pt-6">

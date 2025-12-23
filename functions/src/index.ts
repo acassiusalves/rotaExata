@@ -671,14 +671,14 @@ export const syncAuthUsers=onCall(
     if (!email) {
       throw new HttpsError("invalid-argument", "O email é obrigatório.");
     }
-    
+
     const auth=getAuth();
     const db=getFirestore();
-    
+
     try {
       const userRecord = await auth.getUserByEmail(email);
       const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
-      
+
       await db.collection("users").doc(userRecord.uid).set(
         {
           email: userRecord.email,
@@ -688,7 +688,7 @@ export const syncAuthUsers=onCall(
         },
         {merge:true}
       );
-      
+
       return {ok:true, synced: 1, uid: userRecord.uid, role: role};
     } catch (error: any) {
       console.error(`Failed to sync user ${email}:`, error);
@@ -698,5 +698,91 @@ export const syncAuthUsers=onCall(
       const msg = error instanceof Error ? error.message : "Falha ao sincronizar usuário.";
       throw new HttpsError("internal", msg);
     }
+  }
+);
+
+/* ========== cleanupOfflineDrivers (scheduled) ========== */
+// Função scheduled que roda a cada 2 minutos para marcar motoristas inativos como offline
+export const cleanupOfflineDrivers = functionsV1
+  .region("southamerica-east1")
+  .pubsub.schedule("every 2 minutes")
+  .onRun(async () => {
+    const db = getFirestore();
+    const now = new Date();
+    const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
+
+    try {
+      // Buscar motoristas online com lastSeenAt antigo
+      const staleDrivers = await db
+        .collection("users")
+        .where("role", "==", "driver")
+        .where("status", "in", ["online", "available"])
+        .where("lastSeenAt", "<", twoMinutesAgo)
+        .get();
+
+      if (staleDrivers.empty) {
+        console.log("✅ Nenhum motorista stale encontrado");
+        return null;
+      }
+
+      // Atualizar em batch
+      const batch = db.batch();
+      staleDrivers.docs.forEach((doc) => {
+        batch.update(doc.ref, { status: "offline" });
+        console.log(`📴 Marcando motorista ${doc.id} como offline`);
+      });
+
+      await batch.commit();
+      console.log(`✅ ${staleDrivers.size} motorista(s) marcado(s) como offline`);
+      return null;
+    } catch (error) {
+      console.error("❌ Erro ao limpar motoristas offline:", error);
+      return null;
+    }
+  });
+
+/* ========== forceCleanupOfflineDrivers (callable) ========== */
+// Função callable para limpeza manual de motoristas offline
+export const forceCleanupOfflineDrivers = onCall(
+  { region: "southamerica-east1" },
+  async () => {
+    const db = getFirestore();
+    const now = new Date();
+    const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
+
+    // Buscar todos os motoristas para filtragem em memória (evita problemas de índice)
+    const allDrivers = await db
+      .collection("users")
+      .where("role", "==", "driver")
+      .get();
+
+    const driversToUpdate: string[] = [];
+
+    allDrivers.docs.forEach((doc) => {
+      const data = doc.data();
+      const lastSeen = data.lastSeenAt?.toDate();
+      const status = data.status;
+
+      if ((status === "online" || status === "available") && lastSeen && lastSeen < twoMinutesAgo) {
+        driversToUpdate.push(doc.id);
+      }
+    });
+
+    if (driversToUpdate.length === 0) {
+      return { ok: true, updated: 0, message: "Nenhum motorista precisava ser atualizado" };
+    }
+
+    const batch = db.batch();
+    driversToUpdate.forEach((docId) => {
+      batch.update(db.collection("users").doc(docId), { status: "offline" });
+    });
+
+    await batch.commit();
+
+    return {
+      ok: true,
+      updated: driversToUpdate.length,
+      message: `${driversToUpdate.length} motorista(s) marcado(s) como offline`
+    };
   }
 );
