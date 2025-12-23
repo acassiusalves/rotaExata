@@ -917,18 +917,26 @@ export default function NewRoutePage() {
         }
       });
 
-      // Salvar rota como rascunho no Firestore
+      // Salvar rota como rascunho COMPLETO no Firestore
+      // Isso garante que todos os dados estejam disponíveis em qualquer computador
       const draftDoc = {
         name: draftName,
         status: 'draft',
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         plannedDate: Timestamp.fromDate(plannedDate),
         origin: cleanedOrigin,
         stops: cleanedStops,
+        // Dados adicionais para persistência completa
+        routeDate: routeDate?.toISOString() || '',
+        routeTime: routeTime,
         // Campos que serão preenchidos ao despachar
         distanceMeters: 0,
         duration: '0s',
         encodedPolyline: '',
+        // Array para armazenar rotas organizadas (A, B, C, etc.)
+        // Será preenchido na página de organização
+        organizedRoutes: null,
       };
 
       const docRef = await addDoc(collection(db, 'routes'), draftDoc);

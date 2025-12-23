@@ -409,17 +409,15 @@ export default function RoutesPage() {
   }
 
   const handleEditDraft = (route: RouteDocument) => {
-    const routeDate = route.plannedDate.toDate();
+    // Simplificado: apenas salvar o ID do rascunho
+    // Os dados completos serão carregados do Firestore na página de organização
+    // Isso garante consistência entre diferentes computadores
     const routeData = {
-      origin: route.origin,
-      stops: route.stops,
-      routeDate: routeDate.toISOString(),
-      routeTime: format(routeDate, 'HH:mm'),
       isDraft: true,
       draftRouteId: route.id,
     };
     sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
-    router.push('/routes/organize'); // Redirecionar para página de organização
+    router.push('/routes/organize');
   };
   
   // Filter routes based on search query

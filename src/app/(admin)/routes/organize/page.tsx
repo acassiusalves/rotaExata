@@ -880,64 +880,153 @@ export default function OrganizeRoutePage() {
 
         loadRouteFromFirestore();
       } else if (parsedData.isDraft && parsedData.draftRouteId) {
-        // Rota rascunho - usar dados do sessionStorage (já salvos no Firestore)
-        // Os dados já estão corretos no sessionStorage, apenas dividir geograficamente
-        const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
-        const MAX_STOPS_PER_ROUTE = 25;
-
-        // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
-        const stopsNorte = allStops.filter(stop => stop.lat >= parsedData.origin.lat);
-        const stopsSul = allStops.filter(stop => stop.lat < parsedData.origin.lat);
-
-        // Ordenar cada grupo por proximidade, priorizando pontos com preferência de horário
-        const sortedNorte = sortByProximityWithPriority(stopsNorte, parsedData.origin);
-        const sortedSul = sortByProximityWithPriority(stopsSul, parsedData.origin);
-
-        // Determinar qual grupo vai para qual rota baseado no tamanho
-        // Rota A fica com o grupo maior (ou Norte se igual)
-        let routeAStops: PlaceValue[];
-        let routeBStops: PlaceValue[];
-
-        if (sortedNorte.length >= sortedSul.length) {
-          routeAStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
-          routeBStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
-        } else {
-          routeAStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
-          routeBStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
-        }
-
-        // Calcular rotas
-        const calculateRoutes = async () => {
+        // Rota rascunho - CARREGAR DADOS DO FIRESTORE (não do sessionStorage)
+        // Isso garante que os dados sejam consistentes entre diferentes computadores
+        const loadDraftFromFirestore = async () => {
           setIsLoading(true);
           try {
-            if (routeAStops.length > 0) {
-              const routeAInfo = await computeRoute(parsedData.origin, routeAStops);
-              if (routeAInfo) {
-                setRouteA({ ...routeAInfo, color: '#e60000', visible: true });
-              }
+            const draftRef = doc(db, 'routes', parsedData.draftRouteId!);
+            const draftSnap = await getDoc(draftRef);
+
+            if (!draftSnap.exists()) {
+              console.error('❌ Rascunho não encontrado no Firestore');
+              toast({
+                variant: 'destructive',
+                title: 'Rascunho não encontrado',
+                description: 'O rascunho pode ter sido deletado ou despachado.',
+              });
+              router.push('/routes');
+              return;
             }
 
-            if (routeBStops.length > 0) {
-              const routeBInfo = await computeRoute(parsedData.origin, routeBStops);
-              if (routeBInfo) {
-                setRouteB({ ...routeBInfo, color: '#0066cc', visible: true });
+            const draftData = draftSnap.data();
+            console.log('📄 Rascunho carregado do Firestore:', draftData);
+
+            // Atualizar routeData com dados do Firestore
+            const updatedRouteData: RouteData = {
+              origin: draftData.origin,
+              stops: draftData.stops,
+              routeDate: draftData.routeDate || parsedData.routeDate,
+              routeTime: draftData.routeTime || parsedData.routeTime,
+              isDraft: true,
+              draftRouteId: parsedData.draftRouteId,
+            };
+            setRouteData(updatedRouteData);
+
+            // Verificar se já tem rotas organizadas salvas
+            if (draftData.organizedRoutes && draftData.organizedRoutes.length > 0) {
+              console.log('📊 Restaurando rotas organizadas:', draftData.organizedRoutes.length);
+
+              // Restaurar rotas salvas
+              for (const savedRoute of draftData.organizedRoutes) {
+                if (savedRoute.dispatched) continue; // Pular rotas já despachadas
+
+                if (savedRoute.key === 'A') {
+                  setRouteA({
+                    stops: savedRoute.stops,
+                    distanceMeters: savedRoute.info.distanceMeters,
+                    duration: savedRoute.info.duration,
+                    encodedPolyline: savedRoute.info.encodedPolyline,
+                    color: savedRoute.info.color || '#e60000',
+                    visible: true,
+                  });
+                } else if (savedRoute.key === 'B') {
+                  setRouteB({
+                    stops: savedRoute.stops,
+                    distanceMeters: savedRoute.info.distanceMeters,
+                    duration: savedRoute.info.duration,
+                    encodedPolyline: savedRoute.info.encodedPolyline,
+                    color: savedRoute.info.color || '#0066cc',
+                    visible: true,
+                  });
+                } else {
+                  // Rotas dinâmicas (C, D, E, etc.)
+                  setDynamicRoutes(prev => [...prev, {
+                    key: savedRoute.key,
+                    name: savedRoute.name || `Rota ${savedRoute.key}`,
+                    data: {
+                      stops: savedRoute.stops,
+                      distanceMeters: savedRoute.info.distanceMeters,
+                      duration: savedRoute.info.duration,
+                      encodedPolyline: savedRoute.info.encodedPolyline,
+                      color: savedRoute.info.color,
+                      visible: true,
+                    },
+                    color: savedRoute.info.color,
+                  }]);
+                }
               }
+
+              // Restaurar nomes das rotas se existirem
+              if (draftData.routeNames) {
+                setRouteNames(draftData.routeNames);
+              }
+
+              setIsLoading(false);
             } else {
-              setRouteB(null);
-            }
+              // Primeira vez organizando - dividir geograficamente
+              console.log('🗺️ Primeira organização - dividindo rotas geograficamente');
+              const allStops = draftData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+              const MAX_STOPS_PER_ROUTE = 25;
 
-            // Paradas que não couberam em nenhuma rota
-            const extraNorte = sortedNorte.slice(MAX_STOPS_PER_ROUTE);
-            const extraSul = sortedSul.slice(MAX_STOPS_PER_ROUTE);
-            if (extraNorte.length > 0 || extraSul.length > 0) {
-              setUnassignedStops([...extraNorte, ...extraSul]);
+              // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
+              const stopsNorte = allStops.filter((stop: PlaceValue) => stop.lat >= draftData.origin.lat);
+              const stopsSul = allStops.filter((stop: PlaceValue) => stop.lat < draftData.origin.lat);
+
+              // Ordenar cada grupo por proximidade, priorizando pontos com preferência de horário
+              const sortedNorte = sortByProximityWithPriority(stopsNorte, draftData.origin);
+              const sortedSul = sortByProximityWithPriority(stopsSul, draftData.origin);
+
+              // Determinar qual grupo vai para qual rota baseado no tamanho
+              let routeAStops: PlaceValue[];
+              let routeBStops: PlaceValue[];
+
+              if (sortedNorte.length >= sortedSul.length) {
+                routeAStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
+                routeBStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
+              } else {
+                routeAStops = sortedSul.slice(0, MAX_STOPS_PER_ROUTE);
+                routeBStops = sortedNorte.slice(0, MAX_STOPS_PER_ROUTE);
+              }
+
+              // Calcular rotas
+              if (routeAStops.length > 0) {
+                const routeAInfo = await computeRoute(draftData.origin, routeAStops);
+                if (routeAInfo) {
+                  setRouteA({ ...routeAInfo, color: '#e60000', visible: true });
+                }
+              }
+
+              if (routeBStops.length > 0) {
+                const routeBInfo = await computeRoute(draftData.origin, routeBStops);
+                if (routeBInfo) {
+                  setRouteB({ ...routeBInfo, color: '#0066cc', visible: true });
+                }
+              } else {
+                setRouteB(null);
+              }
+
+              // Paradas que não couberam em nenhuma rota
+              const extraNorte = sortedNorte.slice(MAX_STOPS_PER_ROUTE);
+              const extraSul = sortedSul.slice(MAX_STOPS_PER_ROUTE);
+              if (extraNorte.length > 0 || extraSul.length > 0) {
+                setUnassignedStops([...extraNorte, ...extraSul]);
+              }
+
+              setIsLoading(false);
             }
-          } finally {
+          } catch (error) {
+            console.error('❌ Erro ao carregar rascunho do Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Erro ao carregar rascunho',
+              description: 'Não foi possível carregar os dados do rascunho.',
+            });
             setIsLoading(false);
           }
         };
 
-        calculateRoutes();
+        loadDraftFromFirestore();
       } else {
         // Rota nova - dividir geograficamente usando origem como referência
         const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
@@ -1830,6 +1919,110 @@ export default function OrganizeRoutePage() {
     });
   };
 
+  // Função para persistir todas as rotas organizadas no Firestore
+  // Isso garante que a divisão de rotas seja salva e possa ser recuperada em outro computador
+  const persistOrganizedRoutes = React.useCallback(async () => {
+    if (!routeData?.isDraft || !routeData?.draftRouteId) {
+      return; // Não persiste se não for rascunho
+    }
+
+    // Verificar se temos pelo menos uma rota para persistir
+    if (!routeA && !routeB && dynamicRoutes.length === 0) {
+      return;
+    }
+
+    try {
+      const organizedRoutes: Array<{
+        key: string;
+        name: string;
+        stops: PlaceValue[];
+        info: {
+          distanceMeters: number;
+          duration: string;
+          encodedPolyline: string;
+          color: string;
+        };
+        dispatched: boolean;
+      }> = [];
+
+      // Adicionar Rota A
+      if (routeA) {
+        organizedRoutes.push({
+          key: 'A',
+          name: routeNames.A,
+          stops: routeA.stops,
+          info: {
+            distanceMeters: routeA.distanceMeters,
+            duration: routeA.duration,
+            encodedPolyline: routeA.encodedPolyline,
+            color: routeA.color || '#e60000',
+          },
+          dispatched: false,
+        });
+      }
+
+      // Adicionar Rota B
+      if (routeB) {
+        organizedRoutes.push({
+          key: 'B',
+          name: routeNames.B,
+          stops: routeB.stops,
+          info: {
+            distanceMeters: routeB.distanceMeters,
+            duration: routeB.duration,
+            encodedPolyline: routeB.encodedPolyline,
+            color: routeB.color || '#0066cc',
+          },
+          dispatched: false,
+        });
+      }
+
+      // Adicionar rotas dinâmicas (C, D, E, etc.)
+      for (const dynRoute of dynamicRoutes) {
+        if (dynRoute.data && dynRoute.data.stops.length > 0) {
+          organizedRoutes.push({
+            key: dynRoute.key,
+            name: dynRoute.name,
+            stops: dynRoute.data.stops,
+            info: {
+              distanceMeters: dynRoute.data.distanceMeters,
+              duration: dynRoute.data.duration,
+              encodedPolyline: dynRoute.data.encodedPolyline,
+              color: dynRoute.color,
+            },
+            dispatched: false,
+          });
+        }
+      }
+
+      // Atualizar documento do rascunho no Firestore
+      const draftRef = doc(db, 'routes', routeData.draftRouteId);
+      await updateDoc(draftRef, {
+        organizedRoutes,
+        routeNames,
+        updatedAt: serverTimestamp(),
+      });
+
+      console.log('✅ Rotas organizadas persistidas no Firestore:', organizedRoutes.length);
+    } catch (error) {
+      console.error('❌ Erro ao persistir rotas organizadas:', error);
+    }
+  }, [routeData, routeA, routeB, dynamicRoutes, routeNames]);
+
+  // useEffect para persistir automaticamente quando as rotas mudam (com debounce)
+  React.useEffect(() => {
+    if (!routeData?.isDraft || !routeData?.draftRouteId || isLoading) {
+      return;
+    }
+
+    // Debounce de 2 segundos para evitar múltiplas escritas
+    const timeoutId = setTimeout(() => {
+      persistOrganizedRoutes();
+    }, 2000);
+
+    return () => clearTimeout(timeoutId);
+  }, [routeA, routeB, dynamicRoutes, routeNames, persistOrganizedRoutes, routeData, isLoading]);
+
   const handleOptimizeSingleRoute = async (routeKey: 'A' | 'B') => {
     const routeToOptimize = routeKey === 'A' ? routeA : routeB;
     const setter = routeKey === 'A' ? setRouteA : setRouteB;
@@ -1962,24 +2155,43 @@ export default function OrganizeRoutePage() {
             description: `A ${routeName} foi enviada para ${driver?.name}.`,
         });
 
-        // Se era um draft, deletar o documento original do draft
-        // Cada rota despachada cria seu próprio documento, então o draft original deve ser removido
+        // Se era um draft, marcar a rota como despachada no array
+        // Só deletar o draft quando TODAS as rotas forem despachadas
         if (isDraft) {
             try {
                 const draftRef = doc(db, 'routes', routeData.draftRouteId!);
-                // Verificar se o draft ainda existe antes de tentar deletar
                 const draftSnap = await getDoc(draftRef);
-                if (draftSnap.exists()) {
-                    await deleteDoc(draftRef);
-                    console.log('✅ [handleDispatchRoute] Draft deletado:', routeData.draftRouteId);
-                }
-            } catch (deleteError) {
-                // Se falhar ao deletar (pode já ter sido deletado pela outra rota), apenas logar
-                console.log('ℹ️ [handleDispatchRoute] Draft já foi deletado ou não existe');
-            }
 
-            // Limpar sessionStorage - as rotas agora são documentos separados
-            sessionStorage.removeItem('newRouteData');
+                if (draftSnap.exists()) {
+                    const draftData = draftSnap.data();
+                    const organizedRoutes = draftData.organizedRoutes || [];
+
+                    // Marcar a rota específica como despachada
+                    const updatedRoutes = organizedRoutes.map((r: any) =>
+                        r.key === routeKey ? { ...r, dispatched: true } : r
+                    );
+
+                    // Verificar se TODAS as rotas foram despachadas
+                    const allDispatched = updatedRoutes.every((r: any) => r.dispatched);
+
+                    if (allDispatched) {
+                        // Todas as rotas despachadas - deletar o rascunho
+                        await deleteDoc(draftRef);
+                        console.log('✅ [handleDispatchRoute] Todas rotas despachadas - Draft deletado:', routeData.draftRouteId);
+                        sessionStorage.removeItem('newRouteData');
+                    } else {
+                        // Ainda tem rotas pendentes - apenas atualizar o array
+                        await updateDoc(draftRef, {
+                            organizedRoutes: updatedRoutes,
+                            updatedAt: serverTimestamp(),
+                        });
+                        console.log('✅ [handleDispatchRoute] Rota', routeKey, 'marcada como despachada. Rotas restantes:',
+                            updatedRoutes.filter((r: any) => !r.dispatched).length);
+                    }
+                }
+            } catch (updateError) {
+                console.error('❌ [handleDispatchRoute] Erro ao atualizar draft:', updateError);
+            }
         }
 
         // Remove the dispatched route from state
