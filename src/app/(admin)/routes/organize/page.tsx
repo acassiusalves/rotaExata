@@ -1945,8 +1945,8 @@ export default function OrganizeRoutePage() {
         dispatched: boolean;
       }> = [];
 
-      // Adicionar Rota A
-      if (routeA) {
+      // Adicionar Rota A (somente se tiver stops)
+      if (routeA && routeA.stops.length > 0) {
         organizedRoutes.push({
           key: 'A',
           name: routeNames.A,
@@ -1961,8 +1961,8 @@ export default function OrganizeRoutePage() {
         });
       }
 
-      // Adicionar Rota B
-      if (routeB) {
+      // Adicionar Rota B (somente se tiver stops)
+      if (routeB && routeB.stops.length > 0) {
         organizedRoutes.push({
           key: 'B',
           name: routeNames.B,

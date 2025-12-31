@@ -16,6 +16,7 @@ import {
   RadioTower,
   XCircle,
   Info,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { db, storage } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp, updateDoc, increment } from 'firebase/firestore';
+import { doc, onSnapshot, Timestamp, updateDoc, increment, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -45,6 +46,7 @@ type RouteDocument = RouteInfo & {
   id: string;
   name: string;
   status: 'dispatched' | 'in_progress' | 'completed';
+  driverId?: string;
   driverInfo: {
     name: string;
     vehicle: string;
@@ -52,6 +54,7 @@ type RouteDocument = RouteInfo & {
   } | null;
   plannedDate: Timestamp;
   origin: PlaceValue;
+  source?: string;
 };
 
 
@@ -379,12 +382,18 @@ export default function RouteDetailsPage() {
       return;
     }
 
+    // Detectar se é uma edição (stop já tinha deliveryStatus)
+    const currentStop = route.stops[selectedStopIndex];
+    const isEdit = !!currentStop.deliveryStatus;
+
     try {
       const updatedStops = [...route.stops];
       const updatedStop: any = {
         ...updatedStops[selectedStopIndex],
         deliveryStatus: data.status,
         completedAt: Timestamp.now(),
+        // Marcar que foi editado pelo motorista
+        ...(isEdit && { editedByDriver: true, editedAt: Timestamp.now() }),
       };
 
       // Upload da foto para o Storage se houver
@@ -482,11 +491,44 @@ export default function RouteDetailsPage() {
         }
       }
 
+      // Notificar admin quando motorista editar uma entrega já concluída
+      if (isEdit) {
+        try {
+          const driverName = route.driverInfo?.name || 'Motorista';
+          const stopName = currentStop.customerName || currentStop.address || `Ponto ${selectedStopIndex + 1}`;
+
+          await addDoc(collection(db, 'notifications'), {
+            type: 'delivery_edited',
+            title: 'Entrega editada pelo motorista',
+            message: `${driverName} editou as informações do ponto "${stopName}" na rota "${route.name}".`,
+            priority: 'normal',
+            routeId: routeId,
+            routeName: route.name,
+            stopIndex: selectedStopIndex,
+            driverId: route.driverId,
+            driverName: driverName,
+            read: false,
+            opened: false,
+            openedAt: null,
+            timestamp: serverTimestamp(),
+            // Para admins verem (não tem driverId específico, então todos admins veem)
+            forAdmin: true,
+          });
+          console.log('✅ Notificação de edição enviada para admin');
+        } catch (notifError) {
+          console.error('⚠️ Erro ao criar notificação (não crítico):', notifError);
+        }
+      }
+
       toast({
-        title: data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada',
-        description: data.status === 'completed'
-          ? 'A entrega foi registrada com sucesso.'
-          : 'A falha na entrega foi registrada.',
+        title: isEdit
+          ? 'Informações atualizadas!'
+          : (data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada'),
+        description: isEdit
+          ? 'As informações da entrega foram atualizadas com sucesso.'
+          : (data.status === 'completed'
+            ? 'A entrega foi registrada com sucesso.'
+            : 'A falha na entrega foi registrada.'),
       });
 
       setIsConfirmDialogOpen(false);
@@ -744,7 +786,8 @@ export default function RouteDetailsPage() {
                                         className="ml-auto"
                                         onClick={() => handleOpenConfirmDialog(index)}
                                     >
-                                        Reabrir
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        Editar
                                     </Button>
                                 )}
                             </div>

@@ -116,13 +116,27 @@ export function DatePickerWithPresets({
   };
 
   const handleDateSelect = (range: { from: Date | undefined; to: Date | undefined } | undefined) => {
+    // Quando range é undefined, significa que o usuário clicou no mesmo dia já selecionado
+    // Neste caso, queremos selecionar apenas esse dia (ao invés de desselecionar)
+    if (!range && selectedRange.from) {
+      const start = startOfDay(selectedRange.from);
+      const end = new Date(selectedRange.from);
+      end.setHours(23, 59, 59, 999);
+      setSelectedRange({ from: start, to: end });
+      onDateRangeChange?.(start, end);
+      return;
+    }
+
     if (range?.from) {
+      // Se clicou no mesmo dia duas vezes (from e to são o mesmo dia), considerar como seleção de um único dia
+      const isSameDay = range.to && startOfDay(range.from).getTime() === startOfDay(range.to).getTime();
+
       setSelectedRange(range);
 
-      // Se apenas uma data foi selecionada (from sem to), usar o dia inteiro
-      if (!range.to) {
+      // Se apenas uma data foi selecionada (from sem to), ou se é o mesmo dia
+      if (!range.to || isSameDay) {
         const start = startOfDay(range.from);
-        const end = new Date(range.from);
+        const end = new Date(range.to || range.from);
         end.setHours(23, 59, 59, 999);
         onDateRangeChange?.(start, end);
       } else {
