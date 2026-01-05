@@ -396,8 +396,8 @@ export default function RouteDetailsPage() {
         ...(isEdit && { editedByDriver: true, editedAt: Timestamp.now() }),
       };
 
-      // Upload da foto para o Storage se houver
-      if (data.photo) {
+      // Upload da foto para o Storage se houver nova foto (base64)
+      if (data.photo && data.photo.startsWith('data:')) {
         try {
           // Cria referência única para a foto
           const photoRef = ref(
@@ -422,23 +422,38 @@ export default function RouteDetailsPage() {
             description: 'Não foi possível salvar a foto, mas a entrega foi registrada.',
           });
         }
+      } else if (data.photo && data.photo.startsWith('http')) {
+        // Manter URL existente (não foi alterada)
+        updatedStop.photoUrl = data.photo;
+      } else if (!data.photo && isEdit) {
+        // Foto foi removida na edição - limpar do Firestore
+        updatedStop.photoUrl = null;
       }
 
+      // Atualizar ou limpar notas
       if (data.notes) {
         updatedStop.notes = data.notes;
+      } else if (isEdit) {
+        updatedStop.notes = null;
       }
+
       if (data.failureReason) {
         updatedStop.failureReason = data.failureReason;
       }
       if (data.wentToLocation !== undefined) {
         updatedStop.wentToLocation = data.wentToLocation;
       }
-      if (data.payments) {
+
+      // Atualizar ou limpar pagamentos
+      if (data.payments && data.payments.length > 0) {
         updatedStop.payments = data.payments;
+      } else if (isEdit && data.status === 'failed') {
+        // Se mudou para falha, limpar pagamentos
+        updatedStop.payments = null;
       }
 
-      // Upload da foto da tentativa de entrega se houver
-      if (data.attemptPhoto) {
+      // Upload da foto da tentativa de entrega se houver nova foto (base64)
+      if (data.attemptPhoto && data.attemptPhoto.startsWith('data:')) {
         try {
           const attemptPhotoRef = ref(
             storage,
@@ -455,6 +470,12 @@ export default function RouteDetailsPage() {
             description: 'Não foi possível salvar a foto de tentativa, mas a entrega foi registrada.',
           });
         }
+      } else if (data.attemptPhoto && data.attemptPhoto.startsWith('http')) {
+        // Manter URL existente
+        updatedStop.attemptPhotoUrl = data.attemptPhoto;
+      } else if (!data.attemptPhoto && isEdit) {
+        // Foto de tentativa foi removida - limpar do Firestore
+        updatedStop.attemptPhotoUrl = null;
       }
 
       updatedStops[selectedStopIndex] = updatedStop;

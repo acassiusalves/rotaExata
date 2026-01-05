@@ -91,6 +91,8 @@ export function DeliveryConfirmationDialog({
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Flag para evitar que o useEffect sobrescreva edições do usuário
+  const [hasUserEdited, setHasUserEdited] = React.useState(false);
   const [validationSettings, setValidationSettings] = React.useState<{
     enabled: boolean;
     maxDistance: number;
@@ -122,8 +124,9 @@ export function DeliveryConfirmationDialog({
   };
 
   // Load existing data when reopening a completed delivery
+  // Só carrega se o usuário ainda não fez nenhuma edição
   React.useEffect(() => {
-    if (isOpen && existingData) {
+    if (isOpen && existingData && !hasUserEdited) {
       // Carregar foto existente (URL do Firebase Storage)
       if (existingData.photoUrl) {
         setPhoto(existingData.photoUrl);
@@ -159,7 +162,7 @@ export function DeliveryConfirmationDialog({
         setPayments(existingData.payments);
       }
     }
-  }, [isOpen, existingData]);
+  }, [isOpen, existingData, hasUserEdited]);
 
   // Load validation settings
   React.useEffect(() => {
@@ -304,6 +307,7 @@ export function DeliveryConfirmationDialog({
     // Comprimir a imagem antes de salvar
     const compressedPhoto = await compressImage(photoData, 800, 0.6);
     setPhoto(compressedPhoto);
+    setHasUserEdited(true);
     stopCamera();
   };
 
@@ -316,6 +320,7 @@ export function DeliveryConfirmationDialog({
       // Comprimir a imagem antes de salvar
       const compressedPhoto = await compressImage(photoData, 800, 0.6);
       setPhoto(compressedPhoto);
+      setHasUserEdited(true);
     };
     reader.readAsDataURL(file);
   };
@@ -328,10 +333,12 @@ export function DeliveryConfirmationDialog({
     setWentToLocation(null);
     setAttemptPhoto(null);
     setPayments([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
+    setHasUserEdited(false);
   };
 
 
   const handlePaymentChange = (index: number, field: keyof Payment, value: string | number) => {
+    setHasUserEdited(true);
     const newPayments = [...payments];
     (newPayments[index] as any)[field] = value;
 
@@ -455,10 +462,12 @@ export function DeliveryConfirmationDialog({
     }
   };
 
-  // Cleanup camera when dialog closes or component unmounts
+  // Cleanup camera and reset edit flag when dialog closes or component unmounts
   React.useEffect(() => {
     if (!isOpen) {
       stopCamera();
+      // Resetar flag de edição quando o dialog fecha
+      setHasUserEdited(false);
     }
     return () => {
       stopCamera();
@@ -483,7 +492,7 @@ export function DeliveryConfirmationDialog({
           {/* Status Selection */}
           <div className="space-y-2">
             <Label>Status da Entrega</Label>
-            <RadioGroup value={deliveryStatus} onValueChange={(value) => setDeliveryStatus(value as 'completed' | 'failed')} disabled={viewOnly}>
+            <RadioGroup value={deliveryStatus} onValueChange={(value) => { setDeliveryStatus(value as 'completed' | 'failed'); setHasUserEdited(true); }} disabled={viewOnly}>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="completed" id="completed" disabled={viewOnly} />
                 <Label htmlFor="completed" className="flex items-center gap-2 cursor-pointer">
@@ -505,7 +514,7 @@ export function DeliveryConfirmationDialog({
             <>
               <div className="space-y-2">
                 <Label>Motivo da Falha</Label>
-                <RadioGroup value={failureReason} onValueChange={setFailureReason} disabled={viewOnly}>
+                <RadioGroup value={failureReason} onValueChange={(value) => { setFailureReason(value); setHasUserEdited(true); }} disabled={viewOnly}>
                   <div className="flex items-center space-x-2"> <RadioGroupItem value="ausente" id="ausente" disabled={viewOnly} /> <Label htmlFor="ausente" className="cursor-pointer">Cliente ausente</Label> </div>
                   <div className="flex items-center space-x-2"> <RadioGroupItem value="recusou" id="recusou" disabled={viewOnly} /> <Label htmlFor="recusou" className="cursor-pointer">Cliente recusou</Label> </div>
                   <div className="flex items-center space-x-2"> <RadioGroupItem value="endereco_incorreto" id="endereco_incorreto" disabled={viewOnly} /> <Label htmlFor="endereco_incorreto" className="cursor-pointer">Endereço incorreto</Label> </div>
@@ -517,7 +526,7 @@ export function DeliveryConfirmationDialog({
                 <Label>Foi até o local?</Label>
                 <RadioGroup
                   value={wentToLocation === null ? '' : wentToLocation ? 'sim' : 'nao'}
-                  onValueChange={(value) => setWentToLocation(value === 'sim')}
+                  onValueChange={(value) => { setWentToLocation(value === 'sim'); setHasUserEdited(true); }}
                   disabled={viewOnly}
                 >
                   <div className="flex items-center space-x-2">
@@ -576,6 +585,7 @@ export function DeliveryConfirmationDialog({
                                 const photoData = canvas.toDataURL('image/jpeg', 0.8);
                                 const compressedPhoto = await compressImage(photoData, 800, 0.6);
                                 setAttemptPhoto(compressedPhoto);
+                                setHasUserEdited(true);
                                 stopCamera();
                               }} className="flex-1"> Capturar Foto </Button>
                               <Button onClick={stopCamera} variant="outline"> Cancelar </Button>
@@ -588,7 +598,7 @@ export function DeliveryConfirmationDialog({
                     ) : (
                       <div className="relative">
                         <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
-                        <Button onClick={() => setAttemptPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                        <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
                   </TabsContent>
@@ -610,6 +620,7 @@ export function DeliveryConfirmationDialog({
                             const photoData = e.target?.result as string;
                             const compressedPhoto = await compressImage(photoData, 800, 0.6);
                             setAttemptPhoto(compressedPhoto);
+                            setHasUserEdited(true);
                           };
                           reader.readAsDataURL(file);
                         }} />
@@ -617,7 +628,7 @@ export function DeliveryConfirmationDialog({
                     ) : (
                       <div className="relative">
                         <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
-                        <Button onClick={() => setAttemptPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                        <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
                   </TabsContent>
@@ -666,7 +677,7 @@ export function DeliveryConfirmationDialog({
                   ) : (
                     <div className="relative">
                       <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
-                      <Button onClick={() => setPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                      <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
                   <canvas ref={canvasRef} className="hidden" />
@@ -686,7 +697,7 @@ export function DeliveryConfirmationDialog({
                   ) : (
                     <div className="relative">
                       <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
-                      <Button onClick={() => setPhoto(null)} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
+                      <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
                 </TabsContent>
@@ -797,7 +808,7 @@ export function DeliveryConfirmationDialog({
               id="notes"
               placeholder="Adicione detalhes sobre a entrega..."
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => { setNotes(e.target.value); setHasUserEdited(true); }}
               disabled={viewOnly}
               rows={3}
             />
