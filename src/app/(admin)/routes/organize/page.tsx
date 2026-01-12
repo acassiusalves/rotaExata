@@ -1724,7 +1724,7 @@ export default function OrganizeRoutePage() {
         });
 
         // Se for uma rota existente, persistir no Firestore
-        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
+        if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
             await updateDoc(routeRef, {
