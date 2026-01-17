@@ -846,6 +846,13 @@ export default function OrganizeRoutePage() {
                 visible: true,
               });
               setRouteB(null); // Não tem segunda rota
+
+              // Carregar unassignedStops do Firestore (pontos adicionados via Lunna)
+              if (routeData.unassignedStops && routeData.unassignedStops.length > 0) {
+                const validUnassigned = routeData.unassignedStops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+                setUnassignedStops(validUnassigned);
+                console.log('📥 Carregados unassignedStops do Firestore:', validUnassigned.length);
+              }
             } else {
               console.error('❌ Rota não encontrada no Firestore');
               // Fallback para dados do sessionStorage
@@ -1128,6 +1135,58 @@ export default function OrganizeRoutePage() {
       router.push('/routes/new');
     }
   }, [router]);
+
+  // Listener em tempo real para detectar novos stops adicionados via Lunna
+  React.useEffect(() => {
+    // Funciona tanto para rotas draft quanto para rotas existentes (Lunna)
+    const routeId = routeData?.draftRouteId || routeData?.currentRouteId;
+    if (!routeId) return;
+
+    const routeRef = doc(db, 'routes', routeId);
+
+    const unsubscribe = onSnapshot(routeRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+
+      const data = snapshot.data();
+      // Verificar tanto o campo 'stops' quanto 'unassignedStops' do Firestore
+      // O sistema Lunna salva novos pontos em 'unassignedStops'
+      const firestoreStops: PlaceValue[] = data.stops || [];
+      const firestoreUnassignedStops: PlaceValue[] = data.unassignedStops || [];
+      const allFirestoreStops = [...firestoreStops, ...firestoreUnassignedStops];
+
+      // Coletar IDs de todos os stops já carregados na interface
+      const currentStopIds = new Set<string>();
+
+      if (routeA?.stops) {
+        routeA.stops.forEach(s => currentStopIds.add(s.id));
+      }
+      if (routeB?.stops) {
+        routeB.stops.forEach(s => currentStopIds.add(s.id));
+      }
+      dynamicRoutes.forEach(route => {
+        if (route.data?.stops) {
+          route.data.stops.forEach(s => currentStopIds.add(s.id));
+        }
+      });
+      unassignedStops.forEach(s => currentStopIds.add(s.id));
+
+      // Filtrar stops que não estão na interface
+      const newStops = allFirestoreStops.filter(s => !currentStopIds.has(s.id));
+
+      if (newStops.length > 0) {
+        console.log('📥 Novos stops detectados via Lunna:', newStops.length);
+        setUnassignedStops(prev => [...prev, ...newStops]);
+        toast({
+          title: 'Novos pontos adicionados',
+          description: `${newStops.length} ponto(s) foram adicionados via Lunna e estão em "Não Alocados"`,
+        });
+      }
+    }, (error) => {
+      console.error('Erro ao escutar mudanças no draft:', error);
+    });
+
+    return () => unsubscribe();
+  }, [routeData?.draftRouteId, routeData?.currentRouteId, routeA, routeB, dynamicRoutes, unassignedStops]);
 
   const geocodeAddress = React.useCallback(
     (address: string): Promise<PlaceValue | null> => {

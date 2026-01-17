@@ -1037,6 +1037,23 @@ export default function OrganizeRoutePage() {
 
               // Usar dados do Firestore ao invés do sessionStorage
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+
+              // Atualizar routeData com origem do Firestore (ou criar uma baseada no primeiro stop)
+              let origin = routeData.origin || parsedData.origin;
+              if (!origin && allStops.length > 0) {
+                // Se não tem origem, usar o primeiro stop como origem
+                origin = {
+                  id: 'origin-from-first-stop',
+                  address: allStops[0].address,
+                  lat: allStops[0].lat,
+                  lng: allStops[0].lng,
+                  placeId: allStops[0].placeId,
+                };
+                console.log('⚠️ [useEffect:loadRouteData] Origem não encontrada, usando primeiro stop como origem');
+              }
+              if (origin) {
+                setRouteData(prev => prev ? { ...prev, origin } : prev);
+              }
               console.log('✅ [useEffect:loadRouteData] Stops válidos após filtro:', allStops.length);
               setRouteA({
                 stops: allStops,
@@ -1047,6 +1064,13 @@ export default function OrganizeRoutePage() {
                 visible: true,
               });
               setRouteB(null); // Não tem segunda rota
+
+              // Carregar unassignedStops do Firestore (pontos adicionados via Lunna)
+              if (routeData.unassignedStops && routeData.unassignedStops.length > 0) {
+                const validUnassigned = routeData.unassignedStops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+                setUnassignedStops(validUnassigned);
+                console.log('📥 [useEffect:loadRouteData] Carregados unassignedStops do Firestore:', validUnassigned.length);
+              }
             } else {
               console.error('❌ [useEffect:loadRouteData] Rota não encontrada no Firestore - ID:', parsedData.currentRouteId);
               // Fallback para dados do sessionStorage
@@ -1881,7 +1905,16 @@ export default function OrganizeRoutePage() {
       const newTargetStops = targetRoute ? [...targetRoute.stops, stopToMove] : [stopToMove];
       console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
 
-      setRoute(overRouteKey, prev => prev ? { ...prev, stops: newTargetStops, encodedPolyline: '' } : null);
+      // Atualizar rota temporariamente (será substituída após recalcular)
+      const tempRouteData: RouteInfo = {
+        stops: newTargetStops,
+        distanceMeters: targetRoute?.distanceMeters || 0,
+        duration: targetRoute?.duration || '0s',
+        encodedPolyline: '',
+        color: targetRoute?.color || (overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : '#fa9200'),
+        visible: targetRoute?.visible ?? true,
+      };
+      setRoute(overRouteKey, () => tempRouteData);
 
       // Recalculate route
       console.log('🔄 [handleDragEnd] Recalculando rota...');
@@ -1911,13 +1944,18 @@ export default function OrganizeRoutePage() {
           console.log('💾 [handleDragEnd] SALVANDO NO FIRESTORE - Route ID:', routeData.currentRouteId);
           try {
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            // Calcular unassignedStops atualizado (removendo o ponto que foi movido)
+            const stopId = String(stopToMove.id ?? stopToMove.placeId);
+            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== stopId);
+
             await updateDoc(routeRef, {
               stops: newTargetStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
+              unassignedStops: updatedUnassignedStops, // Atualizar também os não alocados
             });
-            console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso!');
+            console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
             toast({
@@ -1934,7 +1972,23 @@ export default function OrganizeRoutePage() {
           });
         }
       } else {
-        console.error('❌ [handleDragEnd] computeRoute retornou null');
+        console.error('❌ [handleDragEnd] computeRoute retornou null - salvando sem polyline');
+        // Mesmo sem polyline, salvar no Firestore para manter consistência
+        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
+          try {
+            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const stopId = String(stopToMove.id ?? stopToMove.placeId);
+            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== stopId);
+
+            await updateDoc(routeRef, {
+              stops: newTargetStops,
+              unassignedStops: updatedUnassignedStops,
+            });
+            console.log('✅ [handleDragEnd] Firestore ATUALIZADO (sem polyline)');
+          } catch (error) {
+            console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
+          }
+        }
       }
 
       const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;

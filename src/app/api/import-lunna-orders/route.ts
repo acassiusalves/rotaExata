@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { orderIds, userId } = body;
+    const { orderIds, userId, existingRouteId } = body;
 
     // Validação de entrada
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
@@ -277,10 +277,71 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Gerar código da rota (LN-XXXX)
+    // 4. Verificar se deve atualizar rota existente ou criar nova
+    if (existingRouteId) {
+      const existingRouteRef = adminDb.collection('routes').doc(existingRouteId);
+      const existingRouteSnap = await existingRouteRef.get();
+
+      if (existingRouteSnap.exists) {
+        const existingData = existingRouteSnap.data();
+        const existingStops = existingData?.stops || [];
+        const existingOrderNumbers = new Set(existingStops.map((s: PlaceValue) => s.orderNumber));
+
+        // Filtrar apenas stops novos (evitar duplicados)
+        const newStops = successfulStops.filter(s => !existingOrderNumbers.has(s.orderNumber));
+
+        if (newStops.length === 0) {
+          return NextResponse.json({
+            success: true,
+            routeId: existingRouteId,
+            routeCode: existingData?.code,
+            updated: true,
+            message: 'Todos os pedidos já estavam na rota',
+            stats: {
+              total: orders.length,
+              added: 0,
+              alreadyInRoute: orders.length,
+            },
+          });
+        }
+
+        // Atualizar rota existente com novos stops
+        await existingRouteRef.update({
+          stops: [...existingStops, ...newStops],
+          lunnaOrderIds: FieldValue.arrayUnion(...orders.map(o => o.number)),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        // Atualizar status dos pedidos no Lunna
+        for (const order of orders) {
+          await adminDb.collection('orders').doc(order.id).update({
+            logisticsStatus: 'em_rota',
+            rotaExataRouteId: existingRouteId,
+            rotaExataRouteCode: existingData?.code,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        return NextResponse.json({
+          success: true,
+          routeId: existingRouteId,
+          routeCode: existingData?.code,
+          updated: true,
+          stats: {
+            total: orders.length,
+            added: newStops.length,
+            alreadyInRoute: orders.length - newStops.length,
+            withIssues: failedGeocodings.length,
+            failedGeocodings: failedGeocodings,
+          },
+        });
+      }
+    }
+
+    // 5. Gerar código da rota (LN-XXXX) - apenas para novas rotas
     const routeCode = await generateLunnaRouteCode();
 
-    // 5. Criar rota no Firestore
+    // 6. Criar rota no Firestore
     const routeData: Partial<RouteInfo> & { plannedDate: any; createdBy: string; createdAt: any } = {
       code: routeCode,
       stops: successfulStops,
