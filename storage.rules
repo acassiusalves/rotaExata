@@ -3,9 +3,16 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Allow authenticated users to upload delivery photos
+    // Allow authenticated users to upload delivery photos (entregas concluídas)
     match /delivery-photos/{routeId}/{fileName} {
-      // Allow authenticated users (drivers) to create/read delivery photos
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024 // Limit to 5MB
+                   && request.resource.contentType.matches('image/.*'); // Only images
+    }
+
+    // Allow authenticated users to upload attempt photos (tentativas de entrega - falhas)
+    match /delivery-attempt-photos/{routeId}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
                    && request.resource.size < 5 * 1024 * 1024 // Limit to 5MB
