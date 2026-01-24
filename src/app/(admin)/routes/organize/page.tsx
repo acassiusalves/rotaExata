@@ -35,6 +35,7 @@ import {
   PackagePlus,
   MoreHorizontal,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import { GoogleMap, Marker } from '@react-google-maps/api';
@@ -320,7 +321,8 @@ const UnassignedStopItem: React.FC<{
   stop: PlaceValue;
   index: number;
   onOpenInfo: (stopId: string) => void;
-}> = ({ stop, index, onOpenInfo }) => {
+  onDelete: (stopId: string) => void;
+}> = ({ stop, index, onOpenInfo, onDelete }) => {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `unassigned-${stop.id ?? stop.placeId ?? index}`,
     data: { routeKey: 'unassigned', index, stop },
@@ -331,22 +333,41 @@ const UnassignedStopItem: React.FC<{
     opacity: isDragging ? 0.5 : 1,
   };
 
+  const stopId = String(stop.id ?? stop.placeId);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
-      className="text-left text-sm p-2 rounded-md hover:bg-muted border border-dashed border-gray-300 cursor-grab active:cursor-grabbing"
-      onClick={(e) => {
-        if (!isDragging) {
-          onOpenInfo(String(stop.id));
-        }
-      }}
+      className="text-left text-sm p-2 rounded-md hover:bg-muted border border-dashed border-gray-300 group"
     >
       <div className="flex items-center gap-2">
-        <div className="h-2 w-2 rounded-full bg-black" />
-        <span className="flex-1 truncate">{stop.customerName || stop.address}</span>
+        {/* Área arrastável */}
+        <div
+          {...listeners}
+          {...attributes}
+          className="flex items-center gap-2 flex-1 cursor-grab active:cursor-grabbing"
+          onClick={(e) => {
+            if (!isDragging) {
+              onOpenInfo(stopId);
+            }
+          }}
+        >
+          <div className="h-2 w-2 rounded-full bg-black flex-shrink-0" />
+          <span className="flex-1 truncate">{stop.customerName || stop.address}</span>
+        </div>
+        {/* Botão de excluir */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(stopId);
+          }}
+          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 text-destructive transition-opacity"
+          title="Excluir serviço"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );
@@ -2895,6 +2916,10 @@ export default function OrganizeRoutePage() {
                                         stop={stop}
                                         index={index}
                                         onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
+                                        onDelete={(stopId) => {
+                                          setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
+                                          toast({ title: 'Serviço removido', description: 'O serviço foi excluído da lista de não alocados.' });
+                                        }}
                                     />
                                 ))}
                                 </div>
