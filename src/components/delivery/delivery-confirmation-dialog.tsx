@@ -26,7 +26,9 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Input } from '../ui/input';
-import { Payment } from '@/lib/types';
+import { Payment, LunnaOrderItem } from '@/lib/types';
+import { Checkbox } from '../ui/checkbox';
+import { Package, RefreshCw } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -48,6 +50,7 @@ interface DeliveryConfirmationDialogProps {
     wentToLocation?: boolean;
     attemptPhoto?: string;
     payments?: Payment[];
+    deliveredItemIds?: string[];
   }) => Promise<void>;
   customerName?: string;
   address?: string;
@@ -64,7 +67,15 @@ interface DeliveryConfirmationDialogProps {
     wentToLocation?: boolean;
     attemptPhotoUrl?: string;
     payments?: Payment[];
+    deliveredItemIds?: string[];
   };
+  // Props específicos para pedidos Lunna
+  isLunnaOrder?: boolean;
+  expectedValue?: number;
+  orderNumber?: string;
+  items?: LunnaOrderItem[];
+  hasExchangeItems?: boolean;
+  operationType?: 'venda' | 'troca' | 'misto';
 }
 
 export function DeliveryConfirmationDialog({
@@ -78,6 +89,13 @@ export function DeliveryConfirmationDialog({
   currentLocation,
   viewOnly = false,
   existingData,
+  // Props Lunna
+  isLunnaOrder = false,
+  expectedValue,
+  orderNumber,
+  items,
+  hasExchangeItems,
+  operationType,
 }: DeliveryConfirmationDialogProps) {
   const [photo, setPhoto] = React.useState<string | null>(null);
   const [notes, setNotes] = React.useState('');
@@ -88,6 +106,9 @@ export function DeliveryConfirmationDialog({
 
   // Alterado para suportar múltiplos pagamentos
   const [payments, setPayments] = React.useState<Payment[]>([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
+
+  // Estado para itens entregues (Lunna)
+  const [deliveredItemIds, setDeliveredItemIds] = React.useState<Set<string>>(new Set());
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -161,8 +182,28 @@ export function DeliveryConfirmationDialog({
       if (existingData.payments && existingData.payments.length > 0) {
         setPayments(existingData.payments);
       }
+
+      // Carregar itens entregues (Lunna)
+      if (existingData.deliveredItemIds && existingData.deliveredItemIds.length > 0) {
+        setDeliveredItemIds(new Set(existingData.deliveredItemIds));
+      }
     }
   }, [isOpen, existingData, hasUserEdited]);
+
+  // Inicializar itens do Lunna e valor esperado quando abrir o dialog
+  React.useEffect(() => {
+    if (isOpen && isLunnaOrder && !hasUserEdited) {
+      // Inicializar todos os itens como entregues por padrão
+      if (items && items.length > 0 && deliveredItemIds.size === 0) {
+        setDeliveredItemIds(new Set(items.map(item => item.id)));
+      }
+
+      // Pré-preencher valor esperado se não houver pagamentos existentes
+      if (expectedValue !== undefined && (!existingData?.payments || existingData.payments.length === 0)) {
+        setPayments([{ id: `payment-${Date.now()}`, method: '', value: expectedValue }]);
+      }
+    }
+  }, [isOpen, isLunnaOrder, items, expectedValue, existingData?.payments, hasUserEdited, deliveredItemIds.size]);
 
   // Load validation settings
   React.useEffect(() => {
@@ -333,6 +374,7 @@ export function DeliveryConfirmationDialog({
     setWentToLocation(null);
     setAttemptPhoto(null);
     setPayments([{ id: `payment-${Date.now()}`, method: '', value: 0 }]);
+    setDeliveredItemIds(new Set());
     setHasUserEdited(false);
   };
 
@@ -449,6 +491,7 @@ export function DeliveryConfirmationDialog({
         wentToLocation: deliveryStatus === 'failed' ? wentToLocation || undefined : undefined,
         attemptPhoto: deliveryStatus === 'failed' ? attemptPhoto || undefined : undefined,
         payments: deliveryStatus === 'completed' ? payments : undefined,
+        deliveredItemIds: deliveryStatus === 'completed' && items ? Array.from(deliveredItemIds) : undefined,
       });
 
       resetForm();
@@ -489,6 +532,35 @@ export function DeliveryConfirmationDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* Header do Pedido Lunna */}
+          {isLunnaOrder && orderNumber && (
+            <div className="rounded-lg border bg-blue-50 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-900">
+                    Pedido #{orderNumber}
+                  </span>
+                  {operationType === 'troca' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
+                      <RefreshCw className="h-3 w-3" />
+                      Troca
+                    </span>
+                  )}
+                  {operationType === 'misto' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                      Venda + Troca
+                    </span>
+                  )}
+                </div>
+                {expectedValue !== undefined && (
+                  <span className="text-lg font-bold text-green-700">
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(expectedValue)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           {/* Status Selection */}
           <div className="space-y-2">
             <Label>Status da Entrega</Label>
@@ -702,6 +774,91 @@ export function DeliveryConfirmationDialog({
                   )}
                 </TabsContent>
               </Tabs>
+              )}
+
+              {/* Lista de Produtos - apenas para Lunna com items */}
+              {isLunnaOrder && items && items.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-2">
+                      <Package className="h-4 w-4" />
+                      Itens do Pedido ({items.length})
+                    </Label>
+                    {!viewOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (deliveredItemIds.size === items.length) {
+                            setDeliveredItemIds(new Set());
+                          } else {
+                            setDeliveredItemIds(new Set(items.map(i => i.id)));
+                          }
+                          setHasUserEdited(true);
+                        }}
+                      >
+                        {deliveredItemIds.size === items.length ? 'Desmarcar todos' : 'Marcar todos'}
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto space-y-2 rounded-md border p-2">
+                    {items.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`flex items-center gap-3 p-2 rounded-md transition-colors ${
+                          item.tipo === 'Troca' ? 'bg-orange-50' : 'bg-gray-50'
+                        }`}
+                      >
+                        <Checkbox
+                          id={item.id}
+                          checked={deliveredItemIds.has(item.id)}
+                          onCheckedChange={(checked) => {
+                            const newSet = new Set(deliveredItemIds);
+                            if (checked) {
+                              newSet.add(item.id);
+                            } else {
+                              newSet.delete(item.id);
+                            }
+                            setDeliveredItemIds(newSet);
+                            setHasUserEdited(true);
+                          }}
+                          disabled={viewOnly}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">
+                              {item.description}
+                            </span>
+                            {item.tipo === 'Troca' && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-600 border border-orange-300">
+                                <RefreshCw className="h-3 w-3" />
+                                Troca
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>Cod: {item.code}</span>
+                            <span>|</span>
+                            <span>Qtd: {item.quantity}</span>
+                            <span>|</span>
+                            <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.subtotal)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {hasExchangeItems && (
+                    <Alert className="bg-orange-50 border-orange-200">
+                      <RefreshCw className="h-4 w-4 text-orange-600" />
+                      <AlertDescription className="text-orange-700 text-xs">
+                        Este pedido contém itens de troca. Certifique-se de recolher os produtos que serão trocados.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
               )}
 
               {/* Payment Method */}

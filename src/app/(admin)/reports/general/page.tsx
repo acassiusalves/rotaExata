@@ -144,6 +144,8 @@ type DeliveryReport = {
   reconciledBy?: string;
   reconciledMethod?: 'manual' | 'ai';
   aiExtractedValue?: number;
+  // Campo Lunna
+  expectedValue?: number; // Valor esperado do pedido Lunna
 };
 
 const formatCurrency = (value: number) => {
@@ -315,6 +317,7 @@ export default function ReportsPage() {
               reconciledBy: stop.reconciledBy,
               reconciledMethod: stop.reconciledMethod,
               aiExtractedValue: stop.aiExtractedValue,
+              expectedValue: stop.expectedValue, // Valor esperado do pedido Lunna
             });
           });
         });
@@ -532,12 +535,16 @@ export default function ReportsPage() {
     try {
       // Preparar itens para a API
       const items = eligibleDeliveries.map(d => {
-        // Buscar pagamento elegível (cartão de crédito, débito ou PIX)
+        // Para pedidos Lunna, usar expectedValue se disponível
+        // Caso contrário, usar o valor do pagamento informado pelo motorista
         const eligiblePayment = d.payments?.find(p => aiEligiblePaymentMethods.includes(p.method));
+        const expectedValue = d.expectedValue !== undefined
+          ? d.expectedValue
+          : (eligiblePayment?.value || 0);
         return {
           routeId: d.routeId,
           stopIndex: d.stopIndex,
-          expectedValue: eligiblePayment?.value || 0,
+          expectedValue,
           photoUrl: d.photoUrl!,
           customerName: d.customerName,
         };
@@ -1162,15 +1169,52 @@ export default function ReportsPage() {
                         </TooltipProvider>
                       </TableCell>
                       <TableCell>
-                        {delivery.payments
-                          ? formatCurrency(
-                              selectedPaymentMethod !== 'all'
-                                ? delivery.payments
-                                    .filter(p => p.method === selectedPaymentMethod)
-                                    .reduce((s, p) => s + (p.value || 0), 0)
-                                : delivery.payments.reduce((s, p) => s + (p.value || 0), 0)
-                            )
-                          : '-'}
+                        {delivery.payments ? (
+                          <div className="flex items-center gap-1">
+                            <span>
+                              {formatCurrency(
+                                selectedPaymentMethod !== 'all'
+                                  ? delivery.payments
+                                      .filter(p => p.method === selectedPaymentMethod)
+                                      .reduce((s, p) => s + (p.value || 0), 0)
+                                  : delivery.payments.reduce((s, p) => s + (p.value || 0), 0)
+                              )}
+                            </span>
+                            {delivery.expectedValue !== undefined && (() => {
+                              const totalPaid = delivery.payments.reduce((s, p) => s + (p.value || 0), 0);
+                              const diff = Math.abs(delivery.expectedValue - totalPaid);
+                              if (diff <= 0.50) {
+                                return (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger>
+                                        <CheckCircle className="h-4 w-4 text-green-600" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
+                                        <p className="text-green-600">Dentro da tolerância</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                );
+                              } else {
+                                return (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger>
+                                        <AlertCircle className="h-4 w-4 text-orange-500" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
+                                        <p className="text-orange-600">Diferença: {formatCurrency(diff)}</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                );
+                              }
+                            })()}
+                          </div>
+                        ) : '-'}
                       </TableCell>
                       <TableCell>
                         <Button

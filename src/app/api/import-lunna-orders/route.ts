@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo } from '@/lib/types';
+import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 
 // Função para geocodificar um endereço usando Google Maps API
@@ -237,6 +237,33 @@ export async function POST(request: NextRequest) {
     const failedGeocodings: Array<{ orderNumber: string; reason: string }> = [];
 
     for (const result of geocodingResults) {
+      // Preparar items com IDs únicos para o checklist do motorista
+      const itemsWithIds: LunnaOrderItem[] = result.order.items.map((item, idx) => ({
+        id: `${result.order.number}-item-${idx}`,
+        code: item.code,
+        description: item.description,
+        quantity: item.quantity,
+        subtotal: item.subtotal,
+        tipo: item.tipo,
+      }));
+
+      // Determinar tipo de operação
+      const hasVenda = result.order.items.some(item => item.tipo === 'Venda');
+      const hasTroca = result.order.items.some(item => item.tipo === 'Troca');
+      let operationType: 'venda' | 'troca' | 'misto' = 'venda';
+      if (hasVenda && hasTroca) operationType = 'misto';
+      else if (hasTroca) operationType = 'troca';
+
+      // Campos comuns do Lunna
+      const lunnaFields = {
+        expectedValue: result.order.billing.finalValue,
+        items: itemsWithIds,
+        deliveredItemIds: itemsWithIds.map(item => item.id), // Por padrão, todos marcados como entregues
+        hasExchangeItems: hasTroca,
+        operationType,
+        lunnaClientCode: result.client.codigo,
+      };
+
       if (result.geocoded) {
         // Geocoding bem-sucedido
         const stop: PlaceValue = {
@@ -244,11 +271,12 @@ export async function POST(request: NextRequest) {
           id: `lunna-${result.order.id}-${Date.now()}`,
           customerName: result.client.nome,
           phone: result.client.telefone,
-          notes: result.order.complement?.notes || `Pedido Lunna: ${result.order.number}`,
+          notes: result.order.complement?.notes || '', // Notas separadas do número do pedido
           orderNumber: result.order.number,
           complemento: result.client.complemento,
           addressString: result.addressString.replace(', Brasil', ''),
           deliveryStatus: 'pending',
+          ...lunnaFields,
         };
         successfulStops.push(stop);
       } else {
@@ -261,13 +289,14 @@ export async function POST(request: NextRequest) {
           lng: 0,
           customerName: result.client.nome,
           phone: result.client.telefone,
-          notes: result.order.complement?.notes || `Pedido Lunna: ${result.order.number}`,
+          notes: result.order.complement?.notes || '', // Notas separadas do número do pedido
           orderNumber: result.order.number,
           complemento: result.client.complemento,
           addressString: result.addressString.replace(', Brasil', ''),
           deliveryStatus: 'pending',
           hasValidationIssues: true,
           validationIssues: ['Endereço não foi geocodificado. Necessário editar manualmente.'],
+          ...lunnaFields,
         };
         successfulStops.push(stopWithIssue);
         failedGeocodings.push({

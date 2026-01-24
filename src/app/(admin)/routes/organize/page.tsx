@@ -1855,7 +1855,8 @@ export default function OrganizeRoutePage() {
       const sourceRoute = getRoute(activeRouteKey);
       const targetRoute = getRoute(overRouteKey);
 
-      if (!sourceRoute || !targetRoute || !routeData) return;
+      // Permitir targetRoute null (rota vazia recém-criada)
+      if (!sourceRoute || !routeData) return;
 
       const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
@@ -1869,7 +1870,7 @@ export default function OrganizeRoutePage() {
 
       // Check if there's already a pending edit for target route
       const currentTargetPending = pendingEdits[overRouteKey];
-      const targetStopsToEdit = currentTargetPending || targetRoute.stops.map((stop, idx) => ({
+      const targetStopsToEdit = currentTargetPending || (targetRoute?.stops || []).map((stop, idx) => ({
         ...stop,
         _originalIndex: (stop as any)._originalIndex ?? idx
       }));

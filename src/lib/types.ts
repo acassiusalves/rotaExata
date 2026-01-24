@@ -60,6 +60,13 @@ export type PlaceValue = {
   modifiedAt?: Timestamp | Date;
   modificationType?: 'address' | 'sequence' | 'data' | 'removed' | 'added';
   originalSequence?: number;
+  // Campos específicos para pedidos Lunna
+  expectedValue?: number; // Valor total esperado do pedido (billing.finalValue)
+  items?: LunnaOrderItem[]; // Lista de produtos do pedido
+  deliveredItemIds?: string[]; // IDs dos itens efetivamente entregues
+  hasExchangeItems?: boolean; // Se tem itens de troca
+  operationType?: 'venda' | 'troca' | 'misto'; // Tipo da operação
+  lunnaClientCode?: string; // Código do cliente no Lunna
 };
 
 export type DriverLocation = {
@@ -219,6 +226,16 @@ export type ActivityEvent = {
 // ============================================
 // TIPOS PARA INTEGRAÇÃO COM SISTEMA LUNNA
 // ============================================
+
+// Item do pedido Lunna (usado no checklist do motorista)
+export type LunnaOrderItem = {
+  id: string; // ID único para identificação
+  code: string; // Código do produto
+  description: string; // Descrição do produto
+  quantity: number; // Quantidade
+  subtotal: number; // Valor subtotal
+  tipo: 'Venda' | 'Troca'; // Tipo da operação
+};
 
 export type LunnaOrder = {
   id: string; // ID do documento no Firestore

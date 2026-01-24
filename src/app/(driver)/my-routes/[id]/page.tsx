@@ -17,6 +17,9 @@ import {
   XCircle,
   Info,
   Pencil,
+  Package,
+  RefreshCw,
+  DollarSign,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -376,6 +379,7 @@ export default function RouteDetailsPage() {
     wentToLocation?: boolean;
     attemptPhoto?: string;
     payments?: Payment[];
+    deliveredItemIds?: string[];
   }) => {
     if (!route || selectedStopIndex === null) {
       console.error('❌ Confirmação falhou: route ou selectedStopIndex é null');
@@ -450,6 +454,11 @@ export default function RouteDetailsPage() {
       } else if (isEdit && data.status === 'failed') {
         // Se mudou para falha, limpar pagamentos
         updatedStop.payments = null;
+      }
+
+      // Salvar IDs dos itens entregues (Lunna)
+      if (data.deliveredItemIds && data.deliveredItemIds.length > 0) {
+        updatedStop.deliveredItemIds = data.deliveredItemIds;
       }
 
       // Upload da foto da tentativa de entrega se houver nova foto (base64)
@@ -737,9 +746,33 @@ export default function RouteDetailsPage() {
                                 currentSequence={index}
                               />
                             )}
-                            {stop.orderNumber && (
+                            {stop.orderNumber && route.source === 'lunna' ? (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <Badge variant="outline" className="text-xs font-mono bg-blue-50 text-blue-700 border-blue-200">
+                                        <Package className="mr-1 h-3 w-3" />
+                                        #{stop.orderNumber}
+                                    </Badge>
+                                    {stop.operationType === 'troca' && (
+                                        <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-700">
+                                            <RefreshCw className="mr-1 h-3 w-3" />
+                                            Troca
+                                        </Badge>
+                                    )}
+                                    {stop.operationType === 'misto' && (
+                                        <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-700">
+                                            Venda + Troca
+                                        </Badge>
+                                    )}
+                                    {stop.expectedValue !== undefined && (
+                                        <Badge variant="outline" className="text-xs font-medium bg-green-50 text-green-700 border-green-200">
+                                            <DollarSign className="mr-1 h-3 w-3" />
+                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stop.expectedValue)}
+                                        </Badge>
+                                    )}
+                                </div>
+                            ) : stop.orderNumber ? (
                                 <p className="text-xs text-muted-foreground">Pedido: #{stop.orderNumber}</p>
-                            )}
+                            ) : null}
                             {stop.notes && (
                                 <p className="text-xs text-muted-foreground italic">{stop.notes}</p>
                             )}
@@ -848,14 +881,22 @@ export default function RouteDetailsPage() {
               ? {
                   photoUrl: route.stops[selectedStopIndex].photoUrl,
                   notes: route.stops[selectedStopIndex].notes,
-                  deliveryStatus: route.stops[selectedStopIndex].deliveryStatus,
+                  deliveryStatus: route.stops[selectedStopIndex].deliveryStatus as 'completed' | 'failed' | undefined,
                   failureReason: route.stops[selectedStopIndex].failureReason,
                   wentToLocation: route.stops[selectedStopIndex].wentToLocation,
                   attemptPhotoUrl: route.stops[selectedStopIndex].attemptPhotoUrl,
                   payments: route.stops[selectedStopIndex].payments,
+                  deliveredItemIds: route.stops[selectedStopIndex].deliveredItemIds,
                 }
               : undefined
           }
+          // Props Lunna
+          isLunnaOrder={route.source === 'lunna'}
+          expectedValue={route.stops[selectedStopIndex]?.expectedValue}
+          orderNumber={route.stops[selectedStopIndex]?.orderNumber}
+          items={route.stops[selectedStopIndex]?.items}
+          hasExchangeItems={route.stops[selectedStopIndex]?.hasExchangeItems}
+          operationType={route.stops[selectedStopIndex]?.operationType}
         />
       )}
 

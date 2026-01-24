@@ -471,7 +471,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       const hasTimePreference = stop.hasTimePreference === true;
 
       // Determinar cor e ícone baseado no status
-      let markerBackground = color;
+      let markerBackground = color || '#6b7280'; // Cinza como fallback quando cor não definida
       let markerBorder = "#FFFFFF";
       let markerGlyph = index !== undefined ? `${index + 1}` : '';
       let markerScale = 1;
@@ -628,30 +628,28 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         markerContent = customIcon;
       } else {
         // Usar PinElement padrão
-        const pinElement = isUnassigned
-          ? new google.maps.marker.PinElement({
-              background: isHighlighted ? '#FFD700' : (isNewlyAdded ? '#FF6B00' : '#000000'),
-              borderColor: isHighlighted ? '#FF6B00' : (isNewlyAdded ? '#FFD700' : '#FFFFFF'),
-              glyphColor: isNewlyAdded ? '#FFFFFF' : '#000000',
-              scale: isHighlighted ? 1.5 : (isNewlyAdded ? 1.3 : 1),
-              glyph: isHighlighted ? '★' : (isNewlyAdded ? '✨' : '')
-            })
-          : new google.maps.marker.PinElement({
-              background: markerBackground,
-              borderColor: markerBorder,
-              glyph: markerGlyph,
-              glyphColor: "#FFFFFF",
-              scale: markerScale,
-            });
+        const pinElement = new google.maps.marker.PinElement({
+          background: isUnassigned
+            ? (isHighlighted ? '#FFD700' : (isNewlyAdded ? '#FF6B00' : '#000000'))
+            : markerBackground,
+          borderColor: isUnassigned
+            ? (isHighlighted ? '#FF6B00' : (isNewlyAdded ? '#FFD700' : '#FFFFFF'))
+            : markerBorder,
+          glyphColor: '#FFFFFF', // Sempre branco para visibilidade
+          scale: isHighlighted ? 1.5 : (isNewlyAdded ? 1.3 : markerScale),
+          glyph: isHighlighted ? '★' : (isNewlyAdded ? '✨' : markerGlyph), // Sempre mostrar número
+        });
         markerContent = pinElement.element;
       }
 
+      // zIndex: marcadores de rota (com index) ficam por cima de não alocados (sem index)
+      const baseZIndex = isUnassigned ? 100 : 500; // Rota fica por cima de não alocados
       const marker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: stop,
         content: markerContent,
         title: `Parada ${index !== undefined ? index + 1 : 'Avulsa'}: ${stop.customerName ?? ""}${hasTimePreference ? ' (Com horário)' : ''}`,
-        zIndex: isHighlighted ? 1000 : (hasTimePreference ? 950 : (isNewlyAdded ? 900 : undefined)),
+        zIndex: isHighlighted ? 1000 : (hasTimePreference ? 950 : (isNewlyAdded ? 900 : baseZIndex)),
       });
       const info = new google.maps.InfoWindow({ content: createInfoWindowContent(stop, index) });
 
