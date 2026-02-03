@@ -218,6 +218,9 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      <p className="mt-6 text-xs text-muted-foreground">
+        © 2026 Rota Exata. Todos os direitos reservados.
+      </p>
     </div>
   )
 }
