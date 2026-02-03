@@ -501,146 +501,26 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       // Criar elemento de conteúdo do marcador
       let markerContent: HTMLElement;
 
-      // Se tem preferência de horário, usar ícone customizado SVG
-      if (hasTimePreference && !isHighlighted) {
-        const customIcon = document.createElement('div');
-        customIcon.style.cursor = 'pointer';
-        customIcon.style.position = 'relative';
-
-        // Usar ícone verde se concluído, rosa se pendente
-        const iconSrc = isCompleted
-          ? '/icons/icone-rota-com-horario-finalizada.svg'
-          : '/icons/icone-rota-com-horario.svg';
-
-        const img = document.createElement('img');
-        img.src = iconSrc;
-        // Tamanho maior para ficar compatível com os PinElements padrão do Google Maps
-        img.style.width = '105px';
-        img.style.height = '105px';
-        img.style.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,0.4))';
-        img.style.transition = 'transform 0.3s ease';
-
-        // Criar tooltip que aparece ao passar o mouse
-        const tooltip = document.createElement('div');
-        tooltip.style.position = 'absolute';
-        tooltip.style.bottom = '110%';
-        tooltip.style.left = '50%';
-        tooltip.style.transform = 'translateX(-50%)';
-        tooltip.style.opacity = '0';
-        tooltip.style.visibility = 'hidden';
-        tooltip.style.background = 'linear-gradient(138deg, rgba(236, 72, 153, 1) 15%, rgba(249, 115, 170, 1) 65%)';
-        tooltip.style.padding = '12px 16px';
-        tooltip.style.borderRadius = '12px';
-        tooltip.style.transition = 'opacity 0.3s, visibility 0.3s, bottom 0.3s';
-        tooltip.style.zIndex = '9999';
-        tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.25)';
-        tooltip.style.minWidth = '200px';
-        tooltip.style.maxWidth = '280px';
-        tooltip.style.pointerEvents = 'none';
-
-        // Conteúdo do tooltip
-        const timeWindow = stop.timeWindowStart && stop.timeWindowEnd
-          ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}`
-          : 'Não especificado';
-
-        tooltip.innerHTML = `
-          <div style="font-family: Inter, system-ui, sans-serif; color: #ffffff;">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12 6 12 12 16 14"></polyline>
-              </svg>
-              <span style="font-weight: 700; font-size: 15px; color: #ffffff;">Preferência de Horário</span>
-            </div>
-            <div style="display: grid; gap: 8px; font-size: 13px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="color: #ffffff;">🕐 Janela:</span>
-                <strong style="color: #ffffff;">${timeWindow}</strong>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="color: #ffffff;">👤 Cliente:</span>
-                <strong style="color: #ffffff;">${stop.customerName || 'Não informado'}</strong>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="color: #ffffff;">📞 Telefone:</span>
-                <strong style="color: #ffffff;">${stop.phone || 'Não informado'}</strong>
-              </div>
-              ${stop.notes ? `
-              <div style="display: flex; align-items: start; gap: 8px; margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.3);">
-                <span style="color: #ffffff;">📝</span>
-                <span style="font-style: italic; color: #ffffff;">${stop.notes}</span>
-              </div>
-              ` : ''}
-            </div>
-          </div>
-          <div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid rgba(249, 115, 170, 1);"></div>
-        `;
-
-        // Se concluído, mudar cor do tooltip para verde
-        if (isCompleted) {
-          tooltip.style.background = 'linear-gradient(138deg, rgba(22, 163, 74, 1) 15%, rgba(34, 197, 94, 1) 65%)';
-          tooltip.innerHTML = tooltip.innerHTML.replace('rgba(249, 115, 170, 1)', 'rgba(34, 197, 94, 1)');
-        }
-
-        // Event listeners para mostrar/esconder tooltip
-        customIcon.addEventListener('mouseenter', () => {
-          tooltip.style.opacity = '1';
-          tooltip.style.visibility = 'visible';
-          tooltip.style.bottom = '115%';
-          img.style.transform = 'scale(1.1)';
-        });
-
-        customIcon.addEventListener('mouseleave', () => {
-          tooltip.style.opacity = '0';
-          tooltip.style.visibility = 'hidden';
-          tooltip.style.bottom = '110%';
-          img.style.transform = 'scale(1)';
-        });
-
-        customIcon.appendChild(tooltip);
-
-        // Adicionar número da parada se disponível
-        if (index !== undefined) {
-          const numberBadge = document.createElement('div');
-          numberBadge.textContent = `${index + 1}`;
-          numberBadge.style.position = 'absolute';
-          numberBadge.style.top = '-2px';
-          numberBadge.style.right = '-2px';
-          numberBadge.style.backgroundColor = isCompleted ? '#16a34a' : '#ec4899';
-          numberBadge.style.color = 'white';
-          numberBadge.style.borderRadius = '50%';
-          numberBadge.style.width = '36px';
-          numberBadge.style.height = '36px';
-          numberBadge.style.display = 'flex';
-          numberBadge.style.alignItems = 'center';
-          numberBadge.style.justifyContent = 'center';
-          numberBadge.style.fontSize = '16px';
-          numberBadge.style.fontWeight = 'bold';
-          numberBadge.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-          numberBadge.style.border = '3px solid white';
-          numberBadge.style.transition = 'transform 0.3s ease';
-          customIcon.appendChild(img);
-          customIcon.appendChild(numberBadge);
-        } else {
-          customIcon.appendChild(img);
-        }
-
-        markerContent = customIcon;
-      } else {
-        // Usar PinElement padrão
-        const pinElement = new google.maps.marker.PinElement({
-          background: isUnassigned
-            ? (isHighlighted ? '#FFD700' : (isNewlyAdded ? '#FF6B00' : '#000000'))
-            : markerBackground,
-          borderColor: isUnassigned
-            ? (isHighlighted ? '#FF6B00' : (isNewlyAdded ? '#FFD700' : '#FFFFFF'))
-            : markerBorder,
-          glyphColor: '#FFFFFF', // Sempre branco para visibilidade
-          scale: isHighlighted ? 1.5 : (isNewlyAdded ? 1.3 : markerScale),
-          glyph: isHighlighted ? '★' : (isNewlyAdded ? '✨' : markerGlyph), // Sempre mostrar número
-        });
-        markerContent = pinElement.element;
+      // Definir cores para marcadores com preferência de horário
+      // Rosa/magenta para pendentes, verde para concluídos
+      if (hasTimePreference && !isHighlighted && !isCompleted && !isFailed && !isNewlyAdded) {
+        markerBackground = '#ec4899'; // Rosa/magenta para entregas com horário
+        markerBorder = '#db2777';
       }
+
+      // Usar PinElement para todos os marcadores (incluindo os com preferência de horário)
+      const pinElement = new google.maps.marker.PinElement({
+        background: isUnassigned
+          ? (isHighlighted ? '#FFD700' : (isNewlyAdded ? '#FF6B00' : '#000000'))
+          : markerBackground,
+        borderColor: isUnassigned
+          ? (isHighlighted ? '#FF6B00' : (isNewlyAdded ? '#FFD700' : '#FFFFFF'))
+          : markerBorder,
+        glyphColor: '#FFFFFF', // Sempre branco para visibilidade
+        scale: isHighlighted ? 1.5 : (isNewlyAdded ? 1.3 : markerScale),
+        glyph: isHighlighted ? '★' : (isNewlyAdded ? '✨' : markerGlyph), // Sempre mostrar número
+      });
+      markerContent = pinElement.element;
 
       // zIndex: marcadores de rota (com index) ficam por cima de não alocados (sem index)
       const baseZIndex = isUnassigned ? 100 : 500; // Rota fica por cima de não alocados
