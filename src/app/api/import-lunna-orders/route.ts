@@ -254,6 +254,11 @@ export async function POST(request: NextRequest) {
       if (hasVenda && hasTroca) operationType = 'misto';
       else if (hasTroca) operationType = 'troca';
 
+      // Extrair janela de tempo do pedido Lunna (se existir)
+      const timeWindowStart = result.order.shipping?.deliveryTimeStart || '';
+      const timeWindowEnd = result.order.shipping?.deliveryTimeEnd || '';
+      const hasTimePreference = !!(timeWindowStart && timeWindowEnd);
+
       // Campos comuns do Lunna
       const lunnaFields = {
         expectedValue: result.order.billing.finalValue,
@@ -262,6 +267,13 @@ export async function POST(request: NextRequest) {
         hasExchangeItems: hasTroca,
         operationType,
         lunnaClientCode: result.client.codigo,
+      };
+
+      // Campos de janela de tempo
+      const timeWindowFields = {
+        timeWindowStart,
+        timeWindowEnd,
+        hasTimePreference,
       };
 
       if (result.geocoded) {
@@ -277,6 +289,7 @@ export async function POST(request: NextRequest) {
           addressString: result.addressString.replace(', Brasil', ''),
           deliveryStatus: 'pending',
           ...lunnaFields,
+          ...timeWindowFields,
         };
         successfulStops.push(stop);
       } else {
@@ -297,6 +310,7 @@ export async function POST(request: NextRequest) {
           hasValidationIssues: true,
           validationIssues: ['Endereço não foi geocodificado. Necessário editar manualmente.'],
           ...lunnaFields,
+          ...timeWindowFields,
         };
         successfulStops.push(stopWithIssue);
         failedGeocodings.push({
@@ -370,9 +384,32 @@ export async function POST(request: NextRequest) {
     // 5. Gerar código da rota (LN-XXXX) - apenas para novas rotas
     const routeCode = await generateLunnaRouteCode();
 
+    // 5.1 Buscar origem padrão do sistema (configurada em settings ou usar padrão fixo)
+    let defaultOrigin: PlaceValue = {
+      id: 'default-origin-sol-de-maria',
+      address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
+      placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
+      lat: -16.6786,
+      lng: -49.2552,
+    };
+
+    // Tentar buscar origem personalizada do Firestore (se existir)
+    try {
+      const settingsDoc = await adminDb.collection('settings').doc('defaultOrigin').get();
+      if (settingsDoc.exists) {
+        const settingsData = settingsDoc.data();
+        if (settingsData?.origin) {
+          defaultOrigin = settingsData.origin;
+        }
+      }
+    } catch (settingsError) {
+      console.warn('Não foi possível buscar origem padrão das configurações, usando padrão fixo:', settingsError);
+    }
+
     // 6. Criar rota no Firestore
-    const routeData: Partial<RouteInfo> & { plannedDate: any; createdBy: string; createdAt: any } = {
+    const routeData: Partial<RouteInfo> & { plannedDate: any; createdBy: string; createdAt: any; origin: PlaceValue } = {
       code: routeCode,
+      origin: defaultOrigin, // Origem padrão do sistema
       stops: successfulStops,
       encodedPolyline: '', // Será preenchido após otimização manual
       distanceMeters: 0,

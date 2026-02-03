@@ -261,6 +261,9 @@ export type LunnaOrder = {
   };
   shipping?: {
     deliveryDate?: Timestamp | Date;
+    deliveryTimeStart?: string; // Horário início da janela de entrega (ex: "08:00")
+    deliveryTimeEnd?: string;   // Horário fim da janela de entrega (ex: "12:00")
+    deliveryPeriod?: 'Matutino' | 'Vespertino' | 'Integral'; // Período de entrega
   };
   complement?: {
     notes?: string;

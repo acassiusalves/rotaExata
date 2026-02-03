@@ -2339,12 +2339,25 @@ export default function OrganizeRoutePage() {
         // Marcar paradas modificadas
         const stopsWithFlags = markModifiedStops(newStops, changes);
 
-        await updateDoc(routeRef, {
+        // Verificar se foi atribuído um motorista na aba Atribuir
+        const driverId = assignedDrivers[routeKey];
+        const driver = driverId ? availableDrivers.find(d => d.id === driverId) : null;
+
+        // Preparar dados para atualização
+        const updateData: Record<string, any> = {
             stops: stopsWithFlags,
             distanceMeters: routeToUpdate.distanceMeters,
             duration: routeToUpdate.duration,
             encodedPolyline: routeToUpdate.encodedPolyline,
-        });
+        };
+
+        // Incluir motorista se foi selecionado um novo
+        if (driverId && driver) {
+            updateData.driverId = driverId;
+            updateData.driverInfo = { name: driver.name, vehicle: driver.vehicle };
+        }
+
+        await updateDoc(routeRef, updateData);
 
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
@@ -2368,9 +2381,13 @@ export default function OrganizeRoutePage() {
             });
           }
         } else {
+          // Mensagem diferenciada se motorista foi atribuído
+          const driverMessage = driverId && driver
+            ? ` Motorista ${driver.name} atribuído.`
+            : '';
           toast({
               title: 'Rota Atualizada!',
-              description: `A ${routeName} foi atualizada com sucesso.`,
+              description: `A ${routeName} foi atualizada com sucesso.${driverMessage}`,
           });
         }
 
