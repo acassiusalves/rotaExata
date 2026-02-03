@@ -1039,21 +1039,40 @@ export default function OrganizeRoutePage() {
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
 
               // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
-              let origin = routeData.origin || parsedData.origin;
-              if (!origin) {
-                // Usar origem padrão do sistema (Sol de Maria)
-                origin = {
-                  id: 'default-origin-sol-de-maria',
-                  address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-                  placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-                  lat: -16.6786,
-                  lng: -49.2552,
-                };
+              // Definir origem padrão Sol de Maria
+              const defaultOrigin: PlaceValue = {
+                id: 'default-origin-sol-de-maria',
+                address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
+                placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
+                lat: -16.6786,
+                lng: -49.2552,
+              };
+
+              // Log para debug - ver quais origens estão disponíveis
+              console.log('🔍 [useEffect:loadRouteData] Verificando origens:', {
+                firestoreOrigin: routeData.origin ? { lat: routeData.origin.lat, lng: routeData.origin.lng, address: routeData.origin.address } : null,
+                sessionStorageOrigin: parsedData.origin ? { lat: parsedData.origin.lat, lng: parsedData.origin.lng, address: parsedData.origin.address } : null,
+                defaultOrigin: { lat: defaultOrigin.lat, lng: defaultOrigin.lng },
+              });
+
+              // Verificar se a origem do Firestore é válida (tem coordenadas válidas)
+              const isValidOrigin = (o: PlaceValue | undefined | null): boolean => {
+                return !!(o && typeof o.lat === 'number' && typeof o.lng === 'number' && o.lat !== 0 && o.lng !== 0);
+              };
+
+              let origin: PlaceValue;
+              if (isValidOrigin(routeData.origin)) {
+                origin = routeData.origin;
+                console.log('✅ [useEffect:loadRouteData] Usando origem do Firestore:', origin.address);
+              } else if (isValidOrigin(parsedData.origin)) {
+                origin = parsedData.origin;
+                console.log('⚠️ [useEffect:loadRouteData] Usando origem do sessionStorage:', origin.address);
+              } else {
+                origin = defaultOrigin;
                 console.log('⚠️ [useEffect:loadRouteData] Origem não encontrada, usando origem padrão Sol de Maria');
               }
-              if (origin) {
-                setRouteData(prev => prev ? { ...prev, origin } : prev);
-              }
+
+              setRouteData(prev => prev ? { ...prev, origin } : prev);
               console.log('✅ [useEffect:loadRouteData] Stops válidos após filtro:', allStops.length);
 
               // Verificar se precisa recalcular a rota (origem não existia ou polyline vazia)
