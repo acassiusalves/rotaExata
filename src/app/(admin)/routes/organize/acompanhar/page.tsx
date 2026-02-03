@@ -1038,31 +1038,62 @@ export default function OrganizeRoutePage() {
               // Usar dados do Firestore ao invés do sessionStorage
               const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
 
-              // Atualizar routeData com origem do Firestore (ou criar uma baseada no primeiro stop)
+              // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
               let origin = routeData.origin || parsedData.origin;
-              if (!origin && allStops.length > 0) {
-                // Se não tem origem, usar o primeiro stop como origem
+              if (!origin) {
+                // Usar origem padrão do sistema (Sol de Maria)
                 origin = {
-                  id: 'origin-from-first-stop',
-                  address: allStops[0].address,
-                  lat: allStops[0].lat,
-                  lng: allStops[0].lng,
-                  placeId: allStops[0].placeId,
+                  id: 'default-origin-sol-de-maria',
+                  address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
+                  placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
+                  lat: -16.6786,
+                  lng: -49.2552,
                 };
-                console.log('⚠️ [useEffect:loadRouteData] Origem não encontrada, usando primeiro stop como origem');
+                console.log('⚠️ [useEffect:loadRouteData] Origem não encontrada, usando origem padrão Sol de Maria');
               }
               if (origin) {
                 setRouteData(prev => prev ? { ...prev, origin } : prev);
               }
               console.log('✅ [useEffect:loadRouteData] Stops válidos após filtro:', allStops.length);
-              setRouteA({
-                stops: allStops,
-                distanceMeters: routeData.distanceMeters,
-                duration: routeData.duration,
-                encodedPolyline: routeData.encodedPolyline,
-                color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
-                visible: true,
-              });
+
+              // Verificar se precisa recalcular a rota (origem não existia ou polyline vazia)
+              const needsRecalculation = !routeData.origin || !routeData.encodedPolyline;
+
+              if (needsRecalculation && origin && allStops.length > 0) {
+                console.log('🔄 [useEffect:loadRouteData] Recalculando rota com nova origem...');
+                // Recalcular a rota incluindo a origem
+                const recalculatedRoute = await computeRoute(origin, allStops);
+                if (recalculatedRoute) {
+                  console.log('✅ [useEffect:loadRouteData] Rota recalculada com sucesso');
+                  setRouteA({
+                    stops: allStops,
+                    distanceMeters: recalculatedRoute.distanceMeters,
+                    duration: recalculatedRoute.duration,
+                    encodedPolyline: recalculatedRoute.encodedPolyline,
+                    color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                    visible: true,
+                  });
+                } else {
+                  console.warn('⚠️ [useEffect:loadRouteData] Falha ao recalcular, usando dados existentes');
+                  setRouteA({
+                    stops: allStops,
+                    distanceMeters: routeData.distanceMeters,
+                    duration: routeData.duration,
+                    encodedPolyline: routeData.encodedPolyline,
+                    color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                    visible: true,
+                  });
+                }
+              } else {
+                setRouteA({
+                  stops: allStops,
+                  distanceMeters: routeData.distanceMeters,
+                  duration: routeData.duration,
+                  encodedPolyline: routeData.encodedPolyline,
+                  color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                  visible: true,
+                });
+              }
               setRouteB(null); // Não tem segunda rota
 
               // Carregar unassignedStops do Firestore (pontos adicionados via Lunna)
