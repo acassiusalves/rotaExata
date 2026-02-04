@@ -37,6 +37,7 @@ import {
   Search,
   Download,
   Bug,
+  Trash2,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import { GoogleMap, Marker } from '@react-google-maps/api';
@@ -106,7 +107,7 @@ import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db, functions } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, writeBatch } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, writeBatch, deleteDoc } from "firebase/firestore";
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -557,11 +558,13 @@ export default function OrganizeRoutePage() {
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
 
   // State for dynamic routes (C, D, E, etc.)
+  // firestoreId is set after the route is saved to Firestore
   const [dynamicRoutes, setDynamicRoutes] = React.useState<Array<{
     key: string;
     name: string;
     data: RouteInfo;
     color: string;
+    firestoreId?: string;
   }>>([]);
 
   // State for pending edits (reordering within same route AND cross-route movements)
@@ -2076,7 +2079,19 @@ export default function OrganizeRoutePage() {
         _originalIndex: idx // Store original index
       }));
 
+      // Validate indices before arrayMove
+      if (oldIndex === undefined || newIndex === undefined || oldIndex < 0 || newIndex < 0 || oldIndex >= stopsToReorder.length) {
+        addDebugLog('DRAG_SAME_ROUTE', 'ERROR: Invalid indices', { oldIndex, newIndex, stopsLength: stopsToReorder.length });
+        return;
+      }
+
       const newStops = arrayMove(stopsToReorder, oldIndex, newIndex);
+
+      // Validate the moved stop exists
+      if (!newStops[newIndex]) {
+        addDebugLog('DRAG_SAME_ROUTE', 'ERROR: Moved stop not found at new index', { newIndex, newStopsLength: newStops.length });
+        return;
+      }
 
       // Mark the moved stop with _wasMoved flag
       const stopId = String(newStops[newIndex].id ?? newStops[newIndex].placeId);
@@ -2322,6 +2337,61 @@ export default function OrganizeRoutePage() {
     toast({
       title: 'Nova rota criada!',
       description: `${newRoute.name} foi adicionada. Arraste serviços para ela.`
+    });
+  };
+
+  // Function to delete a dynamic route
+  const handleDeleteDynamicRoute = async (routeKey: string) => {
+    const dynamicRoute = dynamicRoutes.find(r => r.key === routeKey);
+    if (!dynamicRoute) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Rota não encontrada.',
+      });
+      return;
+    }
+
+    // Check if route has stops - if so, move them back to unassigned
+    const routeStops = pendingEdits[routeKey] || dynamicRoute.data.stops;
+
+    if (routeStops.length > 0) {
+      // Move stops back to unassigned
+      setUnassignedStops(prev => [...prev, ...routeStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop)]);
+    }
+
+    // If route was saved to Firestore, delete it there too
+    if (dynamicRoute.firestoreId) {
+      try {
+        await deleteDoc(doc(db, 'routes', dynamicRoute.firestoreId));
+        addDebugLog('DELETE_ROUTE', `Deleted route ${routeKey} from Firestore`, {
+          firestoreId: dynamicRoute.firestoreId
+        });
+      } catch (error) {
+        console.error('Erro ao deletar rota do Firestore:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao deletar',
+          description: 'A rota foi removida localmente, mas não foi deletada do servidor.',
+        });
+      }
+    }
+
+    // Remove from dynamicRoutes
+    setDynamicRoutes(prev => prev.filter(r => r.key !== routeKey));
+
+    // Clear any pending edits for this route
+    setPendingEdits(prev => {
+      const newEdits = { ...prev };
+      delete newEdits[routeKey];
+      return newEdits;
+    });
+
+    toast({
+      title: 'Rota removida',
+      description: routeStops.length > 0
+        ? `${dynamicRoute.name} foi removida. ${routeStops.length} parada(s) movida(s) para não atribuídos.`
+        : `${dynamicRoute.name} foi removida.`,
     });
   };
 
@@ -3043,6 +3113,15 @@ export default function OrganizeRoutePage() {
       routeId: string;
       cleanedStops: any[];
       routeInfo: RouteInfo | null;
+      isNew: boolean;
+    }> = [];
+
+    // Track new routes that need to be created
+    const newRoutesToCreate: Array<{
+      routeKey: string;
+      cleanedStops: any[];
+      routeInfo: RouteInfo | null;
+      dynamicRoute: { key: string; name: string; data: RouteInfo; color: string };
     }> = [];
 
     for (const key of allRoutesWithPending) {
@@ -3086,7 +3165,41 @@ export default function OrganizeRoutePage() {
           routeKey: key
         });
       } else {
-        // For additional routes, use the route ID directly
+        // Check if it's a dynamic route (C, D, E, etc.)
+        const dynamicRoute = dynamicRoutes.find(r => r.key === key);
+        if (dynamicRoute) {
+          // Check if dynamic route was already saved to Firestore
+          if (dynamicRoute.firestoreId) {
+            // Already saved - update it
+            routeId = dynamicRoute.firestoreId;
+            addDebugLog('APPLY_PENDING_EDITS', `Dynamic route ${key} already has Firestore ID, will UPDATE`, {
+              routeKey: key,
+              firestoreId: routeId,
+              stopsCount: cleanedStops.length
+            });
+            // Don't continue - let it be added to routeUpdates below
+          } else if (cleanedStops.length > 0) {
+            // Dynamic route not yet saved - needs to be created in Firestore
+            newRoutesToCreate.push({
+              routeKey: key,
+              cleanedStops,
+              routeInfo,
+              dynamicRoute
+            });
+            addDebugLog('APPLY_PENDING_EDITS', `Dynamic route ${key} will be CREATED in Firestore`, {
+              routeKey: key,
+              stopsCount: cleanedStops.length
+            });
+            continue; // Don't add to routeUpdates, will be handled separately
+          } else {
+            addDebugLog('APPLY_PENDING_EDITS', `Dynamic route ${key} has no stops, skipping creation`, {
+              routeKey: key
+            });
+            continue;
+          }
+        }
+
+        // For additional routes (existing routes from same period), use the route ID directly
         const additionalRoute = additionalRoutes.find(r => r.id === key);
         if (additionalRoute) {
           routeId = additionalRoute.id;
@@ -3095,8 +3208,9 @@ export default function OrganizeRoutePage() {
             firestoreId: routeId
           });
         } else {
-          addDebugLog('APPLY_PENDING_EDITS', `WARNING: Route ${key} not found in additionalRoutes`, {
+          addDebugLog('APPLY_PENDING_EDITS', `WARNING: Route ${key} not found in dynamicRoutes or additionalRoutes`, {
             routeKey: key,
+            dynamicRoutesKeys: dynamicRoutes.map(r => r.key),
             additionalRoutesIds: additionalRoutes.map(r => r.id)
           });
         }
@@ -3107,7 +3221,8 @@ export default function OrganizeRoutePage() {
           routeKey: key,
           routeId,
           cleanedStops,
-          routeInfo
+          routeInfo,
+          isNew: false
         });
 
         // Update local state
@@ -3123,47 +3238,98 @@ export default function OrganizeRoutePage() {
       }
     }
 
-    addDebugLog('APPLY_PENDING_EDITS', 'All routes prepared, starting ATOMIC Firestore batch', {
-      routesToUpdate: routeUpdates.length
+    addDebugLog('APPLY_PENDING_EDITS', 'All routes prepared, starting Firestore operations', {
+      routesToUpdate: routeUpdates.length,
+      routesToCreate: newRoutesToCreate.length
     });
 
-    // Use Firestore batch to write ALL routes atomically
     try {
-      const batch = writeBatch(db);
+      // First, create new routes (dynamic routes C, D, E, etc.)
+      const createdRouteIds: Record<string, string> = {};
 
-      for (const update of routeUpdates) {
-        const routeRef = doc(db, 'routes', update.routeId);
+      for (const newRoute of newRoutesToCreate) {
+        const routeDate = new Date(routeData.routeDate);
+        const newRouteDoc = await addDoc(collection(db, 'routes'), {
+          name: newRoute.dynamicRoute.name,
+          origin: routeData.origin,
+          stops: newRoute.cleanedStops,
+          encodedPolyline: newRoute.routeInfo?.encodedPolyline || '',
+          distanceMeters: newRoute.routeInfo?.distanceMeters || 0,
+          duration: newRoute.routeInfo?.duration || '0s',
+          color: newRoute.dynamicRoute.color,
+          status: 'pending',
+          plannedDate: Timestamp.fromDate(routeDate),
+          period: routeData.period || 'Matutino',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
 
-        if (update.routeInfo) {
-          batch.update(routeRef, {
-            stops: update.cleanedStops,
-            encodedPolyline: update.routeInfo.encodedPolyline,
-            distanceMeters: update.routeInfo.distanceMeters,
-            duration: update.routeInfo.duration,
-          });
-          addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops`);
-        } else {
-          // Empty route
-          batch.update(routeRef, {
-            stops: [],
-            encodedPolyline: '',
-            distanceMeters: 0,
-            duration: '0s',
-          });
-          addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch as empty`);
-        }
+        createdRouteIds[newRoute.routeKey] = newRouteDoc.id;
+
+        addDebugLog('FIRESTORE_CREATE', `✅ Created new route ${newRoute.routeKey} in Firestore`, {
+          routeKey: newRoute.routeKey,
+          firestoreId: newRouteDoc.id,
+          stopsCount: newRoute.cleanedStops.length
+        });
+
+        // Update local state for the dynamic route - keep in dynamicRoutes but mark with firestoreId
+        setDynamicRoutes(prev => prev.map(r =>
+          r.key === newRoute.routeKey
+            ? {
+                ...r,
+                firestoreId: newRouteDoc.id,
+                data: {
+                  ...r.data,
+                  stops: newRoute.cleanedStops,
+                  encodedPolyline: newRoute.routeInfo?.encodedPolyline || '',
+                  distanceMeters: newRoute.routeInfo?.distanceMeters || 0,
+                  duration: newRoute.routeInfo?.duration || '0s',
+                }
+              }
+            : r
+        ));
       }
 
-      // Commit all changes atomically
-      await batch.commit();
+      // Then, batch update existing routes
+      if (routeUpdates.length > 0) {
+        const batch = writeBatch(db);
 
-      addDebugLog('FIRESTORE_BATCH', '✅ ATOMIC batch commit successful', {
-        routesUpdated: routeUpdates.length
-      });
+        for (const update of routeUpdates) {
+          const routeRef = doc(db, 'routes', update.routeId);
+
+          if (update.routeInfo) {
+            batch.update(routeRef, {
+              stops: update.cleanedStops,
+              encodedPolyline: update.routeInfo.encodedPolyline,
+              distanceMeters: update.routeInfo.distanceMeters,
+              duration: update.routeInfo.duration,
+              updatedAt: serverTimestamp(),
+            });
+            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops`);
+          } else {
+            // Empty route
+            batch.update(routeRef, {
+              stops: [],
+              encodedPolyline: '',
+              distanceMeters: 0,
+              duration: '0s',
+              updatedAt: serverTimestamp(),
+            });
+            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch as empty`);
+          }
+        }
+
+        // Commit all changes atomically
+        await batch.commit();
+
+        addDebugLog('FIRESTORE_BATCH', '✅ ATOMIC batch commit successful', {
+          routesUpdated: routeUpdates.length
+        });
+      }
 
     } catch (error) {
-      console.error('❌ Erro ao salvar edições no Firestore (batch):', error);
-      addDebugLog('FIRESTORE_ERROR', 'Batch commit FAILED', { error });
+      console.error('❌ Erro ao salvar edições no Firestore:', error);
+      addDebugLog('FIRESTORE_ERROR', 'Firestore operation FAILED', { error });
       toast({
         variant: 'destructive',
         title: 'Erro ao salvar',
@@ -3179,14 +3345,18 @@ export default function OrganizeRoutePage() {
       return newEdits;
     });
 
-    addDebugLog('APPLY_PENDING_EDITS', '✅ Completed ATOMIC apply', {
-      clearedRoutes: allRoutesWithPending
+    const totalRoutesAffected = routeUpdates.length + newRoutesToCreate.length;
+
+    addDebugLog('APPLY_PENDING_EDITS', '✅ Completed apply', {
+      clearedRoutes: allRoutesWithPending,
+      updatedRoutes: routeUpdates.length,
+      createdRoutes: newRoutesToCreate.length
     });
 
     toast({
       title: 'Edições aplicadas!',
-      description: routeUpdates.length > 1
-        ? `${routeUpdates.length} rotas foram atualizadas atomicamente.${routeData.isExistingRoute ? ' Motoristas receberão atualização.' : ''}`
+      description: totalRoutesAffected > 1
+        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${routeData.isExistingRoute ? ' Motoristas receberão atualização.' : ''}`
         : `Rota atualizada com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`,
     });
   };
@@ -3260,14 +3430,24 @@ export default function OrganizeRoutePage() {
      dynamicRoutes.map(r => ({ ...r, isMainRoute: true })) as any[]
    );
 
+  // Get Firestore IDs of dynamic routes that have been saved to avoid duplicates
+  const dynamicRouteFirestoreIds = new Set(
+    dynamicRoutes
+      .filter(r => r.firestoreId)
+      .map(r => r.firestoreId)
+  );
+
   // Rotas adicionais do período convertidas para o mesmo formato
-  const additionalRoutesForTable = additionalRoutes.map(route => ({
-    key: route.id,
-    name: route.name,
-    data: route.data,
-    isMainRoute: false,
-    additionalRouteData: route, // Mantém referência aos dados originais
-  }));
+  // Filter out any routes that are already shown as dynamic routes (to avoid duplicates)
+  const additionalRoutesForTable = additionalRoutes
+    .filter(route => !dynamicRouteFirestoreIds.has(route.id)) // Avoid duplicates with saved dynamic routes
+    .map(route => ({
+      key: route.id,
+      name: route.name,
+      data: route.data,
+      isMainRoute: false,
+      additionalRouteData: route, // Mantém referência aos dados originais
+    }));
 
   // Tabela unificada: rotas principais primeiro, depois as adicionais
   const routesForTable = [...mainRoutes, ...additionalRoutesForTable] as any[];
@@ -3564,26 +3744,40 @@ export default function OrganizeRoutePage() {
                                         />
                                     </TableCell>
                                     <TableCell className="py-4 px-4 text-right">
-                                        {pendingEdits[routeItem.key] ? (
-                                            <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
-                                                {pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
-                                            </Badge>
-                                        ) : (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => handleOptimizeSingleRoute(routeItem.key)}
-                                                disabled={true}
-                                                className="bg-primary/10 text-primary hover:bg-primary/20 font-medium opacity-50 cursor-not-allowed"
-                                            >
-                                                {isOptimizing[routeItem.key] ? (
-                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                ) : (
-                                                    <Wand2 className="mr-2 h-4 w-4" />
-                                                )}
-                                                Otimizar
-                                            </Button>
-                                        )}
+                                        <div className="flex items-center justify-end gap-2">
+                                            {pendingEdits[routeItem.key] ? (
+                                                <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                                                    {pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
+                                                </Badge>
+                                            ) : (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleOptimizeSingleRoute(routeItem.key)}
+                                                    disabled={true}
+                                                    className="bg-primary/10 text-primary hover:bg-primary/20 font-medium opacity-50 cursor-not-allowed"
+                                                >
+                                                    {isOptimizing[routeItem.key] ? (
+                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <Wand2 className="mr-2 h-4 w-4" />
+                                                    )}
+                                                    Otimizar
+                                                </Button>
+                                            )}
+                                            {/* Show delete button only for dynamic routes (C, D, E, etc.) */}
+                                            {dynamicRoutes.some(r => r.key === routeItem.key) && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => handleDeleteDynamicRoute(routeItem.key)}
+                                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                    title="Remover rota"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                                 );
