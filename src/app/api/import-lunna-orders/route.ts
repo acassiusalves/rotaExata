@@ -4,6 +4,18 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 
+// CORS headers para permitir chamadas do Luna
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://luna-sooty.vercel.app',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Handler para preflight requests (OPTIONS)
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 // Função para geocodificar um endereço usando Google Maps API
 async function geocodeAddress(address: string): Promise<PlaceValue | null> {
   try {
@@ -107,14 +119,14 @@ export async function POST(request: NextRequest) {
     if (!rateLimitResult.success) {
       return NextResponse.json(
         { error: 'RATE_LIMIT_EXCEEDED', detail: 'Muitas requisições. Tente novamente em alguns segundos.' },
-        { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+        { status: 429, headers: { ...corsHeaders, ...rateLimitHeaders(rateLimitResult) } }
       );
     }
 
     if (!adminDb) {
       return NextResponse.json(
         { error: 'Firebase Admin não inicializado' },
-        { status: 500 }
+        { status: 500, headers: corsHeaders }
       );
     }
 
@@ -125,14 +137,14 @@ export async function POST(request: NextRequest) {
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
       return NextResponse.json(
         { error: 'orderIds é obrigatório e deve ser um array não vazio' },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
     if (!userId) {
       return NextResponse.json(
         { error: 'userId é obrigatório' },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -141,7 +153,7 @@ export async function POST(request: NextRequest) {
     if (!hasPermission) {
       return NextResponse.json(
         { error: 'Usuário não tem permissão para importar pedidos' },
-        { status: 403 }
+        { status: 403, headers: corsHeaders }
       );
     }
 
@@ -164,7 +176,7 @@ export async function POST(request: NextRequest) {
           error: 'Alguns pedidos não foram encontrados',
           notFoundOrders,
         },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       );
     }
 
@@ -189,7 +201,7 @@ export async function POST(request: NextRequest) {
           error: 'Alguns clientes não foram encontrados na coleção "clientes"',
           missingClients,
         },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       );
     }
 
@@ -351,7 +363,7 @@ export async function POST(request: NextRequest) {
               added: 0,
               alreadyInRoute: orders.length,
             },
-          });
+          }, { headers: corsHeaders });
         }
 
         // Atualizar rota existente com novos stops
@@ -383,7 +395,7 @@ export async function POST(request: NextRequest) {
             withIssues: failedGeocodings.length,
             failedGeocodings: failedGeocodings,
           },
-        });
+        }, { headers: corsHeaders });
       }
     }
 
@@ -457,7 +469,7 @@ export async function POST(request: NextRequest) {
         withIssues: failedGeocodings.length,
         failedGeocodings: failedGeocodings,
       },
-    });
+    }, { headers: corsHeaders });
   } catch (error) {
     console.error('Erro ao importar pedidos:', error);
     return NextResponse.json(
@@ -465,7 +477,7 @@ export async function POST(request: NextRequest) {
         error: 'Erro interno ao processar pedidos',
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
