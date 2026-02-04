@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem } from '@/lib/types';
+import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 
 // Função para geocodificar um endereço usando Google Maps API
@@ -46,13 +46,13 @@ async function geocodeAddress(address: string): Promise<PlaceValue | null> {
   }
 }
 
-// Função para gerar código LN-XXXX usando o contador existente
-async function generateLunnaRouteCode(): Promise<string> {
+// Função para gerar código LN-XXXX para Serviços usando contador dedicado
+async function generateLunnaServiceCode(): Promise<string> {
   if (!adminDb) {
     throw new Error('Firebase Admin não inicializado');
   }
 
-  const counterRef = adminDb.collection('counters').doc('routeCode');
+  const counterRef = adminDb.collection('counters').doc('serviceCode');
 
   const newCode = await adminDb.runTransaction(async (transaction) => {
     const counterDoc = await transaction.get(counterRef);
@@ -69,6 +69,12 @@ async function generateLunnaRouteCode(): Promise<string> {
   });
 
   return newCode;
+}
+
+// Função para gerar código de rota dentro de um serviço (LN-XXXX-A, LN-XXXX-B, etc.)
+function generateRouteCodeForService(serviceCode: string, routeIndex: number): string {
+  const letter = String.fromCharCode(65 + routeIndex); // A, B, C, D, ...
+  return `${serviceCode}-${letter}`;
 }
 
 // Validar permissões do usuário
@@ -381,8 +387,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 5. Gerar código da rota (LN-XXXX) - apenas para novas rotas
-    const routeCode = await generateLunnaRouteCode();
+    // 5. Gerar código do serviço (LN-XXXX) - para novos serviços
+    const serviceCode = await generateLunnaServiceCode();
 
     // 5.1 Buscar origem padrão do sistema (configurada em settings ou usar padrão fixo)
     let defaultOrigin: PlaceValue = {
@@ -406,40 +412,45 @@ export async function POST(request: NextRequest) {
       console.warn('Não foi possível buscar origem padrão das configurações, usando padrão fixo:', settingsError);
     }
 
-    // 6. Criar rota no Firestore
-    const routeData: Partial<RouteInfo> & { plannedDate: any; createdBy: string; createdAt: any; origin: PlaceValue } = {
-      code: routeCode,
-      origin: defaultOrigin, // Origem padrão do sistema
-      stops: successfulStops,
-      encodedPolyline: '', // Será preenchido após otimização manual
-      distanceMeters: 0,
-      duration: '0s',
-      status: 'dispatched',
+    // 6. Criar SERVIÇO no Firestore (nova arquitetura)
+    const serviceData: Omit<LunnaService, 'id'> = {
+      code: serviceCode,
+      name: `Serviço ${serviceCode}`,
       source: 'lunna',
+      status: 'organizing', // Aguardando organização das rotas
       lunnaOrderIds: orders.map((o) => o.number),
-      visible: true,
-      plannedDate: FieldValue.serverTimestamp(),
+      allStops: successfulStops, // Todos os stops ficam no serviço
+      origin: defaultOrigin,
+      routeIds: [], // Inicialmente vazio, rotas serão criadas depois
+      plannedDate: FieldValue.serverTimestamp() as any,
+      createdAt: FieldValue.serverTimestamp() as any,
       createdBy: userId,
-      createdAt: FieldValue.serverTimestamp(),
+      stats: {
+        totalRoutes: 0,
+        completedRoutes: 0,
+        totalDeliveries: successfulStops.length,
+        completedDeliveries: 0,
+        failedDeliveries: 0,
+      },
     };
 
-    const routeRef = await adminDb.collection('routes').add(routeData);
+    const serviceRef = await adminDb.collection('services').add(serviceData);
 
-    // 6. Atualizar status dos pedidos no Lunna
+    // 7. Atualizar status dos pedidos no Lunna (agora referenciando o Serviço)
     for (const order of orders) {
       await adminDb.collection('orders').doc(order.id).update({
-        logisticsStatus: 'em_rota',
-        rotaExataRouteId: routeRef.id,
-        rotaExataRouteCode: routeCode,
+        logisticsStatus: 'pendente', // Ainda não está em rota, apenas no serviço
+        rotaExataServiceId: serviceRef.id,
+        rotaExataServiceCode: serviceCode,
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
 
-    // 7. Retornar resposta com estatísticas
+    // 8. Retornar resposta com estatísticas
     return NextResponse.json({
       success: true,
-      routeId: routeRef.id,
-      routeCode: routeCode,
+      serviceId: serviceRef.id,
+      serviceCode: serviceCode,
       stats: {
         total: orders.length,
         success: successfulStops.filter((s) => !s.hasValidationIssues).length,

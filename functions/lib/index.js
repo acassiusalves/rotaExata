@@ -221,10 +221,23 @@ exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
     }
     try {
         const db = (0, firestore_1.getFirestore)();
-        await db.collection("routes").doc(routeId).update({
+        const routeRef = db.collection("routes").doc(routeId);
+        // Buscar a rota atual para verificar o status
+        const routeDoc = await routeRef.get();
+        const routeData = routeDoc.data();
+        const currentStatus = routeData?.status;
+        // Se a rota não está em um status ativo, mudar para dispatched ao receber motorista
+        const updateData = {
             driverId,
             driverInfo
-        });
+        };
+        // Status que precisam ser convertidos para 'dispatched' quando um motorista é atribuído
+        const inactiveStatuses = ['draft', 'pending'];
+        if (inactiveStatuses.includes(currentStatus)) {
+            updateData.status = 'dispatched';
+            console.log(`📦 Rota ${routeId} mudando de ${currentStatus} para dispatched`);
+        }
+        await routeRef.update(updateData);
         return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
     }
     catch (error) {

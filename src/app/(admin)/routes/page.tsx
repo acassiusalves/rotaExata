@@ -41,7 +41,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { db, functions } from '@/lib/firebase/client';
 import { collection, onSnapshot, query, orderBy, Timestamp, doc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import type { RouteInfo, Driver } from '@/lib/types';
+import type { RouteInfo, Driver, LunnaService } from '@/lib/types';
+import { ServiceCard } from '@/components/routes/service-card';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
@@ -103,11 +104,18 @@ const getRoutePeriod = (date: Date): { label: string; color: string; icon: React
 };
 
 
+// Type for Luna Service with its routes
+type ServiceWithRoutes = {
+  service: LunnaService & { id: string };
+  routes: RouteDocument[];
+};
+
 export default function RoutesPage() {
   const router = useRouter();
   const { searchQuery } = useRouteSearch();
   const { userRole } = useAuth();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
+  const [services, setServices] = React.useState<ServiceWithRoutes[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [pendingNotifications, setPendingNotifications] = React.useState<Set<string>>(new Set());
@@ -135,8 +143,8 @@ export default function RoutesPage() {
         // Filtrar apenas rotas não concluídas (excluir completed e completed_auto)
         if (data.status !== 'completed' && data.status !== 'completed_auto') {
           routesData.push({
-            id: doc.id,
             ...data,
+            id: doc.id,
           } as RouteDocument);
         }
       });
@@ -149,6 +157,42 @@ export default function RoutesPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Carregar Serviços Luna
+  React.useEffect(() => {
+    const q = query(
+      collection(db, 'services'),
+      where('status', 'in', ['organizing', 'dispatched', 'in_progress', 'partial']),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+      const servicesData: ServiceWithRoutes[] = [];
+
+      for (const docSnap of querySnapshot.docs) {
+        const serviceData = { id: docSnap.id, ...docSnap.data() } as LunnaService & { id: string };
+
+        // Buscar rotas deste serviço
+        const serviceRoutes: RouteDocument[] = [];
+        if (serviceData.routeIds && serviceData.routeIds.length > 0) {
+          // As rotas já foram carregadas no estado routes, filtrar por serviceId
+          const matchingRoutes = routes.filter(r => r.serviceId === docSnap.id);
+          serviceRoutes.push(...matchingRoutes);
+        }
+
+        servicesData.push({
+          service: serviceData,
+          routes: serviceRoutes,
+        });
+      }
+
+      setServices(servicesData);
+    }, (error) => {
+      console.error("Error fetching services: ", error);
+    });
+
+    return () => unsubscribe();
+  }, [routes]);
 
   React.useEffect(() => {
     const q = query(collection(db, 'users'), where('role', '==', 'driver'));
@@ -248,11 +292,18 @@ export default function RoutesPage() {
       const driver = availableDrivers.find(d => d.id === newDriverId);
       const updateRouteDriverFn = httpsCallable(functions, 'updateRouteDriver');
 
+      console.log('🔄 [ChangeDriver] Atualizando rota:', routeToModify.id);
+      console.log('🔄 [ChangeDriver] Novo driverId:', newDriverId);
+      console.log('🔄 [ChangeDriver] Status atual da rota:', routeToModify.status);
+      console.log('🔄 [ChangeDriver] DriverInfo:', driver ? { name: driver.name, vehicle: driver.vehicle } : null);
+
       await updateRouteDriverFn({
         routeId: routeToModify.id,
         driverId: newDriverId,
         driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
       });
+
+      console.log('✅ [ChangeDriver] Rota atualizada com sucesso');
 
       toast({
         title: 'Motorista Alterado!',
@@ -263,7 +314,7 @@ export default function RoutesPage() {
       setRouteToModify(null);
       setNewDriverId('');
     } catch (error: any) {
-      console.error('Error updating driver:', error);
+      console.error('❌ [ChangeDriver] Error updating driver:', error);
       toast({
         variant: 'destructive',
         title: 'Erro ao Alterar Motorista',
@@ -421,14 +472,24 @@ export default function RoutesPage() {
   };
   
   // Filter routes based on search query
+  // Rotas que pertencem a serviços (serão exibidas dentro do ServiceCard)
+  const serviceRouteIds = React.useMemo(() => {
+    return new Set(routes.filter(r => r.serviceId).map(r => r.id));
+  }, [routes]);
+
+  // Rotas independentes (não pertencem a serviços) - rotas legadas do Luna e rotas normais
+  const independentRoutes = React.useMemo(() => {
+    return routes.filter(r => !r.serviceId);
+  }, [routes]);
+
   const filteredRoutes = React.useMemo(() => {
     if (!searchQuery.trim()) {
-      return routes;
+      return independentRoutes;
     }
 
     const normalizedQuery = searchQuery.toLowerCase().trim();
 
-    return routes.filter((route) => {
+    return independentRoutes.filter((route) => {
       // Search in route name
       if (route.name?.toLowerCase().includes(normalizedQuery)) {
         return true;
@@ -460,7 +521,37 @@ export default function RoutesPage() {
 
       return false;
     });
-  }, [routes, searchQuery]);
+  }, [independentRoutes, searchQuery]);
+
+  // Filtrar serviços pela busca
+  const filteredServices = React.useMemo(() => {
+    if (!searchQuery.trim()) {
+      return services;
+    }
+
+    const normalizedQuery = searchQuery.toLowerCase().trim();
+
+    return services.filter((s) => {
+      // Buscar no código do serviço
+      if (s.service.code?.toLowerCase().includes(normalizedQuery)) {
+        return true;
+      }
+
+      // Buscar nos stops do serviço
+      if (s.service.allStops?.some((stop) => {
+        return (
+          stop.customerName?.toLowerCase().includes(normalizedQuery) ||
+          stop.address?.toLowerCase().includes(normalizedQuery) ||
+          stop.phone?.toLowerCase().includes(normalizedQuery) ||
+          stop.orderNumber?.toLowerCase().includes(normalizedQuery)
+        );
+      })) {
+        return true;
+      }
+
+      return false;
+    });
+  }, [services, searchQuery]);
 
   const groupedRoutes = React.useMemo(() => {
     return filteredRoutes.reduce((acc, route) => {
@@ -499,7 +590,7 @@ export default function RoutesPage() {
       );
   }
 
-  if (searchQuery && filteredRoutes.length === 0) {
+  if (searchQuery && filteredRoutes.length === 0 && filteredServices.length === 0) {
       return (
         <Card className="min-h-[400px] flex items-center justify-center border-dashed">
             <CardContent className="text-center pt-6">
@@ -516,9 +607,43 @@ export default function RoutesPage() {
       );
   }
 
+  // Função para navegar para organização de serviço
+  const handleOrganizeService = (serviceId: string) => {
+    router.push(`/routes/service/${serviceId}/organize`);
+  };
+
+  // Função para expandir rota
+  const handleExpandRoute = (routeId: string) => {
+    router.push(`/routes/organize/acompanhar?routeId=${routeId}`);
+  };
+
   return (
     <>
       <div className="space-y-4">
+        {/* Seção de Serviços Luna */}
+        {filteredServices.length > 0 && (
+          <div className="space-y-4 mb-6">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <LunnaBadge />
+              Serviços Luna
+            </h2>
+            <div className="space-y-4">
+              {filteredServices.map((s) => (
+                <ServiceCard
+                  key={s.service.id}
+                  service={s.service}
+                  routes={s.routes.map(r => ({
+                    id: r.id,
+                    data: r,
+                    driverInfo: r.driverInfo || undefined,
+                  }))}
+                  onOrganize={handleOrganizeService}
+                  onExpandRoute={handleExpandRoute}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         <Accordion type="single" collapsible className="w-full space-y-4">
           {Object.entries(groupedRoutes).map(([date, dailyRoutes]) => {
             const totalDistance = dailyRoutes.reduce((sum, route) => sum + (route.distanceMeters || 0), 0);

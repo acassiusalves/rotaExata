@@ -101,7 +101,7 @@ export type RouteChangeNotification = {
 };
 
 export type RouteInfo = {
-  code?: string; // Código sequencial único (ex: RT-0001)
+  code?: string; // Código sequencial único (ex: RT-0001 ou LN-0011-A)
   stops: PlaceValue[];
   encodedPolyline: string;
   distanceMeters: number;
@@ -122,6 +122,9 @@ export type RouteInfo = {
   // Integração com sistema Lunna
   source?: 'rota-exata' | 'lunna'; // Origem da rota
   lunnaOrderIds?: string[]; // Array de números de pedidos do Lunna (ex: ['P0001', 'P0002'])
+  // Vínculo com Serviço Luna (apenas para rotas com source: 'lunna')
+  serviceId?: string; // ID do LunnaService pai
+  serviceCode?: string; // Código do serviço (LN-XXXX) para referência rápida
 };
 
 export type OrderStatus =
@@ -269,8 +272,50 @@ export type LunnaOrder = {
     notes?: string;
   };
   logisticsStatus?: 'pendente' | 'em_rota' | 'entregue' | 'falha';
+  // Referência ao Serviço Luna (novo modelo)
+  rotaExataServiceId?: string; // ID do serviço no Rota Exata
+  rotaExataServiceCode?: string; // Código do serviço (LN-0011)
+  // Referência à Rota específica dentro do Serviço
   rotaExataRouteId?: string; // ID da rota no Rota Exata
-  rotaExataRouteCode?: string; // Código da rota (LN-0001)
+  rotaExataRouteCode?: string; // Código da rota (LN-0011-A)
+};
+
+// ============================================
+// TIPOS PARA SERVIÇOS LUNA (AGRUPAMENTO DE ROTAS)
+// ============================================
+
+export type LunnaServiceStatus = 'organizing' | 'dispatched' | 'in_progress' | 'completed' | 'partial';
+
+export type LunnaService = {
+  id: string; // ID do documento Firestore
+  code: string; // Código único (LN-XXXX)
+  name: string; // Nome do serviço (ex: "Serviço LN-0011")
+  source: 'lunna'; // Sempre 'lunna' para Serviços
+  status: LunnaServiceStatus;
+
+  // Dados originais do Luna
+  lunnaOrderIds: string[]; // IDs dos pedidos Luna ['P0001', 'P0002', ...]
+  allStops: PlaceValue[]; // TODOS os stops do serviço (antes de dividir em rotas)
+  origin: PlaceValue; // Origem padrão do sistema
+
+  // Referências às rotas
+  routeIds: string[]; // IDs das rotas pertencentes a este serviço
+
+  // Timestamps
+  plannedDate: Timestamp | Date;
+  createdAt: Timestamp | Date;
+  createdBy: string;
+  updatedAt?: Timestamp | Date;
+  completedAt?: Timestamp | Date;
+
+  // Estatísticas (desnormalizadas para acesso rápido)
+  stats: {
+    totalRoutes: number;
+    completedRoutes: number;
+    totalDeliveries: number;
+    completedDeliveries: number;
+    failedDeliveries: number;
+  };
 };
 
 export type LunnaClient = {

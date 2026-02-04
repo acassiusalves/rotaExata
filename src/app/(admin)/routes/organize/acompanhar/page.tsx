@@ -107,7 +107,7 @@ import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { db, functions } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, writeBatch, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, writeBatch, deleteDoc, arrayUnion, increment } from "firebase/firestore";
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -129,6 +129,10 @@ interface RouteData {
     encodedPolyline: string;
     color: string;
   };
+  // Campos para Serviços Luna
+  isService?: boolean; // Flag para indicar que é um serviço Luna
+  serviceId?: string; // ID do serviço
+  serviceCode?: string; // Código do serviço (LN-XXXX)
 }
 
 const computeRoute = async (
@@ -863,7 +867,7 @@ export default function OrganizeRoutePage() {
         );
 
         const querySnapshot = await getDocs(q);
-        const routes: Array<{ id: string; data: RouteInfo; driverId?: string; driverInfo?: any }> = [];
+        const routes: Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any; plannedDate?: Date }> = [];
         const visibility: Record<string, boolean> = {};
 
         // Array of distinct colors for routes (sistema sequencial de cores)
@@ -2308,12 +2312,16 @@ export default function OrganizeRoutePage() {
 
   // Function to add a new dynamic route
   const handleAddNewRoute = () => {
+    // Cores diferentes das rotas A (vermelho) e B (verde) para evitar confusão
     const routeColors = [
-      '#e60000', // Vermelho - Icone address 1.svg
-      '#1fd634', // Verde - Icone address 2.svg
-      '#fa9200', // Laranja - Icone address 3.svg
-      '#bf07e4', // Roxo - Icone address 4.svg
-      '#000000', // Preto - Icone address 5.svg
+      '#fa9200', // Laranja - Rota C
+      '#bf07e4', // Roxo - Rota D
+      '#00bcd4', // Ciano - Rota E
+      '#795548', // Marrom - Rota F
+      '#e91e63', // Rosa - Rota G
+      '#009688', // Teal - Rota H
+      '#ff5722', // Laranja escuro - Rota I
+      '#673ab7', // Roxo escuro - Rota J
     ];
     const nextRouteIndex = dynamicRoutes.length;
     const nextRouteLetter = String.fromCharCode(67 + nextRouteIndex); // C, D, E, F, etc.
@@ -2435,9 +2443,19 @@ export default function OrganizeRoutePage() {
     }
   };
 
-  const toggleRouteVisibility = (routeKey: 'A' | 'B') => {
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
-    setter(prev => prev ? { ...prev, visible: !prev.visible } : null);
+  const toggleRouteVisibility = (routeKey: string) => {
+    if (routeKey === 'A') {
+      setRouteA(prev => prev ? { ...prev, visible: !prev.visible } : null);
+    } else if (routeKey === 'B') {
+      setRouteB(prev => prev ? { ...prev, visible: !prev.visible } : null);
+    } else {
+      // Toggle visibility for dynamic routes (C, D, E, etc.)
+      setDynamicRoutes(prev => prev.map(r =>
+        r.key === routeKey
+          ? { ...r, data: { ...r.data, visible: !r.data.visible } }
+          : r
+      ));
+    }
   };
   
   const handleAssignDriver = (routeKey: 'A' | 'B', driverId: string) => {
@@ -2464,8 +2482,13 @@ export default function OrganizeRoutePage() {
 
     try {
         const driver = availableDrivers.find(d => d.id === driverId);
-        
-        const routeDoc = {
+
+        // Obter IDs dos pedidos Luna desta rota (se aplicável)
+        const lunnaOrderIds = routeToSave.stops
+          .map(s => s.orderNumber)
+          .filter((n): n is string => !!n);
+
+        const routeDoc: Record<string, any> = {
             name: routeName,
             status: 'dispatched',
             createdAt: serverTimestamp(),
@@ -2479,7 +2502,51 @@ export default function OrganizeRoutePage() {
             driverId: driverId,
             driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
         };
-        await addDoc(collection(db, "routes"), routeDoc);
+
+        // Adicionar campos de serviço Luna se aplicável
+        if (routeData.isService && routeData.serviceId) {
+            routeDoc.source = 'lunna';
+            routeDoc.serviceId = routeData.serviceId;
+            routeDoc.serviceCode = routeData.serviceCode;
+            routeDoc.lunnaOrderIds = lunnaOrderIds;
+            // Gerar código da rota baseado no serviço (LN-XXXX-A, LN-XXXX-B, etc.)
+            const existingServiceRoutes = await getDocs(
+              query(collection(db, 'routes'), where('serviceId', '==', routeData.serviceId))
+            );
+            const routeIndex = existingServiceRoutes.size;
+            const routeLetter = String.fromCharCode(65 + routeIndex); // A, B, C...
+            routeDoc.code = `${routeData.serviceCode}-${routeLetter}`;
+        }
+
+        const routeRef = await addDoc(collection(db, "routes"), routeDoc);
+
+        // Se é um serviço, atualizar o serviço com o ID da rota
+        if (routeData.isService && routeData.serviceId) {
+            const serviceRef = doc(db, 'services', routeData.serviceId);
+            await updateDoc(serviceRef, {
+                routeIds: arrayUnion(routeRef.id),
+                'stats.totalRoutes': increment(1),
+                status: 'dispatched',
+                updatedAt: serverTimestamp(),
+            });
+
+            // Atualizar pedidos Luna com referência à rota
+            for (const orderNumber of lunnaOrderIds) {
+                const ordersQuery = query(
+                    collection(db, 'orders'),
+                    where('number', '==', orderNumber)
+                );
+                const ordersSnap = await getDocs(ordersQuery);
+                if (!ordersSnap.empty) {
+                    await updateDoc(ordersSnap.docs[0].ref, {
+                        logisticsStatus: 'em_rota',
+                        rotaExataRouteId: routeRef.id,
+                        rotaExataRouteCode: routeDoc.code,
+                        updatedAt: serverTimestamp(),
+                    });
+                }
+            }
+        }
 
         toast({
             title: 'Rota Despachada!',
@@ -3408,8 +3475,10 @@ export default function OrganizeRoutePage() {
         visible: routeVisibility[route.id] === true
       }))
       .filter(route => route.visible),
-    ...dynamicRoutes.map(r => r.data)
-  ].filter((r): r is RouteInfo => !!r);
+    ...dynamicRoutes
+      .filter(r => r.data.visible) // Only include visible dynamic routes
+      .map(r => r.data)
+  ].filter((r): r is RouteInfo => !!r && r.visible !== false);
 
   const toggleAdditionalRoute = (routeId: string) => {
     setRouteVisibility(prev => {

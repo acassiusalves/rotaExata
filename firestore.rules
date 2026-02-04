@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -13,25 +12,26 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
     }
-    
+
     function isOwner(userId) {
       return isAuthed() && request.auth.uid == userId;
     }
 
     // AUTH USERS CAN READ/WRITE THEIR OWN USER DOCUMENT
     match /users/{userId} {
-      allow read, update: if isOwner(userId);
+      // Qualquer usuário autenticado pode ler seu próprio documento
+      allow read: if isOwner(userId);
+      // Qualquer usuário autenticado pode atualizar seu próprio documento
+      allow update: if isOwner(userId);
+      // Apenas admins podem criar e deletar usuários
       allow create, delete: if isAppAdmin();
+      // Admins podem ler qualquer usuário
+      allow read, list: if isAppAdmin();
 
       // Users can read/write their own settings subcollection
       match /settings/{settingId} {
         allow read, write: if isOwner(userId);
       }
-    }
-
-    // Admins can manage all users
-    match /users/{userId} {
-      allow list: if isAppAdmin();
     }
 
     // A COURIER CAN READ/WRITE TO ITS OWN DOCUMENT
@@ -44,7 +44,7 @@ service cloud.firestore {
     match /couriers/{courierId}/tokens/{tokenId} {
       allow read, write: if isOwner(courierId);
     }
-    
+
     // RULES FOR ROUTES
     match /routes/{routeId} {
       // Admins can do anything
@@ -104,6 +104,11 @@ service cloud.firestore {
       allow update: if isAuthed()
         && resource.data.driverId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt']);
+    }
+
+    // RULES FOR SERVICES (Luna Services - agrupamento de rotas)
+    match /services/{serviceId} {
+      allow read, create, update, delete, list: if isAppAdmin();
     }
   }
 }

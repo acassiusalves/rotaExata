@@ -147,6 +147,8 @@ export default function MyRoutesPage() {
       return;
     }
 
+    console.log('🔍 [MyRoutes] Buscando rotas para driverId:', user.uid);
+
     const q = query(
       collection(db, 'routes'),
       where('driverId', '==', user.uid),
@@ -156,11 +158,14 @@ export default function MyRoutesPage() {
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
+        console.log('📋 [MyRoutes] Rotas encontradas:', querySnapshot.size);
         const routesData: RouteDocument[] = [];
         querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          console.log('📍 [MyRoutes] Rota:', doc.id, '- Nome:', data.name, '- Status:', data.status, '- DriverId:', data.driverId);
           routesData.push({
             id: doc.id,
-            ...doc.data(),
+            ...data,
           } as RouteDocument);
         });
 
@@ -174,7 +179,7 @@ export default function MyRoutesPage() {
         setIsLoading(false);
       },
       (error) => {
-        console.error('Error fetching routes: ', error);
+        console.error('❌ [MyRoutes] Error fetching routes:', error);
         toast({
           variant: 'destructive',
           title: 'Erro ao buscar rotas',
