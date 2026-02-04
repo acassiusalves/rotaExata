@@ -160,17 +160,24 @@ export default function RoutesPage() {
 
   // Carregar Serviços Luna
   React.useEffect(() => {
+    // Query simplificada - ordenar por createdAt e filtrar status no cliente
+    // Isso evita a necessidade de índice composto (status + createdAt)
     const q = query(
       collection(db, 'services'),
-      where('status', 'in', ['organizing', 'dispatched', 'in_progress', 'partial']),
       orderBy('createdAt', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
       const servicesData: ServiceWithRoutes[] = [];
+      const activeStatuses = ['organizing', 'dispatched', 'in_progress', 'partial'];
 
       for (const docSnap of querySnapshot.docs) {
         const serviceData = { id: docSnap.id, ...docSnap.data() } as LunnaService & { id: string };
+
+        // Filtrar apenas serviços ativos (não completados)
+        if (!activeStatuses.includes(serviceData.status)) {
+          continue;
+        }
 
         // Buscar rotas deste serviço
         const serviceRoutes: RouteDocument[] = [];

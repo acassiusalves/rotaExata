@@ -38,6 +38,7 @@ import {
   Download,
   Bug,
   Trash2,
+  AlertCircle,
 } from 'lucide-react';
 import { RouteMap, RouteMapHandle } from '@/components/maps/RouteMap';
 import { GoogleMap, Marker } from '@react-google-maps/api';
@@ -1013,6 +1014,9 @@ export default function OrganizeRoutePage() {
         hasOrigin: !!parsedData.origin,
         routeDate: parsedData.routeDate,
         period: parsedData.period,
+        isService: parsedData.isService,
+        serviceId: parsedData.serviceId,
+        serviceCode: parsedData.serviceCode,
       });
       setRouteData(parsedData);
 
@@ -1168,10 +1172,67 @@ export default function OrganizeRoutePage() {
 
         loadRouteFromFirestore();
       } else {
-        console.log('ℹ️ [useEffect:loadRouteData] NÃO é rota existente - processando como rota nova');
+        console.log('ℹ️ [useEffect:loadRouteData] NÃO é rota existente - processando como rota nova', {
+          isService: parsedData.isService,
+          serviceId: parsedData.serviceId,
+          serviceCode: parsedData.serviceCode,
+          totalStops: parsedData.stops?.length || 0,
+          originLat: parsedData.origin?.lat,
+          originLng: parsedData.origin?.lng,
+        });
+
+        // Debug: mostrar primeiros 3 stops antes do filtro
+        if (parsedData.stops && parsedData.stops.length > 0) {
+          console.log('🔍 [useEffect:loadRouteData] Primeiros 3 stops ANTES do filtro:',
+            parsedData.stops.slice(0, 3).map(s => ({
+              id: s.id,
+              lat: s.lat,
+              lng: s.lng,
+              address: s.address,
+              customerName: s.customerName,
+              hasValidationIssues: s.hasValidationIssues,
+            }))
+          );
+        }
+
         // Rota nova - dividir geograficamente usando origem como referência
-        const allStops = parsedData.stops.filter((s) => s.id && s.lat && s.lng);
+        // Para serviços Luna, incluir TODOS os stops (mesmo os sem coordenadas válidas)
+        // pois eles podem ser editados manualmente depois
+        // Stops sem coordenadas (lat=0, lng=0) serão colocados em unassignedStops
+        const stopsWithCoords = parsedData.stops.filter((s) => s.id && s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
+        const stopsWithoutCoords = parsedData.stops.filter((s) => s.id && (!s.lat || !s.lng || s.lat === 0 || s.lng === 0));
+
+        console.log('ℹ️ [useEffect:loadRouteData] Stops com coordenadas válidas:', stopsWithCoords.length);
+        console.log('ℹ️ [useEffect:loadRouteData] Stops SEM coordenadas (irão para edição):', stopsWithoutCoords.length);
+
+        // Se houver stops sem coordenadas, adicionar aos unassignedStops para edição manual
+        if (stopsWithoutCoords.length > 0) {
+          console.warn('⚠️ [useEffect:loadRouteData] Stops precisam de geocodificação manual:',
+            stopsWithoutCoords.map(s => ({
+              id: s.id,
+              address: s.address || s.addressString,
+              customerName: s.customerName,
+            }))
+          );
+          // Adicionar ao estado unassignedStops para edição manual
+          setUnassignedStops(stopsWithoutCoords);
+        }
+
+        // Usar apenas stops com coordenadas válidas para dividir em rotas
+        const allStops = stopsWithCoords;
         const MAX_STOPS_PER_ROUTE = 25;
+
+        // Se não há stops com coordenadas, mas há stops sem coordenadas, mostrar mensagem
+        if (allStops.length === 0 && stopsWithoutCoords.length > 0) {
+          console.warn('⚠️ [useEffect:loadRouteData] Nenhum stop tem coordenadas válidas. Todos precisam de edição manual.');
+          setIsLoading(false);
+          toast({
+            title: 'Endereços precisam de correção',
+            description: `${stopsWithoutCoords.length} endereço(s) não foram geocodificados. Edite-os manualmente na lista de paradas não atribuídas.`,
+            variant: 'destructive',
+          });
+          return;
+        }
 
         // Dividir paradas em Norte e Sul usando a latitude da origem como linha divisória
         const stopsNorte = allStops.filter(stop => stop.lat >= parsedData.origin.lat);
@@ -3430,7 +3491,9 @@ export default function OrganizeRoutePage() {
 
   React.useEffect(() => {
     // If all routes have been dispatched, redirect
-    if (!isLoading && !routeA && !routeB) {
+    // Mas NÃO redirecionar se ainda não temos routeData (dados estão sendo carregados)
+    // ou se é um serviço que ainda está sendo processado
+    if (!isLoading && !routeA && !routeB && routeData && !routeData.isService) {
         toast({
             title: 'Todas as rotas foram despachadas!',
             description: 'Redirecionando para a página de rotas.',
@@ -3438,7 +3501,7 @@ export default function OrganizeRoutePage() {
         sessionStorage.removeItem('newRouteData');
         setTimeout(() => router.push('/routes'), 1500);
     }
-  }, [isLoading, routeA, routeB, router, toast]);
+  }, [isLoading, routeA, routeB, router, toast, routeData]);
 
   if (isLoading && !routeData) {
     return (
@@ -3854,6 +3917,57 @@ export default function OrganizeRoutePage() {
 
                             </TableBody>
                         </Table>
+                     ) : unassignedStops.length > 0 ? (
+                        // Mostrar stops que precisam de edição quando não há rotas
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2 p-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
+                                <AlertCircle className="h-5 w-5 text-amber-600" />
+                                <div>
+                                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                                        {unassignedStops.length} endereço(s) precisam de correção
+                                    </p>
+                                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                                        Os endereços abaixo não foram geocodificados. Clique em "Editar" para corrigir manualmente.
+                                    </p>
+                                </div>
+                            </div>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="w-[50px]">#</TableHead>
+                                        <TableHead>Cliente</TableHead>
+                                        <TableHead>Endereço</TableHead>
+                                        <TableHead>Pedido</TableHead>
+                                        <TableHead className="w-[100px]">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {unassignedStops.map((stop, index) => (
+                                        <TableRow key={stop.id || index}>
+                                            <TableCell className="font-medium">{index + 1}</TableCell>
+                                            <TableCell>{stop.customerName || 'N/A'}</TableCell>
+                                            <TableCell className="max-w-[300px] truncate" title={stop.address || stop.addressString}>
+                                                {stop.address || stop.addressString || 'Endereço não informado'}
+                                            </TableCell>
+                                            <TableCell>{stop.orderNumber || 'N/A'}</TableCell>
+                                            <TableCell>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setEditingStop(stop);
+                                                        setEditStopDialogOpen(true);
+                                                    }}
+                                                >
+                                                    <Pencil className="h-3 w-3 mr-1" />
+                                                    Editar
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
                      ) : (
                         <div className="flex h-48 items-center justify-center text-muted-foreground">
                             Nenhuma rota pendente para organizar.

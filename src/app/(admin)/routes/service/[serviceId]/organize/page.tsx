@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import type { LunnaService } from '@/lib/types';
 
@@ -29,20 +29,57 @@ export default function ServiceOrganizePage() {
 
         const serviceData = serviceSnap.data() as LunnaService;
 
+        console.log('📦 [ServiceOrganize] Dados do serviço carregados:', {
+          code: serviceData.code,
+          status: serviceData.status,
+          stopsCount: serviceData.allStops?.length || 0,
+          hasOrigin: !!serviceData.origin,
+          originAddress: serviceData.origin?.address,
+        });
+
+        // Validar se o serviço tem stops
+        if (!serviceData.allStops || serviceData.allStops.length === 0) {
+          setError('Serviço não possui paradas para organizar');
+          setIsLoading(false);
+          return;
+        }
+
+        // Validar se o serviço tem origem
+        if (!serviceData.origin || !serviceData.origin.lat || !serviceData.origin.lng) {
+          setError('Serviço não possui origem definida');
+          setIsLoading(false);
+          return;
+        }
+
+        // Converter Timestamp do Firestore para ISO string
+        let routeDateISO: string;
+        if (serviceData.plannedDate instanceof Timestamp) {
+          routeDateISO = serviceData.plannedDate.toDate().toISOString();
+        } else if (serviceData.plannedDate instanceof Date) {
+          routeDateISO = serviceData.plannedDate.toISOString();
+        } else {
+          routeDateISO = new Date().toISOString();
+        }
+
         // Preparar dados para a página de organização
         // Salvar no sessionStorage para a página de organização consumir
         const routeData = {
           origin: serviceData.origin,
           stops: serviceData.allStops,
-          routeDate: serviceData.plannedDate instanceof Date
-            ? serviceData.plannedDate.toISOString()
-            : new Date().toISOString(),
+          routeDate: routeDateISO,
           routeTime: '08:00',
           isService: true, // Flag para indicar que é um serviço
           serviceId: serviceId,
           serviceCode: serviceData.code,
           isExistingRoute: false, // É um novo fluxo de organização
         };
+
+        console.log('📦 [ServiceOrganize] Salvando no sessionStorage:', {
+          stopsCount: routeData.stops.length,
+          origin: routeData.origin?.address,
+          serviceCode: routeData.serviceCode,
+          isService: routeData.isService,
+        });
 
         sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
 
