@@ -599,6 +599,7 @@ export default function OrganizeRoutePage() {
   // State for pending edits (reordering within same route AND cross-route movements)
   // Now supports dynamic route IDs (A, B, and additional route IDs like "8sS7RrygaWfJYL1cegCN")
   const [pendingEdits, setPendingEdits] = React.useState<Record<string, PlaceValue[] | null>>({ A: null, B: null });
+  const [isApplyingEdits, setIsApplyingEdits] = React.useState(false);
 
   // State for transfer dialog
   const [transferDialogOpen, setTransferDialogOpen] = React.useState(false);
@@ -3899,27 +3900,33 @@ export default function OrganizeRoutePage() {
       dynamicRoute: { key: string; name: string; data: RouteInfo; color: string };
     }> = [];
 
-    for (const key of allRoutesWithPending) {
+    // Preparar dados de cada rota em paralelo (computeRoute é a parte lenta)
+    const routePreparations = allRoutesWithPending.map(async (key) => {
       const pendingStops = pendingEdits[key];
-      if (!pendingStops) continue;
+      if (!pendingStops) return null;
 
       const route = getRoute(key);
       if (!route) {
         addDebugLog('APPLY_PENDING_EDITS', `Route ${key} not found, skipping`);
-        continue;
+        return null;
       }
 
-      // Clean stops
       const cleanedStops = pendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
 
-      addDebugLog('APPLY_PENDING_EDITS', `Preparing route ${key}`, {
-        stopsCount: cleanedStops.length
-      });
+      addDebugLog('APPLY_PENDING_EDITS', `Preparing route ${key}`, { stopsCount: cleanedStops.length });
 
-      // Recalculate route
       const routeInfo = cleanedStops.length > 0
         ? await computeRoute(routeData.origin, cleanedStops)
         : null;
+
+      return { key, route, cleanedStops, routeInfo };
+    });
+
+    const preparations = (await Promise.all(routePreparations)).filter(Boolean) as Array<{
+      key: string; route: RouteInfo; cleanedStops: any[]; routeInfo: RouteInfo | null;
+    }>;
+
+    for (const { key, route, cleanedStops, routeInfo } of preparations) {
 
       // Determine route ID in Firestore
       let routeId: string | null = null;
@@ -4399,6 +4406,7 @@ export default function OrganizeRoutePage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={isApplyingEdits}
                       onClick={() => {
                         // Resetar TODAS as chaves (A, B e rotas dinâmicas C, D, E...)
                         const reset: Record<string, PlaceValue[] | null> = {};
@@ -4413,17 +4421,24 @@ export default function OrganizeRoutePage() {
                     <Button
                       variant="default"
                       size="sm"
+                      disabled={isApplyingEdits}
                       onClick={async () => {
-                        const keysWithPending = Object.keys(pendingEdits).filter(key => pendingEdits[key]);
-                        for (const key of keysWithPending) {
-                          await handleApplyPendingEdits(key);
+                        setIsApplyingEdits(true);
+                        try {
+                          // handleApplyPendingEdits já processa TODAS as rotas com pendingEdits
+                          await handleApplyPendingEdits('A');
+                          toast({ title: 'Todas as edições foram aplicadas com sucesso!' });
+                        } catch (err) {
+                          console.error('Erro ao aplicar edições:', err);
+                          toast({ variant: 'destructive', title: 'Erro ao aplicar edições' });
+                        } finally {
+                          setIsApplyingEdits(false);
                         }
-                        toast({ title: 'Todas as edições foram aplicadas com sucesso!' });
                       }}
                       className="bg-primary hover:bg-primary/90"
                     >
-                      <Check className="mr-2 h-4 w-4" />
-                      Aplicar Todas as Edições
+                      {isApplyingEdits ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                      {isApplyingEdits ? 'Aplicando...' : 'Aplicar Todas as Edições'}
                     </Button>
                   </div>
                 )}
