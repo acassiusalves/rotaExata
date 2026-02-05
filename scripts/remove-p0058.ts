@@ -31,20 +31,27 @@ async function cleanup() {
   const routeDoc = await db.collection('routes').doc(routeId).get();
   const data = routeDoc.data()!;
 
+  const stops = data.stops || [];
   const unassigned = data.unassignedStops || [];
-  console.log('Antes:', unassigned.length, 'unassignedStops');
+
+  console.log('Antes - stops:', stops.length);
+  stops.forEach((s: any) => console.log('  -', s.orderNumber, s.customerName));
+  console.log('Antes - unassignedStops:', unassigned.length);
   unassigned.forEach((s: any) => console.log('  -', s.orderNumber, s.customerName));
 
-  // Remover P0058 (desvinculado no Luna)
-  const cleaned = unassigned.filter((s: any) => s.orderNumber !== 'P0058');
+  // Remover P0058 de AMBOS (desvinculado no Luna)
+  const cleanedStops = stops.filter((s: any) => s.orderNumber !== 'P0058');
+  const cleanedUnassigned = unassigned.filter((s: any) => s.orderNumber !== 'P0058');
 
-  console.log('\nDepois:', cleaned.length, 'unassignedStops');
+  console.log('\nDepois - stops:', cleanedStops.length);
+  console.log('Depois - unassignedStops:', cleanedUnassigned.length);
 
   await db.collection('routes').doc(routeId).update({
-    unassignedStops: cleaned,
+    stops: cleanedStops,
+    unassignedStops: cleanedUnassigned,
   });
 
-  console.log('\n✅ P0058 removido dos unassignedStops!');
+  console.log('\n✅ P0058 removido de stops e unassignedStops!');
 }
 
 cleanup().catch(console.error);

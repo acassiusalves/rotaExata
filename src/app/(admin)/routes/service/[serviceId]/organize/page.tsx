@@ -156,6 +156,95 @@ export default function ServiceOrganizePage() {
           });
         }
 
+        // Auto-cleanup: verificar pedidos desvinculados no Luna e removê-los das rotas
+        const allOrderNumbers = new Set<string>();
+        existingServiceRoutes.forEach(r => {
+          r.stops.forEach(s => { if (s.orderNumber) allOrderNumbers.add(s.orderNumber); });
+        });
+        routeUnassignedStops.forEach(s => { if (s.orderNumber) allOrderNumbers.add(s.orderNumber); });
+
+        if (allOrderNumbers.size > 0) {
+          try {
+            // Buscar orders pelo orderNumber para verificar se foram desvinculados
+            const orderNumbers = Array.from(allOrderNumbers);
+            const unlinkedOrders = new Set<string>();
+
+            // Firestore where-in aceita max 30 itens por query
+            for (let i = 0; i < orderNumbers.length; i += 30) {
+              const batch = orderNumbers.slice(i, i + 30);
+              const ordersSnap = await getDocs(
+                query(collection(db, 'orders'), where('number', 'in', batch))
+              );
+              for (const orderDoc of ordersSnap.docs) {
+                const orderData = orderDoc.data();
+                // Se o pedido não tem rotaExataServiceId ou não referencia este serviço, foi desvinculado
+                if (!orderData.rotaExataServiceId || orderData.rotaExataServiceId !== serviceId) {
+                  if (orderData.number) unlinkedOrders.add(orderData.number);
+                }
+              }
+            }
+
+            if (unlinkedOrders.size > 0) {
+              console.log(`🧹 [ServiceOrganize] Pedidos desvinculados detectados:`, Array.from(unlinkedOrders));
+
+              // Remover stops desvinculados de cada rota
+              for (let ri = 0; ri < existingServiceRoutes.length; ri++) {
+                const route = existingServiceRoutes[ri];
+                const origStopsLen = route.stops.length;
+                route.stops = route.stops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
+                const removed = origStopsLen - route.stops.length;
+
+                if (removed > 0) {
+                  // Atualizar Firestore
+                  try {
+                    const cleanedUnassigned = routeUnassignedStops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
+
+                    await updateDoc(doc(db, 'routes', route.id), {
+                      stops: route.stops,
+                      unassignedStops: cleanedUnassigned,
+                      updatedAt: serverTimestamp(),
+                    });
+                    console.log(`✅ [ServiceOrganize] Removido ${removed} stop(s) desvinculado(s) da rota ${route.code || route.id}`);
+                  } catch (err) {
+                    console.error('❌ [ServiceOrganize] Erro ao limpar stops desvinculados:', err);
+                  }
+                }
+              }
+
+              // Remover dos sets de atribuídos
+              unlinkedOrders.forEach(on => {
+                assignedOrderNumbers.delete(on);
+              });
+
+              // Limpar routeUnassignedStops
+              const cleanedRouteUnassigned = routeUnassignedStops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
+              routeUnassignedStops.length = 0;
+              routeUnassignedStops.push(...cleanedRouteUnassigned);
+
+              // Também limpar do allStops do serviço
+              const origAllStopsLen = serviceData.allStops.length;
+              serviceData.allStops = serviceData.allStops.filter(
+                (s: PlaceValue) => !s.orderNumber || !unlinkedOrders.has(s.orderNumber)
+              );
+              if (serviceData.allStops.length < origAllStopsLen) {
+                try {
+                  const serviceRef = doc(db, 'services', serviceId);
+                  await updateDoc(serviceRef, {
+                    allStops: serviceData.allStops,
+                    'stats.totalDeliveries': serviceData.allStops.length,
+                    updatedAt: serverTimestamp(),
+                  });
+                  console.log(`✅ [ServiceOrganize] Removido ${origAllStopsLen - serviceData.allStops.length} stop(s) desvinculado(s) do serviço`);
+                } catch (err) {
+                  console.error('❌ [ServiceOrganize] Erro ao limpar allStops do serviço:', err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('❌ [ServiceOrganize] Erro ao verificar pedidos desvinculados:', err);
+          }
+        }
+
         // Filtrar stops do serviço que ainda não foram atribuídos a nenhuma rota
         const unassignedFromService = serviceData.allStops.filter((stop) => {
           const stopId = String(stop.id ?? stop.placeId);

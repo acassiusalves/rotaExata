@@ -1071,7 +1071,55 @@ export default function OrganizeRoutePage() {
               setRouteNames(prev => ({ ...prev, A: routeName }));
 
               // Usar dados do Firestore ao invés do sessionStorage
-              const allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+              let allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+
+              // Auto-cleanup: verificar pedidos desvinculados no Luna e removê-los
+              const routeOrderNumbers = allStops
+                .map((s: PlaceValue) => s.orderNumber)
+                .filter(Boolean) as string[];
+              const unassignedOrderNumbers = (routeData.unassignedStops || [])
+                .map((s: PlaceValue) => s.orderNumber)
+                .filter(Boolean) as string[];
+              const allRouteOrderNumbers = [...new Set([...routeOrderNumbers, ...unassignedOrderNumbers])];
+
+              if (allRouteOrderNumbers.length > 0 && routeData.serviceId) {
+                try {
+                  const unlinkedOrders = new Set<string>();
+                  for (let i = 0; i < allRouteOrderNumbers.length; i += 30) {
+                    const batch = allRouteOrderNumbers.slice(i, i + 30);
+                    const ordersSnap = await getDocs(
+                      query(collection(db, 'orders'), where('number', 'in', batch))
+                    );
+                    for (const orderDoc of ordersSnap.docs) {
+                      const orderData = orderDoc.data();
+                      if (!orderData.rotaExataServiceId && !orderData.rotaExataRouteId) {
+                        if (orderData.number) unlinkedOrders.add(orderData.number);
+                      }
+                    }
+                  }
+
+                  if (unlinkedOrders.size > 0) {
+                    console.log(`🧹 [loadRouteData] Pedidos desvinculados detectados:`, Array.from(unlinkedOrders));
+                    const origLen = allStops.length;
+                    allStops = allStops.filter((s: PlaceValue) => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
+                    const cleanedUnassigned = (routeData.unassignedStops || []).filter(
+                      (s: PlaceValue) => !s.orderNumber || !unlinkedOrders.has(s.orderNumber)
+                    );
+
+                    if (allStops.length < origLen || cleanedUnassigned.length < (routeData.unassignedStops || []).length) {
+                      await updateDoc(doc(db, 'routes', parsedData.currentRouteId!), {
+                        stops: allStops,
+                        unassignedStops: cleanedUnassigned,
+                        updatedAt: serverTimestamp(),
+                      });
+                      routeData.unassignedStops = cleanedUnassigned;
+                      console.log(`✅ [loadRouteData] Removidos ${origLen - allStops.length} stop(s) desvinculado(s) da rota`);
+                    }
+                  }
+                } catch (err) {
+                  console.error('❌ [loadRouteData] Erro ao verificar pedidos desvinculados:', err);
+                }
+              }
 
               // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
               // Definir origem padrão Sol de Maria
@@ -1256,9 +1304,84 @@ export default function OrganizeRoutePage() {
                 if (s.orderNumber) assignedOrderNumbers.add(s.orderNumber);
               }));
 
+              // Auto-cleanup: verificar pedidos desvinculados no Luna
+              if (assignedOrderNumbers.size > 0) {
+                try {
+                  const orderNums = Array.from(assignedOrderNumbers);
+                  const unlinkedOrders = new Set<string>();
+                  for (let i = 0; i < orderNums.length; i += 30) {
+                    const batchNums = orderNums.slice(i, i + 30);
+                    const ordersSnap = await getDocs(
+                      query(collection(db, 'orders'), where('number', 'in', batchNums))
+                    );
+                    for (const oDoc of ordersSnap.docs) {
+                      const oData = oDoc.data();
+                      if (!oData.rotaExataServiceId && !oData.rotaExataRouteId) {
+                        if (oData.number) unlinkedOrders.add(oData.number);
+                      }
+                    }
+                  }
+
+                  if (unlinkedOrders.size > 0) {
+                    console.log(`🧹 [loadRouteData:service] Pedidos desvinculados:`, Array.from(unlinkedOrders));
+                    for (const sr of serviceExistingRoutes!) {
+                      const origLen = sr.stops.length;
+                      sr.stops = sr.stops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
+                      if (sr.stops.length < origLen) {
+                        await updateDoc(doc(db, 'routes', sr.id), {
+                          stops: sr.stops,
+                          updatedAt: serverTimestamp(),
+                        });
+                        console.log(`✅ [loadRouteData:service] Removidos ${origLen - sr.stops.length} stop(s) da rota ${sr.code}`);
+                      }
+                    }
+                    // Atualizar sets
+                    unlinkedOrders.forEach(on => assignedOrderNumbers.delete(on));
+                  }
+                } catch (err) {
+                  console.error('❌ [loadRouteData:service] Erro ao verificar desvinculados:', err);
+                }
+              }
+
               const serviceDoc = await getDoc(doc(db, 'services', parsedData.serviceId!));
               if (serviceDoc.exists()) {
-                const allStops = (serviceDoc.data().allStops || []) as PlaceValue[];
+                const svcData = serviceDoc.data();
+                let allStops = (svcData.allStops || []) as PlaceValue[];
+
+                // Também remover pedidos desvinculados do allStops do serviço
+                const orderNums = allStops.map(s => s.orderNumber).filter(Boolean) as string[];
+                if (orderNums.length > 0) {
+                  try {
+                    const unlinkedSvc = new Set<string>();
+                    for (let i = 0; i < orderNums.length; i += 30) {
+                      const batchNums = orderNums.slice(i, i + 30);
+                      const ordersSnap = await getDocs(
+                        query(collection(db, 'orders'), where('number', 'in', batchNums))
+                      );
+                      for (const oDoc of ordersSnap.docs) {
+                        const oData = oDoc.data();
+                        if (!oData.rotaExataServiceId && !oData.rotaExataRouteId) {
+                          if (oData.number) unlinkedSvc.add(oData.number);
+                        }
+                      }
+                    }
+                    if (unlinkedSvc.size > 0) {
+                      const origLen = allStops.length;
+                      allStops = allStops.filter(s => !s.orderNumber || !unlinkedSvc.has(s.orderNumber));
+                      if (allStops.length < origLen) {
+                        await updateDoc(doc(db, 'services', parsedData.serviceId!), {
+                          allStops,
+                          'stats.totalDeliveries': allStops.length,
+                          updatedAt: serverTimestamp(),
+                        });
+                        console.log(`✅ [loadRouteData:service] Removidos ${origLen - allStops.length} stop(s) do serviço`);
+                      }
+                    }
+                  } catch (err) {
+                    console.error('❌ [loadRouteData:service] Erro ao limpar allStops:', err);
+                  }
+                }
+
                 // Filtrar por ID e orderNumber, e auto-deduplicar
                 const seenOrders = new Set<string>();
                 parsedData.stops = allStops.filter(s => {
