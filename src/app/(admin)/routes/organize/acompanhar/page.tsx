@@ -1269,10 +1269,10 @@ export default function OrganizeRoutePage() {
           existingServiceRoutes: parsedData.existingServiceRoutes?.length || 0,
         });
 
-        // Se é um serviço, verificar se já existem rotas no Firestore
-        // (pode não ter vindo no sessionStorage se o usuário atualizou a página)
+        // Se é um serviço, SEMPRE buscar rotas atualizadas do Firestore
+        // (sessionStorage pode ter dados desatualizados após edições)
         let serviceExistingRoutes = parsedData.existingServiceRoutes;
-        if (parsedData.isService && parsedData.serviceId && (!serviceExistingRoutes || serviceExistingRoutes.length === 0)) {
+        if (parsedData.isService && parsedData.serviceId) {
           try {
             const snap = await getDocs(
               query(collection(db, 'routes'), where('serviceId', '==', parsedData.serviceId))
@@ -2893,35 +2893,35 @@ export default function OrganizeRoutePage() {
         targetStopsNames: targetStopsToEdit.map(s => s.customerName)
       });
 
-      let newTargetStops;
+      let newTargetStops: PlaceValue[];
       if (existsInTarget) {
-        // If already exists, just reorder within target
+        // Stop already exists in target - reorder it in target AND remove from source
         const existingIndex = targetStopsToEdit.findIndex(s =>
           String(s.id ?? s.placeId) === movedStopId
         );
-        addDebugLog('DRAG_BETWEEN_ROUTES', 'WARNING: Stop already exists in target - reordering instead of moving', {
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'Stop already exists in target - reordering in target and removing from source', {
           existingIndex,
           overIndex,
           stopId: movedStopId,
           stopName: stopToMove.customerName,
           sourceRouteKey: activeRouteKey,
           targetRouteKey: overRouteKey,
-          message: 'This might cause the stop to disappear if source changes are saved'
         });
 
-        // Since stop already exists in target, don't remove from source - just reorder in target
         newTargetStops = [...targetStopsToEdit];
         const [removed] = newTargetStops.splice(existingIndex, 1);
         newTargetStops.splice(overIndex, 0, removed);
 
-        // IMPORTANT: Don't modify source route when stop already exists in target
+        // ALSO remove from source to fix duplication
+        console.log('🔧 [CROSS-DRAG] Stop duplicado detectado - removendo da origem e reordenando no destino');
         setPendingEdits(prev => ({
           ...prev,
+          [activeRouteKey]: newSourceStops,  // Remove from source!
           [overRouteKey]: newTargetStops
         }));
 
-        addDebugLog('DRAG_BETWEEN_ROUTES', 'Saved reordering - source route NOT modified');
-        return; // Exit early - don't process source route removal
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'Saved reordering - source route ALSO updated to remove duplicate');
+        return;
       } else {
         // Normal case: add to target
         addDebugLog('DRAG_BETWEEN_ROUTES', 'Adding stop to target', { overIndex });
@@ -2945,6 +2945,14 @@ export default function OrganizeRoutePage() {
       });
 
       // Save as pending edits for both routes
+      console.log('🔄 [CROSS-DRAG] Salvando pendingEdits para AMBAS as rotas:', {
+        source: activeRouteKey,
+        sourceStops: newSourceStops.length,
+        sourceOrders: newSourceStops.map((s: any) => s.orderNumber).filter(Boolean),
+        target: overRouteKey,
+        targetStops: newTargetStops.length,
+        targetOrders: newTargetStops.map((s: any) => s.orderNumber).filter(Boolean),
+      });
       setPendingEdits(prev => ({
         ...prev,
         [activeRouteKey]: newSourceStops,
@@ -3870,7 +3878,13 @@ export default function OrganizeRoutePage() {
     if (!routeData) return;
 
     // Get ALL routes with pending edits (including the requested one)
-    const allRoutesWithPending = Object.keys(pendingEdits).filter(k => pendingEdits[k] && pendingEdits[k]!.length >= 0);
+    const allRoutesWithPending = Object.keys(pendingEdits).filter(k => pendingEdits[k] !== null && pendingEdits[k] !== undefined);
+
+    console.log('🔧 [APPLY] Iniciando aplicação. Rotas com pendingEdits:', allRoutesWithPending, 'Detalhes:', allRoutesWithPending.map(k => ({
+      key: k,
+      stopsCount: pendingEdits[k]?.length,
+      stopOrders: pendingEdits[k]?.map((s: any) => s.orderNumber).filter(Boolean),
+    })));
 
     addDebugLog('APPLY_PENDING_EDITS', 'Starting ATOMIC apply of ALL pending edits', {
       requestedRoute: routeKey,
@@ -3941,7 +3955,8 @@ export default function OrganizeRoutePage() {
         });
       } else if ((key === 'A' || key === 'B') && routeData.isService && routeData.serviceId) {
         // Service context: routes A/B may already be saved as draft
-        const existingId = serviceRouteIds[key];
+        const existingId = serviceRouteIds[key as 'A' | 'B'];
+        console.log(`🔧 [APPLY] Service route ${key}: serviceRouteIds =`, JSON.stringify(serviceRouteIds), 'existingId =', existingId);
         if (existingId) {
           routeId = existingId;
           addDebugLog('APPLY_PENDING_EDITS', `Mapped service route ${key} to existing Firestore ID`, {
@@ -4140,8 +4155,8 @@ export default function OrganizeRoutePage() {
               updatedAt: serverTimestamp(),
             });
             addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops`);
-          } else {
-            // Empty route
+          } else if (update.cleanedStops.length === 0) {
+            // Truly empty route (all stops removed)
             batch.update(routeRef, {
               stops: [],
               encodedPolyline: '',
@@ -4150,12 +4165,29 @@ export default function OrganizeRoutePage() {
               updatedAt: serverTimestamp(),
             });
             addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch as empty`);
+          } else {
+            // computeRoute failed but route has stops - save stops without polyline
+            batch.update(routeRef, {
+              stops: update.cleanedStops,
+              updatedAt: serverTimestamp(),
+            });
+            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops (no polyline - computeRoute failed)`);
           }
         }
+
+        // Log detalhado antes do commit
+        console.log('💾 [APPLY] Batch commit com', routeUpdates.length, 'rotas:', routeUpdates.map(u => ({
+          key: u.routeKey,
+          routeId: u.routeId,
+          stopsCount: u.cleanedStops.length,
+          stopOrders: u.cleanedStops.map((s: any) => s.orderNumber).filter(Boolean),
+          hasRouteInfo: !!u.routeInfo,
+        })));
 
         // Commit all changes atomically
         await batch.commit();
 
+        console.log('✅ [APPLY] Batch commit SUCESSO!');
         addDebugLog('FIRESTORE_BATCH', '✅ ATOMIC batch commit successful', {
           routesUpdated: routeUpdates.length
         });
