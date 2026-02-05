@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
-import { doc, getDoc, getDocs, collection, query, where, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, Timestamp, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import type { LunnaService, PlaceValue } from '@/lib/types';
 
@@ -83,16 +83,63 @@ export default function ServiceOrganizePage() {
         }> = [];
 
         const assignedStopIds = new Set<string>();
+        const assignedOrderNumbers = new Set<string>();
+        // Coletar stops não atribuídos que foram adicionados diretamente nas rotas pelo Luna
+        const routeUnassignedStops: PlaceValue[] = [];
 
-        existingRoutesSnap.forEach((routeDoc) => {
+        for (const routeDoc of existingRoutesSnap.docs) {
           const routeData = routeDoc.data();
           const routeStops = (routeData.stops || []) as PlaceValue[];
 
-          // Registrar IDs dos stops já atribuídos a rotas
+          // Registrar IDs e orderNumbers dos stops já atribuídos a rotas
           routeStops.forEach((stop) => {
             const stopId = String(stop.id ?? stop.placeId);
             if (stopId) assignedStopIds.add(stopId);
+            if (stop.orderNumber) assignedOrderNumbers.add(stop.orderNumber);
           });
+
+          // Coletar unassignedStops das rotas (adicionados via Luna diretamente)
+          const routeUnassigned = (routeData.unassignedStops || []) as PlaceValue[];
+          if (routeUnassigned.length > 0) {
+            // Auto-merge: mover unassignedStops com coordenadas válidas para stops da rota
+            const validUnassigned = routeUnassigned.filter(s => s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
+            const invalidUnassigned = routeUnassigned.filter(s => !s.lat || !s.lng || s.lat === 0 || s.lng === 0);
+
+            if (validUnassigned.length > 0) {
+              // Deduplicar contra stops existentes da rota
+              const existingRouteOrders = new Set(routeStops.map(s => s.orderNumber).filter(Boolean));
+              const newValidStops = validUnassigned.filter(s => !s.orderNumber || !existingRouteOrders.has(s.orderNumber));
+
+              if (newValidStops.length > 0) {
+                const mergedStops = [...routeStops, ...newValidStops];
+                // Atualizar Firestore: mover para stops e limpar unassignedStops
+                try {
+                  await updateDoc(doc(db, 'routes', routeDoc.id), {
+                    stops: mergedStops,
+                    unassignedStops: invalidUnassigned, // Manter apenas os sem coordenadas
+                    updatedAt: serverTimestamp(),
+                  });
+                  console.log(`✅ [ServiceOrganize] Auto-merge: ${newValidStops.length} stop(s) movido(s) para rota ${routeData.code || routeDoc.id}`);
+                  // Atualizar routeStops local para refletir a mudança
+                  routeStops.push(...newValidStops);
+                  // Registrar os novos stops como atribuídos
+                  newValidStops.forEach(s => {
+                    const sid = String(s.id ?? s.placeId);
+                    if (sid) assignedStopIds.add(sid);
+                    if (s.orderNumber) assignedOrderNumbers.add(s.orderNumber);
+                  });
+                } catch (err) {
+                  console.error('❌ [ServiceOrganize] Erro ao auto-merge:', err);
+                  // Em caso de erro, tratar como não atribuídos normalmente
+                  routeUnassignedStops.push(...validUnassigned);
+                }
+              }
+            }
+            // Stops sem coordenadas continuam como não atribuídos
+            if (invalidUnassigned.length > 0) {
+              routeUnassignedStops.push(...invalidUnassigned);
+            }
+          }
 
           existingServiceRoutes.push({
             id: routeDoc.id,
@@ -107,17 +154,50 @@ export default function ServiceOrganizePage() {
             driverId: routeData.driverId,
             driverInfo: routeData.driverInfo,
           });
+        }
+
+        // Filtrar stops do serviço que ainda não foram atribuídos a nenhuma rota
+        const unassignedFromService = serviceData.allStops.filter((stop) => {
+          const stopId = String(stop.id ?? stop.placeId);
+          if (assignedStopIds.has(stopId)) return false;
+          if (stop.orderNumber && assignedOrderNumbers.has(stop.orderNumber)) return false;
+          return true;
         });
 
-        // Filtrar stops que ainda não foram atribuídos a nenhuma rota
-        const unassignedStops = serviceData.allStops.filter((stop) => {
-          const stopId = String(stop.id ?? stop.placeId);
-          return !assignedStopIds.has(stopId);
+        // Auto-deduplicar unassignedFromService (evitar duplicatas dentro do próprio allStops)
+        const seenServiceOrders = new Set<string>();
+        const seenServiceIds = new Set<string>();
+        const dedupedFromService = unassignedFromService.filter(s => {
+          const sid = String(s.id ?? s.placeId);
+          if (seenServiceIds.has(sid)) return false;
+          if (s.orderNumber && seenServiceOrders.has(s.orderNumber)) return false;
+          seenServiceIds.add(sid);
+          if (s.orderNumber) seenServiceOrders.add(s.orderNumber);
+          return true;
         });
+
+        // Combinar: stops não atribuídos do serviço + stops não atribuídos das rotas (evitando duplicatas)
+        const allUnassignedIds = new Set(dedupedFromService.map(s => String(s.id ?? s.placeId)));
+        const allUnassignedOrders = new Set(
+          dedupedFromService.map(s => s.orderNumber).filter(Boolean)
+        );
+        const newFromRoutes = routeUnassignedStops.filter(s => {
+          const sid = String(s.id ?? s.placeId);
+          // Evitar duplicata por ID
+          if (allUnassignedIds.has(sid)) return false;
+          // Evitar duplicata por orderNumber (mesmo pedido com ID diferente)
+          if (s.orderNumber && (assignedOrderNumbers.has(s.orderNumber) || allUnassignedOrders.has(s.orderNumber))) return false;
+          allUnassignedIds.add(sid);
+          if (s.orderNumber) allUnassignedOrders.add(s.orderNumber);
+          return true;
+        });
+        const unassignedStops = [...dedupedFromService, ...newFromRoutes];
 
         console.log('📦 [ServiceOrganize] Rotas existentes:', existingServiceRoutes.length);
         console.log('📦 [ServiceOrganize] Stops já atribuídos:', assignedStopIds.size);
-        console.log('📦 [ServiceOrganize] Stops não atribuídos:', unassignedStops.length);
+        console.log('📦 [ServiceOrganize] Stops não atribuídos (serviço):', dedupedFromService.length);
+        console.log('📦 [ServiceOrganize] Stops não atribuídos (rotas):', newFromRoutes.length);
+        console.log('📦 [ServiceOrganize] Total stops não atribuídos:', unassignedStops.length);
 
         // Preparar dados para a página de organização
         const routeData = {

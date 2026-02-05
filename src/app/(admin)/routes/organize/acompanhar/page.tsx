@@ -1153,8 +1153,21 @@ export default function OrganizeRoutePage() {
               // Carregar unassignedStops do Firestore (pontos adicionados via Lunna)
               if (routeData.unassignedStops && routeData.unassignedStops.length > 0) {
                 const validUnassigned = routeData.unassignedStops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
-                setUnassignedStops(validUnassigned);
-                console.log('📥 [useEffect:loadRouteData] Carregados unassignedStops do Firestore:', validUnassigned.length);
+                // Deduplicar contra stops já atribuídos à rota (por ID e orderNumber)
+                const assignedIds = new Set(allStops.map((s: PlaceValue) => String(s.id ?? s.placeId)));
+                const assignedOrders = new Set(allStops.map((s: PlaceValue) => s.orderNumber).filter(Boolean));
+                const seenOrders = new Set<string>();
+                const dedupedUnassigned = validUnassigned.filter((s: PlaceValue) => {
+                  const sid = String(s.id ?? s.placeId);
+                  if (assignedIds.has(sid)) return false;
+                  if (s.orderNumber && assignedOrders.has(s.orderNumber)) return false;
+                  // Auto-dedup entre os próprios unassigned
+                  if (s.orderNumber && seenOrders.has(s.orderNumber)) return false;
+                  if (s.orderNumber) seenOrders.add(s.orderNumber);
+                  return true;
+                });
+                setUnassignedStops(dedupedUnassigned);
+                console.log('📥 [useEffect:loadRouteData] Carregados unassignedStops do Firestore:', dedupedUnassigned.length, '(de', validUnassigned.length, 'totais)');
               }
             } else {
               console.error('❌ [useEffect:loadRouteData] Rota não encontrada no Firestore - ID:', parsedData.currentRouteId);
@@ -1234,17 +1247,29 @@ export default function OrganizeRoutePage() {
                 };
               });
 
-              // Recalcular stops não atribuídos
+              // Recalcular stops não atribuídos (por ID e orderNumber)
               const assignedStopIds = new Set<string>();
+              const assignedOrderNumbers = new Set<string>();
               serviceExistingRoutes.forEach(r => r.stops.forEach(s => {
                 const sid = String(s.id ?? s.placeId);
                 if (sid) assignedStopIds.add(sid);
+                if (s.orderNumber) assignedOrderNumbers.add(s.orderNumber);
               }));
 
               const serviceDoc = await getDoc(doc(db, 'services', parsedData.serviceId!));
               if (serviceDoc.exists()) {
                 const allStops = (serviceDoc.data().allStops || []) as PlaceValue[];
-                parsedData.stops = allStops.filter(s => !assignedStopIds.has(String(s.id ?? s.placeId)));
+                // Filtrar por ID e orderNumber, e auto-deduplicar
+                const seenOrders = new Set<string>();
+                parsedData.stops = allStops.filter(s => {
+                  const sid = String(s.id ?? s.placeId);
+                  if (assignedStopIds.has(sid)) return false;
+                  if (s.orderNumber && assignedOrderNumbers.has(s.orderNumber)) return false;
+                  // Auto-dedup entre os próprios stops
+                  if (s.orderNumber && seenOrders.has(s.orderNumber)) return false;
+                  if (s.orderNumber) seenOrders.add(s.orderNumber);
+                  return true;
+                });
                 console.log('🔍 [useEffect:loadRouteData] Stops não atribuídos:', parsedData.stops.length);
               }
             }
@@ -1604,6 +1629,169 @@ export default function OrganizeRoutePage() {
       router.push('/routes/new');
     }
   }, [router]);
+
+  // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
+  React.useEffect(() => {
+    if (!routeData?.isService || !routeData?.serviceId) return;
+
+    const serviceId = routeData.serviceId;
+    console.log('👂 [useEffect:serviceListener] Iniciando listener para serviço:', serviceId);
+
+    const routesQuery = query(
+      collection(db, 'routes'),
+      where('serviceId', '==', serviceId)
+    );
+
+    // Guardar referência para saber os IDs que já conhecemos
+    let isFirstSnapshot = true;
+
+    const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
+      // Ignorar o snapshot inicial (já temos os dados carregados)
+      if (isFirstSnapshot) {
+        isFirstSnapshot = false;
+        return;
+      }
+
+      console.log('👂 [serviceListener] Mudança detectada nas rotas do serviço');
+
+      // Coletar todos os orderNumbers já atribuídos a rotas (de TODAS as rotas no snapshot)
+      const allAssignedOrderNumbers = new Set<string>();
+      snapshot.docs.forEach((routeDoc) => {
+        const routeStops = (routeDoc.data().stops || []) as PlaceValue[];
+        routeStops.forEach(s => {
+          if (s.orderNumber) allAssignedOrderNumbers.add(s.orderNumber);
+        });
+      });
+
+      // Verificar cada rota modificada
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'modified') {
+          const routeDoc = change.doc;
+          const data = routeDoc.data();
+          const routeCode = data.code || routeDoc.id;
+
+          // Verificar se unassignedStops mudou (Luna adicionou novos stops)
+          const newUnassigned = (data.unassignedStops || []) as PlaceValue[];
+          if (newUnassigned.length > 0) {
+            console.log('👂 [serviceListener] Novos stops não atribuídos detectados na rota', routeCode, ':', newUnassigned.length);
+
+            // Adicionar ao estado sem duplicar - verificar contra stops já atribuídos E unassigned existentes
+            setUnassignedStops(prev => {
+              const existingIds = new Set(prev.map(s => String(s.id ?? s.placeId)));
+              const existingOrders = new Set(prev.map(s => s.orderNumber).filter(Boolean));
+              const trulyNew = newUnassigned.filter(s => {
+                const sid = String(s.id ?? s.placeId);
+                if (existingIds.has(sid)) return false;
+                if (s.orderNumber && existingOrders.has(s.orderNumber)) return false;
+                // Também verificar se o orderNumber já está atribuído a uma rota
+                if (s.orderNumber && allAssignedOrderNumbers.has(s.orderNumber)) return false;
+                return true;
+              });
+
+              if (trulyNew.length > 0) {
+                // Toast fora do setState para evitar "Cannot update component while rendering"
+                setTimeout(() => {
+                  toast({
+                    title: 'Novos pedidos recebidos!',
+                    description: `${trulyNew.length} novo(s) pedido(s) adicionado(s) via Luna. Arraste-os para uma rota.`,
+                  });
+                }, 0);
+                return [...prev, ...trulyNew];
+              }
+              return prev;
+            });
+          }
+        }
+      });
+    }, (error) => {
+      console.error('❌ [serviceListener] Erro no listener:', error);
+    });
+
+    return () => {
+      console.log('👂 [serviceListener] Limpando listener do serviço');
+      unsubscribe();
+    };
+  }, [routeData?.isService, routeData?.serviceId]);
+
+  // Real-time listener: detectar mudanças no serviço (novos stops adicionados ao allStops)
+  React.useEffect(() => {
+    if (!routeData?.isService || !routeData?.serviceId) return;
+
+    const serviceId = routeData.serviceId;
+    const serviceRef = doc(db, 'services', serviceId);
+
+    let previousAllStopsCount: number | null = null;
+
+    const unsubscribe = onSnapshot(serviceRef, async (docSnap) => {
+      if (!docSnap.exists()) return;
+
+      const data = docSnap.data();
+      const currentAllStops = (data.allStops || []) as PlaceValue[];
+
+      // Na primeira vez, apenas registrar a contagem
+      if (previousAllStopsCount === null) {
+        previousAllStopsCount = currentAllStops.length;
+        return;
+      }
+
+      // Detectar se novos stops foram adicionados ao serviço
+      if (currentAllStops.length > previousAllStopsCount) {
+        const newCount = currentAllStops.length - previousAllStopsCount;
+        console.log('👂 [serviceDocListener] Novos stops detectados no serviço:', newCount);
+
+        // Buscar stops atribuídos a rotas existentes do Firestore (IDs e orderNumbers)
+        const routeStopIds = new Set<string>();
+        const routeStopOrders = new Set<string>();
+        try {
+          const routesSnap = await getDocs(query(collection(db, 'routes'), where('serviceId', '==', serviceId)));
+          routesSnap.forEach(rd => {
+            const stops = (rd.data().stops || []) as PlaceValue[];
+            stops.forEach(s => {
+              routeStopIds.add(String(s.id ?? s.placeId));
+              if (s.orderNumber) routeStopOrders.add(s.orderNumber);
+            });
+          });
+        } catch (err) {
+          console.error('❌ [serviceDocListener] Erro ao buscar rotas:', err);
+        }
+
+        setUnassignedStops(prev => {
+          const existingIds = new Set([
+            ...prev.map(s => String(s.id ?? s.placeId)),
+            ...Array.from(routeStopIds),
+          ]);
+          const existingOrders = new Set([
+            ...prev.map(s => s.orderNumber).filter(Boolean),
+            ...Array.from(routeStopOrders),
+          ]);
+
+          const trulyNew = currentAllStops.filter(s => {
+            const sid = String(s.id ?? s.placeId);
+            if (existingIds.has(sid)) return false;
+            if (s.orderNumber && existingOrders.has(s.orderNumber)) return false;
+            return true;
+          });
+
+          if (trulyNew.length > 0) {
+            setTimeout(() => {
+              toast({
+                title: 'Novos pedidos no serviço!',
+                description: `${trulyNew.length} novo(s) pedido(s) adicionado(s) ao serviço via Luna. Arraste-os para uma rota.`,
+              });
+            }, 0);
+            return [...prev, ...trulyNew];
+          }
+          return prev;
+        });
+      }
+
+      previousAllStopsCount = currentAllStops.length;
+    }, (error) => {
+      console.error('❌ [serviceDocListener] Erro no listener:', error);
+    });
+
+    return () => unsubscribe();
+  }, [routeData?.isService, routeData?.serviceId]);
 
   const geocodeAddress = React.useCallback(
     (address: string): Promise<PlaceValue | null> => {
@@ -2335,21 +2523,35 @@ export default function OrganizeRoutePage() {
           visible: true
         });
 
-        // Se for uma rota existente (A) e tiver currentRouteId, salvar no Firestore
+        // Determinar o Firestore ID da rota alvo
+        let firestoreRouteId: string | null = null;
         if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
-          console.log('💾 [handleDragEnd] SALVANDO NO FIRESTORE - Route ID:', routeData.currentRouteId);
+          firestoreRouteId = routeData.currentRouteId;
+        } else if (routeData.isService) {
+          // Rotas de serviço: A/B têm serviceRouteIds, dinâmicas têm firestoreId
+          if (overRouteKey === 'A' || overRouteKey === 'B') {
+            firestoreRouteId = serviceRouteIds[overRouteKey as 'A' | 'B'];
+          } else {
+            const dynRoute = dynamicRoutes.find(r => r.key === overRouteKey);
+            firestoreRouteId = dynRoute?.firestoreId || null;
+          }
+        }
+
+        if (firestoreRouteId) {
+          console.log('💾 [handleDragEnd] SALVANDO NO FIRESTORE - Route ID:', firestoreRouteId);
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = doc(db, 'routes', firestoreRouteId);
             // Calcular unassignedStops atualizado (removendo o ponto que foi movido)
-            const stopId = String(stopToMove.id ?? stopToMove.placeId);
-            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== stopId);
+            const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
+            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== movedStopId);
 
             await updateDoc(routeRef, {
               stops: newTargetStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
-              unassignedStops: updatedUnassignedStops, // Atualizar também os não alocados
+              unassignedStops: updatedUnassignedStops,
+              updatedAt: serverTimestamp(),
             });
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
           } catch (error) {
@@ -2361,8 +2563,9 @@ export default function OrganizeRoutePage() {
             });
           }
         } else {
-          console.log('ℹ️ [handleDragEnd] Não salvando no Firestore:', {
+          console.log('ℹ️ [handleDragEnd] Sem Firestore ID para salvar imediatamente:', {
             isExistingRoute: routeData.isExistingRoute,
+            isService: routeData.isService,
             currentRouteId: routeData.currentRouteId,
             overRouteKey,
           });
@@ -2370,15 +2573,29 @@ export default function OrganizeRoutePage() {
       } else {
         console.error('❌ [handleDragEnd] computeRoute retornou null - salvando sem polyline');
         // Mesmo sem polyline, salvar no Firestore para manter consistência
+        // Reutilizar firestoreRouteId já determinado acima
+        let fallbackRouteId: string | null = null;
         if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
+          fallbackRouteId = routeData.currentRouteId;
+        } else if (routeData.isService) {
+          if (overRouteKey === 'A' || overRouteKey === 'B') {
+            fallbackRouteId = serviceRouteIds[overRouteKey as 'A' | 'B'];
+          } else {
+            const dynRoute = dynamicRoutes.find(r => r.key === overRouteKey);
+            fallbackRouteId = dynRoute?.firestoreId || null;
+          }
+        }
+
+        if (fallbackRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
-            const stopId = String(stopToMove.id ?? stopToMove.placeId);
-            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== stopId);
+            const routeRef = doc(db, 'routes', fallbackRouteId);
+            const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
+            const updatedUnassignedStops = unassignedStops.filter(s => String(s.id ?? s.placeId) !== movedStopId);
 
             await updateDoc(routeRef, {
               stops: newTargetStops,
               unassignedStops: updatedUnassignedStops,
+              updatedAt: serverTimestamp(),
             });
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO (sem polyline)');
           } catch (error) {
@@ -2388,9 +2605,10 @@ export default function OrganizeRoutePage() {
       }
 
       const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
+      const hasFirestoreId = !!(routeData.isExistingRoute && overRouteKey === 'A') || !!(routeData.isService && (serviceRouteIds[overRouteKey as 'A' | 'B'] || dynamicRoutes.find(r => r.key === overRouteKey)?.firestoreId));
       toast({
         title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.${routeData.isExistingRoute && overRouteKey === 'A' ? ' Motorista receberá atualização.' : ''}`,
+        description: `O serviço foi adicionado à ${routeName}.${hasFirestoreId ? ' Salvo automaticamente.' : ''}`,
       });
 
       return;
@@ -4291,20 +4509,51 @@ export default function OrganizeRoutePage() {
                         </div>
                      )
                   )}
-                  {/* Seção de stops sem coordenadas - aparece sempre que houver */}
-                  {!isLoading && unassignedStops.length > 0 && (
+                  {/* Seção de stops não alocados */}
+                  {!isLoading && unassignedStops.length > 0 && (() => {
+                    const stopsWithIssues = unassignedStops.filter(s => !s.lat || !s.lng || s.lat === 0 || s.lng === 0);
+                    const stopsValid = unassignedStops.filter(s => s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
+                    return (
                     <div className="space-y-4 p-4 mt-4 border-t">
+                        {stopsWithIssues.length > 0 && (
                         <div className="flex items-center gap-2 p-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
                             <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0" />
                             <div>
                                 <p className="font-medium text-amber-800 dark:text-amber-200">
-                                    {unassignedStops.length} endereço(s) precisam de correção
+                                    {stopsWithIssues.length} endereço(s) precisam de correção
                                 </p>
                                 <p className="text-sm text-amber-600 dark:text-amber-400">
                                     Edite os endereços abaixo para geocodificá-los. Após corrigir, arraste-os do popover para uma rota.
                                 </p>
                             </div>
                         </div>
+                        )}
+                        {stopsValid.length > 0 && stopsWithIssues.length === 0 && (
+                        <div className="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <PackagePlus className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                            <div>
+                                <p className="font-medium text-blue-800 dark:text-blue-200">
+                                    {stopsValid.length} pedido(s) não alocado(s)
+                                </p>
+                                <p className="text-sm text-blue-600 dark:text-blue-400">
+                                    Arraste-os do popover para uma rota.
+                                </p>
+                            </div>
+                        </div>
+                        )}
+                        {stopsValid.length > 0 && stopsWithIssues.length > 0 && (
+                        <div className="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <PackagePlus className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                            <div>
+                                <p className="font-medium text-blue-800 dark:text-blue-200">
+                                    + {stopsValid.length} pedido(s) prontos para alocar
+                                </p>
+                                <p className="text-sm text-blue-600 dark:text-blue-400">
+                                    Arraste-os do popover para uma rota.
+                                </p>
+                            </div>
+                        </div>
+                        )}
                         <Table>
                             <TableHeader>
                                 <TableRow>
@@ -4339,7 +4588,8 @@ export default function OrganizeRoutePage() {
                             </TableBody>
                         </Table>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
             </TabsContent>
 

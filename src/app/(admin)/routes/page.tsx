@@ -614,9 +614,32 @@ export default function RoutesPage() {
     router.push(`/routes/service/${serviceId}/organize`);
   };
 
-  // Função para expandir rota
+  // Função para expandir rota (de dentro do ServiceCard)
   const handleExpandRoute = (routeId: string) => {
-    router.push(`/routes/organize/acompanhar?routeId=${routeId}`);
+    const route = routes.find(r => r.id === routeId);
+    if (route) {
+      // Preparar sessionStorage como handleEditRoute faz
+      const routeDate = route.plannedDate?.toDate?.() || new Date();
+      const period = getRoutePeriod(routeDate).label;
+      const routeData = {
+        origin: route.origin,
+        stops: route.stops || [],
+        routeDate: routeDate.toISOString(),
+        routeTime: format(routeDate, 'HH:mm'),
+        isExistingRoute: true,
+        currentRouteId: route.id,
+        period,
+        routeName: route.name,
+        existingRouteData: {
+          distanceMeters: route.distanceMeters,
+          duration: route.duration,
+          encodedPolyline: route.encodedPolyline,
+          color: route.color,
+        },
+      };
+      sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+    }
+    router.push('/routes/organize/acompanhar');
   };
 
   return (
