@@ -4227,29 +4227,20 @@ export default function OrganizeRoutePage() {
   }
 
   const { origin } = routeData;
-  // Combine main routes with additional routes and dynamic routes based on visibility
-  // Use pendingEdits stops when they exist to avoid duplicating stops on the map
-  const getRouteWithPendingStops = (route: RouteInfo | null, key: string): RouteInfo | null => {
-    if (!route) return null;
-    const pending = pendingEdits[key];
-    if (pending) {
-      return { ...route, stops: pending as PlaceValue[] };
-    }
-    return route;
-  };
-
+  // Mapa usa APENAS dados reais das rotas (sem pendingEdits)
+  // Alterações na timeline só refletem no mapa após o usuário clicar "Aplicar"
   const combinedRoutes = [
-    getRouteWithPendingStops(routeA, 'A'),
-    getRouteWithPendingStops(routeB, 'B'),
+    routeA,
+    routeB,
     ...additionalRoutes
       .map((route) => ({
-        ...(getRouteWithPendingStops(route.data, route.id) || route.data),
+        ...route.data,
         visible: routeVisibility[route.id] === true
       }))
       .filter(route => route.visible),
     ...dynamicRoutes
-      .filter(r => r.data.visible) // Only include visible dynamic routes
-      .map(r => getRouteWithPendingStops(r.data, r.key) || r.data)
+      .filter(r => r.data.visible)
+      .map(r => r.data)
   ].filter((r): r is RouteInfo => !!r && r.visible !== false);
 
   const toggleAdditionalRoute = (routeId: string) => {
@@ -4403,13 +4394,16 @@ export default function OrganizeRoutePage() {
                  )}
               </div>
               <div className='flex items-center gap-2'>
-                {Object.keys(pendingEdits).some(key => pendingEdits[key as 'A' | 'B']) && (
+                {Object.values(pendingEdits).some(v => v !== null) && (
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        setPendingEdits({ A: null, B: null });
+                        // Resetar TODAS as chaves (A, B e rotas dinâmicas C, D, E...)
+                        const reset: Record<string, PlaceValue[] | null> = {};
+                        Object.keys(pendingEdits).forEach(k => { reset[k] = null; });
+                        setPendingEdits(reset);
                         toast({ title: 'Todas as edições foram canceladas' });
                       }}
                       className="border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700/50"
