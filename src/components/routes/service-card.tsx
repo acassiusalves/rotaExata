@@ -17,6 +17,7 @@ import {
   MapPin,
   User,
   Settings,
+  Eye,
 } from 'lucide-react';
 import { LunnaBadge } from './lunna-badge';
 import type { LunnaService, LunnaServiceStatus, RouteInfo, Driver } from '@/lib/types';
@@ -129,6 +130,20 @@ export function ServiceCard({
                 }}
               >
                 Organizar Rotas
+              </Button>
+            )}
+
+            {(service.status === 'dispatched' || service.status === 'in_progress') && onOrganize && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOrganize(service.id);
+                }}
+              >
+                <Eye className="h-4 w-4 mr-1" />
+                Acompanhar Rotas
               </Button>
             )}
           </div>

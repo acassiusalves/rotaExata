@@ -32,53 +32,75 @@ const adminApp = apps.length === 0
 const db = getFirestore(adminApp);
 
 async function cleanup() {
-  console.log('🔍 Buscando rotas draft com serviceId...\n');
+  console.log('🔍 Buscando TODAS as rotas com serviceId...\n');
 
+  // Buscar todas as rotas que pertencem a um serviço (não apenas drafts)
   const routesSnap = await db.collection('routes')
-    .where('status', '==', 'draft')
+    .where('serviceId', '!=', '')
     .get();
 
-  console.log(`Encontradas ${routesSnap.size} rotas draft total\n`);
+  console.log(`Encontradas ${routesSnap.size} rotas com serviceId total\n`);
 
   // Agrupar por serviceId
-  const byService: Record<string, Array<{ id: string; name: string; stopsCount: number; createdAt: any }>> = {};
+  const byService: Record<string, Array<{ id: string; name: string; code: string; status: string; stopsCount: number; createdAt: any }>> = {};
 
-  for (const doc of routesSnap.docs) {
-    const data = doc.data();
+  for (const routeDoc of routesSnap.docs) {
+    const data = routeDoc.data();
     const serviceId = data.serviceId;
     if (!serviceId) continue;
 
     if (!byService[serviceId]) byService[serviceId] = [];
     byService[serviceId].push({
-      id: doc.id,
+      id: routeDoc.id,
       name: data.name || 'sem nome',
+      code: data.code || '',
+      status: data.status || 'draft',
       stopsCount: data.stops?.length || 0,
       createdAt: data.createdAt,
     });
   }
 
   for (const [serviceId, routes] of Object.entries(byService)) {
-    console.log(`\nServiço ${serviceId}: ${routes.length} rotas draft`);
+    const dispatched = routes.filter(r => r.status !== 'draft');
+    const drafts = routes.filter(r => r.status === 'draft');
+
+    console.log(`\nServiço ${serviceId}: ${routes.length} rotas total (${dispatched.length} despachadas, ${drafts.length} drafts)`);
     routes.forEach((r, i) => {
-      console.log(`  ${i + 1}. ${r.id} - ${r.name} (${r.stopsCount} stops)`);
+      console.log(`  ${i + 1}. [${r.status}] ${r.id} - ${r.name} / ${r.code} (${r.stopsCount} stops)`);
     });
 
-    if (routes.length > 2) {
-      // Manter as 2 primeiras, deletar as duplicatas
-      const toDelete = routes.slice(2);
-      console.log(`  → Deletando ${toDelete.length} duplicatas...`);
-      for (const r of toDelete) {
+    // Se existem rotas despachadas E drafts duplicados, deletar os drafts
+    if (dispatched.length > 0 && drafts.length > 0) {
+      console.log(`  → Deletando ${drafts.length} draft(s) duplicado(s) (já existem ${dispatched.length} rotas despachadas)...`);
+      for (const r of drafts) {
         await db.collection('routes').doc(r.id).delete();
-        console.log(`    ✅ Deletado: ${r.id}`);
+        console.log(`    ✅ Deletado draft: ${r.id} (${r.name})`);
       }
 
-      // Atualizar o serviço com apenas os IDs das rotas mantidas
-      const keptIds = routes.slice(0, 2).map(r => r.id);
+      // Atualizar o serviço com apenas os IDs das rotas mantidas (despachadas)
+      const keptIds = dispatched.map(r => r.id);
       await db.collection('services').doc(serviceId).update({
         routeIds: keptIds,
         'stats.totalRoutes': keptIds.length,
       });
       console.log(`  → Serviço atualizado com routeIds:`, keptIds);
+    } else if (drafts.length > 2) {
+      // Sem rotas despachadas, mas muitos drafts duplicados - manter os 2 primeiros
+      const toDelete = drafts.slice(2);
+      console.log(`  → Deletando ${toDelete.length} draft(s) excedente(s)...`);
+      for (const r of toDelete) {
+        await db.collection('routes').doc(r.id).delete();
+        console.log(`    ✅ Deletado: ${r.id}`);
+      }
+
+      const keptIds = drafts.slice(0, 2).map(r => r.id);
+      await db.collection('services').doc(serviceId).update({
+        routeIds: keptIds,
+        'stats.totalRoutes': keptIds.length,
+      });
+      console.log(`  → Serviço atualizado com routeIds:`, keptIds);
+    } else {
+      console.log(`  → OK, sem duplicatas`);
     }
   }
 

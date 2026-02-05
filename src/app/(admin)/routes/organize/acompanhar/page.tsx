@@ -2801,13 +2801,21 @@ export default function OrganizeRoutePage() {
     setAssignedDrivers(prev => ({...prev, [routeKey]: driverId}));
   };
   
-  const handleDispatchRoute = async (routeKey: 'A' | 'B') => {
+  const handleDispatchRoute = async (routeKey: string) => {
     if (!routeData) return;
 
-    const routeToSave = routeKey === 'A' ? routeA : routeB;
-    const routeName = routeNames[routeKey];
+    // Encontrar a rota: pode ser A, B ou rota dinâmica (C, D, E...)
+    let routeToSave: RouteInfo | null = null;
+    if (routeKey === 'A') routeToSave = routeA;
+    else if (routeKey === 'B') routeToSave = routeB;
+    else {
+      const dynRoute = dynamicRoutes.find(r => r.key === routeKey);
+      if (dynRoute) routeToSave = dynRoute.data;
+    }
+
+    const routeName = routeNames[routeKey] || `Rota ${routeKey}`;
     const driverId = assignedDrivers[routeKey];
-    
+
     if (!routeToSave) {
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
         return;
@@ -2816,7 +2824,7 @@ export default function OrganizeRoutePage() {
         toast({ variant: 'destructive', title: 'Motorista não atribuído', description: `Por favor, atribua um motorista para a ${routeName}.` });
         return;
     }
-    
+
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
@@ -2827,10 +2835,18 @@ export default function OrganizeRoutePage() {
           .map(s => s.orderNumber)
           .filter((n): n is string => !!n);
 
-        const routeDoc: Record<string, any> = {
+        // Verificar se já existe um draft salvo para esta rota (evitar duplicatas)
+        let existingDraftId: string | null = null;
+        if (routeKey === 'A' || routeKey === 'B') {
+          existingDraftId = serviceRouteIds[routeKey as 'A' | 'B'];
+        } else {
+          const dynRoute = dynamicRoutes.find(r => r.key === routeKey);
+          if (dynRoute?.firestoreId) existingDraftId = dynRoute.firestoreId;
+        }
+
+        const routeDocData: Record<string, any> = {
             name: routeName,
             status: 'dispatched',
-            createdAt: serverTimestamp(),
             plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
             origin: routeData.origin,
             stops: routeToSave.stops,
@@ -2840,31 +2856,40 @@ export default function OrganizeRoutePage() {
             color: routeToSave.color,
             driverId: driverId,
             driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
+            updatedAt: serverTimestamp(),
         };
 
         // Adicionar campos de serviço Luna se aplicável
         if (routeData.isService && routeData.serviceId) {
-            routeDoc.source = 'lunna';
-            routeDoc.serviceId = routeData.serviceId;
-            routeDoc.serviceCode = routeData.serviceCode;
-            routeDoc.lunnaOrderIds = lunnaOrderIds;
-            // Gerar código da rota baseado no serviço (LN-XXXX-A, LN-XXXX-B, etc.)
-            const existingServiceRoutes = await getDocs(
-              query(collection(db, 'routes'), where('serviceId', '==', routeData.serviceId))
-            );
-            const routeIndex = existingServiceRoutes.size;
-            const routeLetter = String.fromCharCode(65 + routeIndex); // A, B, C...
-            routeDoc.code = `${routeData.serviceCode}-${routeLetter}`;
+            routeDocData.source = 'lunna';
+            routeDocData.serviceId = routeData.serviceId;
+            routeDocData.serviceCode = routeData.serviceCode;
+            routeDocData.lunnaOrderIds = lunnaOrderIds;
+            // Gerar código da rota baseado na letra da rota (A, B)
+            routeDocData.code = `${routeData.serviceCode}-${routeKey}`;
         }
 
-        const routeRef = await addDoc(collection(db, "routes"), routeDoc);
+        let routeRefId: string;
+
+        if (existingDraftId && routeData.isService) {
+            // ATUALIZAR o draft existente em vez de criar novo documento
+            console.log(`📝 [handleDispatchRoute] Atualizando draft existente ${existingDraftId} para dispatched`);
+            const routeRef = doc(db, 'routes', existingDraftId);
+            await updateDoc(routeRef, routeDocData);
+            routeRefId = existingDraftId;
+        } else {
+            // Criar novo documento (fluxo não-serviço ou sem draft existente)
+            routeDocData.createdAt = serverTimestamp();
+            const routeRef = await addDoc(collection(db, "routes"), routeDocData);
+            routeRefId = routeRef.id;
+        }
 
         // Se é um serviço, atualizar o serviço com o ID da rota
         if (routeData.isService && routeData.serviceId) {
             const serviceRef = doc(db, 'services', routeData.serviceId);
             await updateDoc(serviceRef, {
-                routeIds: arrayUnion(routeRef.id),
-                'stats.totalRoutes': increment(1),
+                routeIds: arrayUnion(routeRefId),
+                'stats.totalRoutes': increment(existingDraftId ? 0 : 1),
                 status: 'dispatched',
                 updatedAt: serverTimestamp(),
             });
@@ -2879,8 +2904,8 @@ export default function OrganizeRoutePage() {
                 if (!ordersSnap.empty) {
                     await updateDoc(ordersSnap.docs[0].ref, {
                         logisticsStatus: 'em_rota',
-                        rotaExataRouteId: routeRef.id,
-                        rotaExataRouteCode: routeDoc.code,
+                        rotaExataRouteId: routeRefId,
+                        rotaExataRouteCode: routeDocData.code,
                         updatedAt: serverTimestamp(),
                     });
                 }
@@ -2895,10 +2920,13 @@ export default function OrganizeRoutePage() {
         // Remove the dispatched route from state
         if (routeKey === 'A') {
             setRouteA(null);
-        } else {
+        } else if (routeKey === 'B') {
             setRouteB(null);
+        } else {
+            // Dynamic route - remove from dynamicRoutes
+            setDynamicRoutes(prev => prev.filter(r => r.key !== routeKey));
         }
-        
+
     } catch (error) {
         console.error("Error saving route:", error);
         toast({

@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { orderIds, userId, existingRouteId } = body;
+    const { orderIds, userId, existingRouteId, existingServiceId } = body;
 
     // Validação de entrada
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
@@ -404,6 +404,72 @@ export async function POST(request: NextRequest) {
             alreadyInRoute: orders.length - newStops.length,
             withIssues: failedGeocodings.length,
             failedGeocodings: failedGeocodings,
+          },
+        }, { headers: corsHeaders });
+      }
+    }
+
+    // 4b. Se existingServiceId, adicionar stops ao serviço existente
+    if (existingServiceId) {
+      const existingServiceRef = adminDb.collection('services').doc(existingServiceId);
+      const existingServiceSnap = await existingServiceRef.get();
+
+      if (existingServiceSnap.exists) {
+        const existingData = existingServiceSnap.data();
+        const existingStops = existingData?.allStops || [];
+        const existingOrderNumbers = new Set(
+          existingStops.map((s: PlaceValue) => s.orderNumber).filter(Boolean)
+        );
+
+        // Filtrar apenas stops novos (evitar duplicados)
+        const newStops = successfulStops.filter(
+          s => !existingOrderNumbers.has(s.orderNumber)
+        );
+
+        if (newStops.length === 0) {
+          return NextResponse.json({
+            success: true,
+            serviceId: existingServiceId,
+            serviceCode: existingData?.code,
+            updated: true,
+            message: 'Todos os pedidos já estavam no serviço',
+            stats: {
+              total: orders.length,
+              added: 0,
+              alreadyInService: orders.length,
+            },
+          }, { headers: corsHeaders });
+        }
+
+        // Atualizar serviço com novos stops
+        await existingServiceRef.update({
+          allStops: [...existingStops, ...newStops],
+          lunnaOrderIds: FieldValue.arrayUnion(...orders.map(o => o.number)),
+          'stats.totalDeliveries': existingStops.length + newStops.length,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        // Atualizar pedidos com referência ao serviço
+        for (const order of orders) {
+          await adminDb.collection('orders').doc(order.id).update({
+            logisticsStatus: 'pendente',
+            rotaExataServiceId: existingServiceId,
+            rotaExataServiceCode: existingData?.code,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        return NextResponse.json({
+          success: true,
+          serviceId: existingServiceId,
+          serviceCode: existingData?.code,
+          updated: true,
+          stats: {
+            total: orders.length,
+            added: newStops.length,
+            alreadyInService: orders.length - newStops.length,
+            withIssues: failedGeocodings.length,
+            failedGeocodings,
           },
         }, { headers: corsHeaders });
       }
