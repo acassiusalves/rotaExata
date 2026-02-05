@@ -20,26 +20,33 @@ export async function OPTIONS() {
 async function geocodeAddress(address: string): Promise<PlaceValue | null> {
   try {
     // Usando a API do Google Maps Geocoding via servidor
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const apiKey = process.env.GMAPS_SERVER_KEY || process.env.NEXT_PUBLIC_GMAPS_KEY;
     if (!apiKey) {
-      console.error('Google Maps API key não configurada');
+      console.error('Google Maps API key não configurada (GMAPS_SERVER_KEY ou NEXT_PUBLIC_GMAPS_KEY)');
       return null;
     }
 
     const encodedAddress = encodeURIComponent(address);
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&region=BR&key=${apiKey}`;
 
+    console.log(`🌍 [Geocoding] Tentando geocodificar: "${address}"`);
+    console.log(`🌍 [Geocoding] API Key presente: ${apiKey ? 'Sim (' + apiKey.substring(0, 10) + '...)' : 'Não'}`);
+
     const response = await fetch(url);
     const data = await response.json();
+
+    console.log(`🌍 [Geocoding] Resposta status: ${data.status}, error_message: ${data.error_message || 'nenhum'}`);
 
     if (data.status === 'OK' && data.results && data.results[0]) {
       const result = data.results[0];
       const location = result.geometry?.location;
 
       if (!location) {
-        console.warn(`Geocoding result for "${address}" missing geometry`);
+        console.warn(`🌍 [Geocoding] Resultado sem geometry para: "${address}"`);
         return null;
       }
+
+      console.log(`🌍 [Geocoding] ✅ Sucesso: "${address}" → lat: ${location.lat}, lng: ${location.lng}`);
 
       return {
         id: `geocoded-${result.place_id}-${Date.now()}`,
@@ -49,7 +56,10 @@ async function geocodeAddress(address: string): Promise<PlaceValue | null> {
         lng: location.lng,
       };
     } else {
-      console.warn(`Geocoding failed for "${address}": ${data.status}`);
+      console.warn(`🌍 [Geocoding] ❌ Falhou para "${address}": status=${data.status}, error=${data.error_message || 'N/A'}`);
+      if (data.results) {
+        console.warn(`🌍 [Geocoding] Results count: ${data.results.length}`);
+      }
       return null;
     }
   } catch (error) {
@@ -77,7 +87,7 @@ async function generateLunnaServiceCode(): Promise<string> {
     const nextValue = currentValue + 1;
     transaction.set(counterRef, { value: nextValue }, { merge: true });
 
-    return `LN-${String(nextValue).padStart(4, '0')}`;
+    return `LNS-${String(nextValue).padStart(4, '0')}`;
   });
 
   return newCode;

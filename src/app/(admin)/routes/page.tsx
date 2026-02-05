@@ -179,13 +179,8 @@ export default function RoutesPage() {
           continue;
         }
 
-        // Buscar rotas deste serviço
-        const serviceRoutes: RouteDocument[] = [];
-        if (serviceData.routeIds && serviceData.routeIds.length > 0) {
-          // As rotas já foram carregadas no estado routes, filtrar por serviceId
-          const matchingRoutes = routes.filter(r => r.serviceId === docSnap.id);
-          serviceRoutes.push(...matchingRoutes);
-        }
+        // Buscar rotas deste serviço - filtrar por serviceId independente do routeIds
+        const serviceRoutes = routes.filter(r => r.serviceId === docSnap.id);
 
         servicesData.push({
           service: serviceData,

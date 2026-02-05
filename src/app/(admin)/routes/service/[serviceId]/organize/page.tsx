@@ -3,9 +3,9 @@
 import * as React from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
-import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, Timestamp } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
-import type { LunnaService } from '@/lib/types';
+import type { LunnaService, PlaceValue } from '@/lib/types';
 
 export default function ServiceOrganizePage() {
   const router = useRouter();
@@ -61,17 +61,75 @@ export default function ServiceOrganizePage() {
           routeDateISO = new Date().toISOString();
         }
 
+        // Buscar rotas já existentes para este serviço
+        const existingRoutesQuery = query(
+          collection(db, 'routes'),
+          where('serviceId', '==', serviceId)
+        );
+        const existingRoutesSnap = await getDocs(existingRoutesQuery);
+
+        const existingServiceRoutes: Array<{
+          id: string;
+          code: string;
+          name: string;
+          stops: PlaceValue[];
+          distanceMeters: number;
+          duration: string;
+          encodedPolyline: string;
+          color: string;
+          status: string;
+          driverId?: string;
+          driverInfo?: { name: string; vehicle: { type: string; plate: string } };
+        }> = [];
+
+        const assignedStopIds = new Set<string>();
+
+        existingRoutesSnap.forEach((routeDoc) => {
+          const routeData = routeDoc.data();
+          const routeStops = (routeData.stops || []) as PlaceValue[];
+
+          // Registrar IDs dos stops já atribuídos a rotas
+          routeStops.forEach((stop) => {
+            const stopId = String(stop.id ?? stop.placeId);
+            if (stopId) assignedStopIds.add(stopId);
+          });
+
+          existingServiceRoutes.push({
+            id: routeDoc.id,
+            code: routeData.code || '',
+            name: routeData.name || '',
+            stops: routeStops,
+            distanceMeters: routeData.distanceMeters || 0,
+            duration: routeData.duration || '0s',
+            encodedPolyline: routeData.encodedPolyline || '',
+            color: routeData.color || '#6366f1',
+            status: routeData.status || 'draft',
+            driverId: routeData.driverId,
+            driverInfo: routeData.driverInfo,
+          });
+        });
+
+        // Filtrar stops que ainda não foram atribuídos a nenhuma rota
+        const unassignedStops = serviceData.allStops.filter((stop) => {
+          const stopId = String(stop.id ?? stop.placeId);
+          return !assignedStopIds.has(stopId);
+        });
+
+        console.log('📦 [ServiceOrganize] Rotas existentes:', existingServiceRoutes.length);
+        console.log('📦 [ServiceOrganize] Stops já atribuídos:', assignedStopIds.size);
+        console.log('📦 [ServiceOrganize] Stops não atribuídos:', unassignedStops.length);
+
         // Preparar dados para a página de organização
-        // Salvar no sessionStorage para a página de organização consumir
         const routeData = {
           origin: serviceData.origin,
-          stops: serviceData.allStops,
+          stops: unassignedStops, // Apenas stops não atribuídos
           routeDate: routeDateISO,
           routeTime: '08:00',
-          isService: true, // Flag para indicar que é um serviço
+          isService: true,
           serviceId: serviceId,
           serviceCode: serviceData.code,
-          isExistingRoute: false, // É um novo fluxo de organização
+          isExistingRoute: false,
+          existingServiceRoutes: existingServiceRoutes.length > 0 ? existingServiceRoutes : undefined,
         };
 
         console.log('📦 [ServiceOrganize] Salvando no sessionStorage:', {
@@ -79,6 +137,7 @@ export default function ServiceOrganizePage() {
           origin: routeData.origin?.address,
           serviceCode: routeData.serviceCode,
           isService: routeData.isService,
+          existingRoutes: existingServiceRoutes.length,
         });
 
         sessionStorage.setItem('newRouteData', JSON.stringify(routeData));

@@ -142,7 +142,7 @@ export function ServiceCard({
           </span>
           <span className="flex items-center gap-1">
             <Route className="h-4 w-4" />
-            {routes.length} rotas
+            {routes.length || service.stats?.totalRoutes || 0} rotas
           </span>
           <span className="flex items-center gap-1">
             <Clock className="h-4 w-4" />
