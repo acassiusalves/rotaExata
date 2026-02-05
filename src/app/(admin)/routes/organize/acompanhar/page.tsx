@@ -3701,7 +3701,30 @@ export default function OrganizeRoutePage() {
     if (firestoreRouteId) {
       try {
         const routeRef = doc(db, 'routes', firestoreRouteId);
-        if (cleanedNewStops.length === 0) {
+
+        // Detectar mudanças para notificar motorista
+        let stopsToSave = cleanedNewStops;
+        let routeStatus = '';
+        let driverId = '';
+        let changes: any[] = [];
+        try {
+          const currentDoc = await getDoc(routeRef);
+          if (currentDoc.exists()) {
+            const currentData = currentDoc.data();
+            routeStatus = currentData.status || '';
+            driverId = currentData.driverId || '';
+            const oldStops = currentData.stops || [];
+            changes = detectRouteChanges(oldStops, cleanedNewStops);
+            if (changes.length > 0) {
+              stopsToSave = markModifiedStops(cleanedNewStops, changes);
+              console.log('📋 [handleRemoveFromRoute] Mudanças detectadas:', changes.length);
+            }
+          }
+        } catch (changeErr) {
+          console.error('⚠️ [handleRemoveFromRoute] Erro ao detectar mudanças:', changeErr);
+        }
+
+        if (stopsToSave.length === 0) {
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -3711,7 +3734,7 @@ export default function OrganizeRoutePage() {
           });
         } else {
           await updateDoc(routeRef, {
-            stops: cleanedNewStops,
+            stops: stopsToSave,
             ...(routeInfo ? {
               encodedPolyline: routeInfo.encodedPolyline,
               distanceMeters: routeInfo.distanceMeters,
@@ -3720,7 +3743,18 @@ export default function OrganizeRoutePage() {
             updatedAt: serverTimestamp(),
           });
         }
-        console.log('✅ [handleRemoveFromRoute] Firestore atualizado com', cleanedNewStops.length, 'stops');
+        console.log('✅ [handleRemoveFromRoute] Firestore atualizado com', stopsToSave.length, 'stops');
+
+        // Notificar motorista se rota despachada/em progresso
+        if (changes.length > 0 && driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
+          try {
+            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+            await notifyFn({ routeId: firestoreRouteId, driverId, changes });
+            console.log('📢 [handleRemoveFromRoute] Motorista notificado:', changes.length, 'mudanças');
+          } catch (notifyErr) {
+            console.error('⚠️ [handleRemoveFromRoute] Erro ao notificar motorista:', notifyErr);
+          }
+        }
       } catch (error) {
         console.error('❌ [handleRemoveFromRoute] Erro ao atualizar Firestore:', error);
       }
@@ -3770,7 +3804,30 @@ export default function OrganizeRoutePage() {
     if (firestoreRouteId) {
       try {
         const routeRef = doc(db, 'routes', firestoreRouteId);
-        if (cleanedNewStops.length === 0) {
+
+        // Detectar mudanças para notificar motorista
+        let stopsToSave = cleanedNewStops;
+        let routeStatus = '';
+        let driverId = '';
+        let changes: any[] = [];
+        try {
+          const currentDoc = await getDoc(routeRef);
+          if (currentDoc.exists()) {
+            const currentData = currentDoc.data();
+            routeStatus = currentData.status || '';
+            driverId = currentData.driverId || '';
+            const oldStops = currentData.stops || [];
+            changes = detectRouteChanges(oldStops, cleanedNewStops);
+            if (changes.length > 0) {
+              stopsToSave = markModifiedStops(cleanedNewStops, changes);
+              console.log('📋 [handleDeleteStop] Mudanças detectadas:', changes.length);
+            }
+          }
+        } catch (changeErr) {
+          console.error('⚠️ [handleDeleteStop] Erro ao detectar mudanças:', changeErr);
+        }
+
+        if (stopsToSave.length === 0) {
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -3780,7 +3837,7 @@ export default function OrganizeRoutePage() {
           });
         } else {
           await updateDoc(routeRef, {
-            stops: cleanedNewStops,
+            stops: stopsToSave,
             ...(routeInfo ? {
               encodedPolyline: routeInfo.encodedPolyline,
               distanceMeters: routeInfo.distanceMeters,
@@ -3789,7 +3846,18 @@ export default function OrganizeRoutePage() {
             updatedAt: serverTimestamp(),
           });
         }
-        console.log('✅ [handleDeleteStop] Firestore rota atualizado com', cleanedNewStops.length, 'stops');
+        console.log('✅ [handleDeleteStop] Firestore rota atualizado com', stopsToSave.length, 'stops');
+
+        // Notificar motorista se rota despachada/em progresso
+        if (changes.length > 0 && driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
+          try {
+            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+            await notifyFn({ routeId: firestoreRouteId, driverId, changes });
+            console.log('📢 [handleDeleteStop] Motorista notificado:', changes.length, 'mudanças');
+          } catch (notifyErr) {
+            console.error('⚠️ [handleDeleteStop] Erro ao notificar motorista:', notifyErr);
+          }
+        }
       } catch (error) {
         console.error('❌ [handleDeleteStop] Erro ao atualizar Firestore:', error);
       }
@@ -4286,21 +4354,50 @@ export default function OrganizeRoutePage() {
       }
 
       // Then, batch update existing routes
+      const routesWithChanges: Array<{ routeId: string; driverId: string; changes: any[] }> = [];
+
       if (routeUpdates.length > 0) {
         const batch = writeBatch(db);
 
         for (const update of routeUpdates) {
           const routeRef = doc(db, 'routes', update.routeId);
 
+          // Buscar stops atuais do Firestore para detectar mudanças e notificar motorista
+          let stopsToSave = update.cleanedStops;
+          try {
+            const currentDoc = await getDoc(routeRef);
+            if (currentDoc.exists()) {
+              const currentData = currentDoc.data();
+              const oldStops = currentData.stops || [];
+              const changes = detectRouteChanges(oldStops, update.cleanedStops);
+
+              if (changes.length > 0) {
+                // Marcar stops modificados com flags visuais para o motorista
+                stopsToSave = markModifiedStops(update.cleanedStops, changes);
+                addDebugLog('CHANGE_TRACKING', `Route ${update.routeKey}: ${changes.length} changes detected`, { changes });
+
+                // Se rota já despachada/em progresso e tem motorista, preparar notificação
+                const routeStatus = currentData.status;
+                const driverId = currentData.driverId;
+                if (driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
+                  routesWithChanges.push({ routeId: update.routeId, driverId, changes });
+                }
+              }
+            }
+          } catch (changeErr) {
+            console.error('⚠️ [APPLY] Erro ao detectar mudanças para rota', update.routeKey, changeErr);
+            // Continuar sem flags - melhor salvar sem flag do que não salvar
+          }
+
           if (update.routeInfo) {
             batch.update(routeRef, {
-              stops: update.cleanedStops,
+              stops: stopsToSave,
               encodedPolyline: update.routeInfo.encodedPolyline,
               distanceMeters: update.routeInfo.distanceMeters,
               duration: update.routeInfo.duration,
               updatedAt: serverTimestamp(),
             });
-            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops`);
+            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${stopsToSave.length} stops`);
           } else if (update.cleanedStops.length === 0) {
             // Truly empty route (all stops removed)
             batch.update(routeRef, {
@@ -4314,10 +4411,10 @@ export default function OrganizeRoutePage() {
           } else {
             // computeRoute failed but route has stops - save stops without polyline
             batch.update(routeRef, {
-              stops: update.cleanedStops,
+              stops: stopsToSave,
               updatedAt: serverTimestamp(),
             });
-            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${update.cleanedStops.length} stops (no polyline - computeRoute failed)`);
+            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${stopsToSave.length} stops (no polyline - computeRoute failed)`);
           }
         }
 
@@ -4337,6 +4434,17 @@ export default function OrganizeRoutePage() {
         addDebugLog('FIRESTORE_BATCH', '✅ ATOMIC batch commit successful', {
           routesUpdated: routeUpdates.length
         });
+      }
+
+      // Notificar motoristas das rotas que tiveram mudanças (após commit bem-sucedido)
+      for (const { routeId, driverId, changes } of routesWithChanges) {
+        try {
+          const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+          await notifyFn({ routeId, driverId, changes });
+          console.log('📢 [APPLY] Motorista notificado para rota', routeId, ':', changes.length, 'mudanças');
+        } catch (notifyErr) {
+          console.error('⚠️ [APPLY] Erro ao notificar motorista para rota', routeId, notifyErr);
+        }
       }
 
     } catch (error) {
@@ -4365,11 +4473,12 @@ export default function OrganizeRoutePage() {
       createdRoutes: newRoutesToCreate.length
     });
 
+    const driversNotified = routesWithChanges.length;
     toast({
       title: 'Edições aplicadas!',
       description: totalRoutesAffected > 1
-        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${routeData.isExistingRoute ? ' Motoristas receberão atualização.' : ''}`
-        : `Rota atualizada com sucesso.${routeData.isExistingRoute ? ' Motorista receberá atualização.' : ''}`,
+        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${driversNotified > 0 ? ` ${driversNotified} motorista(s) notificado(s).` : ''}`
+        : `Rota atualizada com sucesso.${driversNotified > 0 ? ' Motorista notificado das alterações.' : ''}`,
     });
   };
 
