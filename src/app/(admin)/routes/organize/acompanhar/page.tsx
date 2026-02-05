@@ -1793,6 +1793,43 @@ export default function OrganizeRoutePage() {
           const routeDoc = change.doc;
           const data = routeDoc.data();
           const routeCode = data.code || routeDoc.id;
+          const firestoreStops = (data.stops || []) as PlaceValue[];
+
+          // Detectar novos stops adicionados diretamente ao array stops (Luna com existingRouteId)
+          // Mapear Firestore ID → routeKey para atualizar o state correto
+          let routeKey: string | null = null;
+          if (serviceRouteIds.A === routeDoc.id) routeKey = 'A';
+          else if (serviceRouteIds.B === routeDoc.id) routeKey = 'B';
+          else {
+            const dynRoute = dynamicRoutes.find(r => r.firestoreId === routeDoc.id);
+            if (dynRoute) routeKey = dynRoute.key;
+          }
+
+          if (routeKey) {
+            const currentRoute = getRoute(routeKey);
+            const currentStopsCount = currentRoute?.stops?.length || 0;
+
+            if (firestoreStops.length > currentStopsCount) {
+              const newCount = firestoreStops.length - currentStopsCount;
+              console.log('👂 [serviceListener] Novos stops detectados na rota', routeCode, ':', newCount, 'novo(s)');
+
+              // Atualizar o state local da rota com os stops do Firestore
+              setRoute(routeKey, prev => prev ? {
+                ...prev,
+                stops: firestoreStops,
+                encodedPolyline: data.encodedPolyline || prev.encodedPolyline,
+                distanceMeters: data.distanceMeters || prev.distanceMeters,
+                duration: data.duration || prev.duration,
+              } : null);
+
+              setTimeout(() => {
+                toast({
+                  title: 'Novos pedidos na rota!',
+                  description: `${newCount} novo(s) pedido(s) adicionado(s) à ${routeCode} via Luna.`,
+                });
+              }, 0);
+            }
+          }
 
           // Verificar se unassignedStops mudou (Luna adicionou novos stops)
           const newUnassigned = (data.unassignedStops || []) as PlaceValue[];
@@ -3778,6 +3815,27 @@ export default function OrganizeRoutePage() {
         }
       } catch (error) {
         console.error('❌ [handleDeleteStop] Erro ao limpar allStops do serviço:', error);
+      }
+    }
+
+    // Desvincular pedido no Firestore (orders) para que o Luna saiba que foi removido
+    if (stop.orderNumber) {
+      try {
+        const ordersSnap = await getDocs(
+          query(collection(db, 'orders'), where('number', '==', stop.orderNumber))
+        );
+        for (const orderDoc of ordersSnap.docs) {
+          await updateDoc(doc(db, 'orders', orderDoc.id), {
+            logisticsStatus: null,
+            rotaExataServiceId: null,
+            rotaExataServiceCode: null,
+            rotaExataRouteId: null,
+            updatedAt: serverTimestamp(),
+          });
+          console.log('✅ [handleDeleteStop] Pedido', stop.orderNumber, 'desvinculado do Rota Exata (orders doc:', orderDoc.id, ')');
+        }
+      } catch (error) {
+        console.error('❌ [handleDeleteStop] Erro ao desvincular pedido:', error);
       }
     }
 
