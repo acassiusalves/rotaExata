@@ -411,9 +411,11 @@ const UnassignedStopsTimeline: React.FC<{
 const EditableRouteName: React.FC<{
   name: string;
   onChange: (newName: string) => void;
-}> = ({ name, onChange }) => {
+  onSave?: (newName: string) => Promise<void>; // Nova prop para persistir no Firestore
+}> = ({ name, onChange, onSave }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [currentName, setCurrentName] = React.useState(name);
+  const [isSaving, setIsSaving] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -423,9 +425,31 @@ const EditableRouteName: React.FC<{
     }
   }, [isEditing]);
 
-  const handleSave = () => {
-    setIsEditing(false);
-    onChange(currentName);
+  const handleSave = async () => {
+    if (currentName.trim() === name || !currentName.trim()) {
+      setCurrentName(name);
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Atualizar estado local primeiro
+      onChange(currentName);
+
+      // Se tiver função de salvar (para rotas existentes), chamar
+      if (onSave) {
+        await onSave(currentName);
+      }
+
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Erro ao salvar nome da rota:', error);
+      // Reverter para o nome anterior em caso de erro
+      setCurrentName(name);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -441,14 +465,18 @@ const EditableRouteName: React.FC<{
   return (
     <div className="flex items-center gap-2 font-medium">
       {isEditing ? (
-        <Input
-          ref={inputRef}
-          value={currentName}
-          onChange={(e) => setCurrentName(e.target.value)}
-          onBlur={handleSave}
-          onKeyDown={handleKeyDown}
-          className="h-8"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            ref={inputRef}
+            value={currentName}
+            onChange={(e) => setCurrentName(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            className="h-8"
+            disabled={isSaving}
+          />
+          {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+        </div>
       ) : (
         <>
           <span>{name}</span>
@@ -961,6 +989,86 @@ export default function RouteAcompanharPage() {
 
     const loadAdditionalRoutes = async () => {
       try {
+        // Se a rota atual pertence a um serviço, filtrar apenas rotas do mesmo serviço
+        if (routeData.serviceId) {
+          console.log('🔍 [loadAdditionalRoutes] Rota pertence a serviço, filtrando por serviceId:', routeData.serviceId);
+
+          const q = query(
+            collection(db, 'routes'),
+            where('serviceId', '==', routeData.serviceId)
+          );
+
+          const querySnapshot = await getDocs(q);
+          const routes: Array<{ id: string; name: string; data: RouteInfo; driverId?: string; driverInfo?: any; plannedDate?: Date }> = [];
+          const visibility: Record<string, boolean> = {};
+
+          // Array of distinct colors for routes (sistema sequencial de cores)
+          const routeColors = [
+            '#e60000', // Vermelho - Icone address 1.svg
+            '#1fd634', // Verde - Icone address 2.svg
+            '#fa9200', // Laranja - Icone address 3.svg
+            '#bf07e4', // Roxo - Icone address 4.svg
+            '#000000', // Preto - Icone address 5.svg
+          ];
+
+          // Get colors already used by main routes (A and B)
+          const usedColors = new Set<string>();
+          if (routeA?.color) usedColors.add(routeA.color.toLowerCase());
+          if (routeB?.color) usedColors.add(routeB.color.toLowerCase());
+
+          let colorIndex = 0;
+          querySnapshot.forEach((doc) => {
+            // Skip the current route (the one being viewed)
+            if (routeData.currentRouteId && doc.id === routeData.currentRouteId) {
+              return;
+            }
+
+            const routeDoc = doc.data();
+
+            // Skip completed or finished routes
+            if (routeDoc.status === 'completed' || routeDoc.status === 'completed_auto' || routeDoc.status === 'finished') {
+              return;
+            }
+
+            // Find a color that's not already used by main routes
+            let assignedColor = routeDoc.color;
+            if (!assignedColor || usedColors.has(assignedColor.toLowerCase())) {
+              // Find next available color that's not used
+              while (usedColors.has(routeColors[colorIndex % routeColors.length].toLowerCase())) {
+                colorIndex++;
+              }
+              assignedColor = routeColors[colorIndex % routeColors.length];
+              usedColors.add(assignedColor.toLowerCase());
+              colorIndex++;
+            }
+
+            const routeInfo: RouteInfo = {
+              stops: routeDoc.stops || [],
+              encodedPolyline: routeDoc.encodedPolyline || '',
+              distanceMeters: routeDoc.distanceMeters || 0,
+              duration: routeDoc.duration || '0s',
+              color: assignedColor,
+              visible: false, // All hidden by default
+            };
+
+            routes.push({
+              id: doc.id,
+              name: routeDoc.name || `Rota ${doc.id.substring(0, 6)}`, // Use real route name from Firestore
+              data: routeInfo,
+              driverId: routeDoc.driverId,
+              driverInfo: routeDoc.driverInfo,
+              plannedDate: routeDoc.plannedDate?.toDate(),
+            });
+            visibility[doc.id] = false; // Hidden by default
+          });
+
+          console.log('✅ [loadAdditionalRoutes] Rotas do mesmo serviço carregadas:', routes.length);
+          setAdditionalRoutes(routes);
+          setRouteVisibility(visibility);
+          return;
+        }
+
+        // Comportamento original para rotas que não pertencem a serviços
         const routeDate = new Date(routeData.routeDate);
         const dayStart = Timestamp.fromDate(startOfDay(routeDate));
         const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
@@ -1055,7 +1163,7 @@ export default function RouteAcompanharPage() {
     };
 
     loadAdditionalRoutes();
-  }, [routeData?.routeDate, routeData?.period]);
+  }, [routeData?.routeDate, routeData?.period, routeData?.serviceId]);
 
   // Subscribe to real-time location updates for existing route
   React.useEffect(() => {
@@ -1157,6 +1265,10 @@ export default function RouteAcompanharPage() {
             encodedPolyline: routeData.encodedPolyline || '',
             color: routeData.color || '#e60000',
           },
+          // Incluir dados do serviço se a rota pertencer a um serviço
+          isService: !!routeData.serviceId,
+          serviceId: routeData.serviceId,
+          serviceCode: routeData.serviceCode,
         };
       console.log('📦 [useEffect:loadRouteData] Dados parseados:', {
         isExistingRoute: parsedData.isExistingRoute,
@@ -1893,6 +2005,34 @@ export default function RouteAcompanharPage() {
 
     loadRouteData();
   }, [routeId, router, toast]);
+
+  // Real-time listener: sincronizar nome da rota
+  React.useEffect(() => {
+    if (!routeId) return;
+
+    console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da rota:', routeId);
+
+    const unsubscribe = onSnapshot(doc(db, 'routes', routeId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const newName = data.name || data.code || 'Rota 1';
+
+        // Atualizar nome se mudou
+        setRouteNames(prev => {
+          if (prev.A !== newName) {
+            console.log('🔄 [routeNameSync] Nome da rota atualizado:', { old: prev.A, new: newName });
+            return { ...prev, A: newName };
+          }
+          return prev;
+        });
+      }
+    });
+
+    return () => {
+      console.log('👋 [useEffect:routeNameSync] Parando listener para nome da rota');
+      unsubscribe();
+    };
+  }, [routeId]);
 
   // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
   React.useEffect(() => {
@@ -3491,6 +3631,38 @@ export default function RouteAcompanharPage() {
     }
   };
 
+  // Função para atualizar apenas o nome da rota no Firestore
+  const handleUpdateRouteName = async (routeKey: 'A' | 'B', newName: string) => {
+    const routeId = routeKey === 'A' ? routeData?.currentRouteId : serviceRouteIds[routeKey];
+
+    if (!routeId) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Rota ainda não foi salva no sistema.',
+      });
+      throw new Error('Route not saved');
+    }
+
+    try {
+      const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
+      await updateRouteNameFn({ routeId, name: newName });
+
+      toast({
+        title: 'Nome Atualizado!',
+        description: `O nome da rota foi alterado para "${newName}".`,
+      });
+    } catch (error: any) {
+      console.error('Error updating route name:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Atualizar Nome',
+        description: error.message || 'Não foi possível alterar o nome da rota.',
+      });
+      throw error;
+    }
+  };
+
   const handleUpdateExistingRoute = async (routeKey: 'A' | 'B') => {
     if (!routeData) return;
 
@@ -5013,6 +5185,14 @@ export default function RouteAcompanharPage() {
                                               onChange={(newName) =>
                                                   setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
                                               }
+                                              onSave={async (newName) => {
+                                                // Salvar no Firestore se for uma rota existente
+                                                if (routeData.isExistingRoute && routeItem.key === 'A') {
+                                                  await handleUpdateRouteName('A', newName);
+                                                } else if (routeData.isService && serviceRouteIds[routeItem.key as 'A' | 'B']) {
+                                                  await handleUpdateRouteName(routeItem.key as 'A' | 'B', newName);
+                                                }
+                                              }}
                                             />
                                           )}
                                         </div>

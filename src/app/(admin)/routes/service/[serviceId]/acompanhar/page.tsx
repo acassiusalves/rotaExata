@@ -411,9 +411,11 @@ const UnassignedStopsTimeline: React.FC<{
 const EditableRouteName: React.FC<{
   name: string;
   onChange: (newName: string) => void;
-}> = ({ name, onChange }) => {
+  onSave?: (newName: string) => Promise<void>; // Nova prop para persistir no Firestore
+}> = ({ name, onChange, onSave }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [currentName, setCurrentName] = React.useState(name);
+  const [isSaving, setIsSaving] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -423,9 +425,31 @@ const EditableRouteName: React.FC<{
     }
   }, [isEditing]);
 
-  const handleSave = () => {
-    setIsEditing(false);
-    onChange(currentName);
+  const handleSave = async () => {
+    if (currentName.trim() === name || !currentName.trim()) {
+      setCurrentName(name);
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Atualizar estado local primeiro
+      onChange(currentName);
+
+      // Se tiver função de salvar (para rotas existentes), chamar
+      if (onSave) {
+        await onSave(currentName);
+      }
+
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Erro ao salvar nome da rota:', error);
+      // Reverter para o nome anterior em caso de erro
+      setCurrentName(name);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -441,14 +465,18 @@ const EditableRouteName: React.FC<{
   return (
     <div className="flex items-center gap-2 font-medium">
       {isEditing ? (
-        <Input
-          ref={inputRef}
-          value={currentName}
-          onChange={(e) => setCurrentName(e.target.value)}
-          onBlur={handleSave}
-          onKeyDown={handleKeyDown}
-          className="h-8"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            ref={inputRef}
+            value={currentName}
+            onChange={(e) => setCurrentName(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            className="h-8"
+            disabled={isSaving}
+          />
+          {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+        </div>
       ) : (
         <>
           <span>{name}</span>
@@ -1118,10 +1146,13 @@ export default function ServiceAcompanharPage() {
     console.log('📦 [useEffect:loadServiceData] Carregando serviço da URL:', serviceId);
 
     const loadServiceData = async () => {
+      console.log('🚨 DENTRO DE loadServiceData - INÍCIO');
       setIsLoading(true);
       try {
+        console.log('🚨 ANTES DE getDoc');
         // Buscar dados do serviço
         const serviceDoc = await getDoc(doc(db, 'services', serviceId));
+        console.log('🚨 DEPOIS DE getDoc - exists:', serviceDoc.exists());
 
         if (!serviceDoc.exists()) {
           console.error('❌ [useEffect:loadServiceData] Serviço não encontrado:', serviceId);
@@ -1139,11 +1170,41 @@ export default function ServiceAcompanharPage() {
           id: serviceId,
           code: serviceData.code,
           allStops: serviceData.allStops?.length || 0,
+          originFromFirestore: serviceData.origin ? {
+            address: serviceData.origin.address,
+            lat: serviceData.origin.lat,
+            lng: serviceData.origin.lng,
+          } : 'SEM ORIGEM',
+        });
+
+        // Definir origem padrão Sol de Maria
+        const defaultOrigin: PlaceValue = {
+          id: 'default-origin-sol-de-maria',
+          address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
+          placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
+          lat: -16.6786,
+          lng: -49.2552,
+        };
+
+        // Usar origem do serviço ou origem padrão
+        const serviceOrigin = serviceData.origin &&
+                              typeof serviceData.origin.lat === 'number' &&
+                              typeof serviceData.origin.lng === 'number' &&
+                              serviceData.origin.lat !== 0 &&
+                              serviceData.origin.lng !== 0
+          ? serviceData.origin
+          : defaultOrigin;
+
+        console.log('🏢 [loadServiceData] Origem selecionada:', {
+          usandoOrigemDoServico: serviceOrigin !== defaultOrigin,
+          address: serviceOrigin.address,
+          lat: serviceOrigin.lat,
+          lng: serviceOrigin.lng,
         });
 
         // Criar parsedData no formato esperado pelo código existente
         const parsedData: RouteData = {
-          origin: serviceData.origin,
+          origin: serviceOrigin,
           stops: serviceData.allStops || [],
           routeDate: new Date().toISOString(),
           routeTime: 'morning',
@@ -1269,9 +1330,14 @@ export default function ServiceAcompanharPage() {
               };
 
               let origin: PlaceValue;
-              if (isValidOrigin(routeData.origin)) {
+              // Para serviços do Lunna, priorizar origem do parsedData (que já tem o default Sol de Maria)
+              // Para rotas normais, usar origem do Firestore
+              if (parsedData.isService) {
+                origin = parsedData.origin; // Já foi validada e tem default Sol de Maria
+                console.log('✅ [useEffect:loadRouteData] Serviço: usando origem do parsedData (Sol de Maria se não tiver origem):', origin.address);
+              } else if (isValidOrigin(routeData.origin)) {
                 origin = routeData.origin;
-                console.log('✅ [useEffect:loadRouteData] Usando origem do Firestore:', origin.address);
+                console.log('✅ [useEffect:loadRouteData] Rota normal: usando origem do Firestore:', origin.address);
               } else if (isValidOrigin(parsedData.origin)) {
                 origin = parsedData.origin;
                 console.log('⚠️ [useEffect:loadRouteData] Usando origem do sessionStorage:', origin.address);
@@ -1281,7 +1347,39 @@ export default function ServiceAcompanharPage() {
               }
 
               setRouteData(prev => prev ? { ...prev, origin } : prev);
+              console.log('🔧 [useEffect:loadRouteData] Origem definida em setRouteData:', {
+                address: origin.address,
+                lat: origin.lat,
+                lng: origin.lng,
+              });
               console.log('✅ [useEffect:loadRouteData] Stops válidos após filtro:', allStops.length);
+
+              // Para serviços, se a origem do Firestore for diferente da origem correta (Sol de Maria), atualizar TODAS as rotas
+              if (parsedData.isService && routeData.origin &&
+                  (routeData.origin.lat !== origin.lat || routeData.origin.lng !== origin.lng)) {
+                console.log('🔧 [useEffect:loadRouteData] Corrigindo origem de todas as rotas do serviço para:', origin.address);
+                try {
+                  // Buscar todas as rotas do serviço
+                  const allServiceRoutesQuery = query(
+                    collection(db, 'routes'),
+                    where('serviceId', '==', parsedData.serviceId)
+                  );
+                  const allServiceRoutesSnapshot = await getDocs(allServiceRoutesQuery);
+
+                  // Atualizar a origem de todas as rotas
+                  const updatePromises = allServiceRoutesSnapshot.docs.map(routeDoc => {
+                    return updateDoc(doc(db, 'routes', routeDoc.id), {
+                      origin: origin,
+                      updatedAt: serverTimestamp(),
+                    });
+                  });
+
+                  await Promise.all(updatePromises);
+                  console.log(`✅ [useEffect:loadRouteData] Origem atualizada em ${allServiceRoutesSnapshot.size} rota(s) do serviço`);
+                } catch (updateError) {
+                  console.error('❌ Erro ao atualizar origem no Firestore:', updateError);
+                }
+              }
 
               // Verificar se precisa recalcular a rota (origem não existia ou polyline vazia)
               const needsRecalculation = !routeData.origin || !routeData.encodedPolyline;
@@ -1536,6 +1634,11 @@ export default function ServiceAcompanharPage() {
 
         if (serviceExistingRoutes && serviceExistingRoutes.length > 0) {
           console.log('📦 [useEffect:loadRouteData] Carregando rotas existentes do serviço:', serviceExistingRoutes.length);
+          console.log('🏢 [useEffect:loadRouteData] Origem do parsedData:', {
+            address: parsedData.origin?.address,
+            lat: parsedData.origin?.lat,
+            lng: parsedData.origin?.lng,
+          });
 
           const existingRoutes = serviceExistingRoutes;
           const routeColors = ['#e60000', '#1fd634', '#fa9200', '#bf07e4', '#000000'];
@@ -1637,6 +1740,22 @@ export default function ServiceAcompanharPage() {
             setUnassignedStops(dedupedUnassigned);
             console.log('📦 [useEffect:loadRouteData] Stops não atribuídos (total após dedup):', dedupedUnassigned.length);
           }
+
+          // Definir routeData com origem correta (já validada no parsedData)
+          setRouteData({
+            origin: parsedData.origin,
+            stops: [],
+            routeDate: parsedData.routeDate,
+            routeTime: parsedData.routeTime || 'morning',
+            isService: true,
+            serviceId: parsedData.serviceId,
+            serviceCode: parsedData.serviceCode,
+          });
+          console.log('✅ [useEffect:loadRouteData] routeData definido com origem:', {
+            address: parsedData.origin?.address,
+            lat: parsedData.origin?.lat,
+            lng: parsedData.origin?.lng,
+          });
 
           setIsLoading(false);
           return;
@@ -1913,7 +2032,9 @@ export default function ServiceAcompanharPage() {
 
         processNewRoute();
       }
+      console.log('🚨 FINAL DE loadServiceData - SUCESSO');
     } catch (error) {
+      console.log('🚨 ERRO CAPTURADO:', error);
       console.error('❌ [useEffect:loadServiceData] Erro ao carregar serviço:', error);
       setIsLoading(false);
       toast({
@@ -1926,6 +2047,56 @@ export default function ServiceAcompanharPage() {
 
     loadServiceData();
   }, [serviceId, router, toast]);
+
+  // Real-time listener: sincronizar nomes das rotas A e B
+  React.useEffect(() => {
+    const unsubscribes: (() => void)[] = [];
+
+    // Listener para Rota A
+    if (serviceRouteIds.A) {
+      console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da Rota A:', serviceRouteIds.A);
+      const unsubA = onSnapshot(doc(db, 'routes', serviceRouteIds.A), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const newName = data.name || data.code || 'Rota A';
+
+          setRouteNames(prev => {
+            if (prev.A !== newName) {
+              console.log('🔄 [routeNameSync] Nome da Rota A atualizado:', { old: prev.A, new: newName });
+              return { ...prev, A: newName };
+            }
+            return prev;
+          });
+        }
+      });
+      unsubscribes.push(unsubA);
+    }
+
+    // Listener para Rota B
+    if (serviceRouteIds.B) {
+      console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da Rota B:', serviceRouteIds.B);
+      const unsubB = onSnapshot(doc(db, 'routes', serviceRouteIds.B), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const newName = data.name || data.code || 'Rota B';
+
+          setRouteNames(prev => {
+            if (prev.B !== newName) {
+              console.log('🔄 [routeNameSync] Nome da Rota B atualizado:', { old: prev.B, new: newName });
+              return { ...prev, B: newName };
+            }
+            return prev;
+          });
+        }
+      });
+      unsubscribes.push(unsubB);
+    }
+
+    return () => {
+      console.log('👋 [useEffect:routeNameSync] Parando listeners para nomes das rotas');
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [serviceRouteIds.A, serviceRouteIds.B]);
 
   // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
   React.useEffect(() => {
@@ -3605,6 +3776,38 @@ export default function ServiceAcompanharPage() {
     }
   };
 
+  // Função para atualizar apenas o nome da rota no Firestore
+  const handleUpdateRouteName = async (routeKey: 'A' | 'B', newName: string) => {
+    const routeId = serviceRouteIds[routeKey];
+
+    if (!routeId) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: 'Rota ainda não foi salva no sistema.',
+      });
+      throw new Error('Route not saved');
+    }
+
+    try {
+      const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
+      await updateRouteNameFn({ routeId, name: newName });
+
+      toast({
+        title: 'Nome Atualizado!',
+        description: `O nome da rota foi alterado para "${newName}".`,
+      });
+    } catch (error: any) {
+      console.error('Error updating route name:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Atualizar Nome',
+        description: error.message || 'Não foi possível alterar o nome da rota.',
+      });
+      throw error;
+    }
+  };
+
   const handleUpdateExistingRoute = async (routeKey: 'A' | 'B') => {
     if (!routeData) return;
 
@@ -4902,6 +5105,14 @@ export default function ServiceAcompanharPage() {
   }
 
   const { origin } = routeData;
+
+  // Log para debug - ver qual origem está sendo passada para o RouteMap
+  console.log('🗺️ [Render] Origem que será passada para o RouteMap:', {
+    address: origin?.address,
+    lat: origin?.lat,
+    lng: origin?.lng,
+  });
+
   // Mapa usa APENAS dados reais das rotas (sem pendingEdits)
   // Alterações na timeline só refletem no mapa após o usuário clicar "Aplicar"
   const combinedRoutes = [
@@ -4993,6 +5204,7 @@ export default function ServiceAcompanharPage() {
       >
         <div className="h-full bg-muted relative">
           <RouteMap
+            key={`map-${origin?.lat}-${origin?.lng}`}
             ref={mapApiRef}
             height={-1}
             routes={combinedRoutes}
@@ -5217,6 +5429,12 @@ export default function ServiceAcompanharPage() {
                                               onChange={(newName) =>
                                                   setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
                                               }
+                                              onSave={async (newName) => {
+                                                // Salvar no Firestore se for uma rota do serviço já salva
+                                                if (serviceRouteIds[routeItem.key as 'A' | 'B']) {
+                                                  await handleUpdateRouteName(routeItem.key as 'A' | 'B', newName);
+                                                }
+                                              }}
                                             />
                                           )}
                                         </div>

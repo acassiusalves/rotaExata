@@ -433,6 +433,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       return;
     }
 
+    console.log('🔄 [RouteMap useEffect] Executando com origin:', {
+      address: origin?.address,
+      lat: origin?.lat,
+      lng: origin?.lng,
+    });
+
     // Only clear and redraw when data actually changes - use lightweight check
     const routesKey = routes?.map(r =>
       `${r.name}:${r.visible}:${r.stops.length}:${r.encodedPolyline?.slice(0, 20) || ''}:${r.stops.map(s => `${s.id}|${s.lat?.toFixed(4)}|${s.lng?.toFixed(4)}|${s.deliveryStatus || ''}`).join(',')}`
@@ -468,6 +474,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       // Usar lat/lng explicitamente para garantir posicionamento correto
       const originPosition = { lat: origin.lat, lng: origin.lng };
 
+      console.log('🗺️ [RouteMap] Criando marcador de origem:', {
+        address: origin.address,
+        position: originPosition,
+        originObject: origin
+      });
+
       const originMarker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: originPosition,
@@ -481,6 +493,10 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       });
       markersRef.current.push(originMarker as any); // cast because of type mismatch
       bounds.extend(originPosition);
+
+      console.log('✅ [RouteMap] Marcador de origem criado na posição:', originPosition);
+    } else {
+      console.warn('⚠️ [RouteMap] Origem inválida ou não fornecida:', origin);
     }
     
     // helper para criar marker+info e indexar por id
@@ -594,6 +610,12 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       entriesRef.current.set(sid, { marker: marker as any, info });
       markersRef.current.push(marker as any);
       bounds.extend(stop);
+      console.log('📍 [RouteMap] Stop adicionado ao bounds:', {
+        address: stop.address?.substring(0, 50),
+        lat: stop.lat,
+        lng: stop.lng,
+        isUnassigned,
+      });
     };
     
     // Handle multiple routes with different colors
@@ -663,9 +685,15 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     const shouldFitBounds = isFirstLoad || countChanged;
 
     if (!bounds.isEmpty() && shouldFitBounds) {
+        console.log('📍 [RouteMap] Bounds calculados:', {
+          ne: { lat: bounds.getNorthEast().lat(), lng: bounds.getNorthEast().lng() },
+          sw: { lat: bounds.getSouthWest().lat(), lng: bounds.getSouthWest().lng() },
+          center: bounds.getCenter().toJSON(),
+        });
         // Small delay to ensure map is fully rendered
         requestAnimationFrame(() => {
           map.fitBounds(bounds, 100); // 100px padding
+          console.log('🗺️ [RouteMap] Mapa centralizado em:', map.getCenter().toJSON(), 'zoom:', map.getZoom());
         });
         hasInitializedBoundsRef.current = true;
         previousCountCheckRef.current = currentCountCheck;

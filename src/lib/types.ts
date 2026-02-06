@@ -108,6 +108,7 @@ export type RouteChangeNotification = {
 
 export type RouteInfo = {
   code?: string; // Código sequencial único (ex: RT-0001 ou LN-0011-A)
+  name?: string; // Nome da rota (ex: "Entregas da Manhã")
   stops: PlaceValue[];
   encodedPolyline: string;
   distanceMeters: number;

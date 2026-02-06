@@ -666,6 +666,28 @@ export default function RoutesPage() {
                   }))}
                   onOrganize={handleOrganizeService}
                   onExpandRoute={handleExpandRoute}
+                  onDuplicateRoute={(routeId) => {
+                    const route = routes.find(r => r.id === routeId);
+                    if (route) handleDuplicateRoute(route);
+                  }}
+                  onEditRouteName={(routeId) => {
+                    const route = routes.find(r => r.id === routeId);
+                    if (route) handleOpenEditNameDialog(route);
+                  }}
+                  onChangeDriver={(routeId) => {
+                    const route = routes.find(r => r.id === routeId);
+                    if (route) handleOpenChangeDriver(route);
+                  }}
+                  onCompleteRoute={(routeId) => {
+                    const route = routes.find(r => r.id === routeId);
+                    if (route) handleOpenCompleteRouteDialog(route);
+                  }}
+                  onDeleteRoute={(routeId) => {
+                    const route = routes.find(r => r.id === routeId);
+                    if (route) handleOpenDeleteDialog(route);
+                  }}
+                  isDuplicating={isDuplicating}
+                  userRole={userRole}
                 />
               ))}
             </div>

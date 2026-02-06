@@ -182,6 +182,25 @@ export const deleteRoute = onCall(
 
     try {
       const db = getFirestore();
+
+      // Buscar a rota para verificar se pertence a um serviço
+      const routeDoc = await db.collection("routes").doc(routeId).get();
+
+      if (!routeDoc.exists) {
+        throw new HttpsError("not-found", "Rota não encontrada");
+      }
+
+      const routeData = routeDoc.data();
+
+      // Bloquear exclusão de rotas que pertencem a serviços Luna
+      if (routeData?.serviceId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Não é possível excluir rotas que pertencem a um serviço Luna. " +
+          "Para remover esta rota, acesse a página de organização do serviço e reorganize as paradas."
+        );
+      }
+
       await db.collection("routes").doc(routeId).delete();
       return { ok: true, message: `Rota ${routeId} removida com sucesso.` };
     } catch (error: any) {
@@ -294,12 +313,21 @@ export const duplicateRoute = onCall(
       const newCode = await generateRouteCode();
 
       // Criar uma cópia da rota com um novo nome e código
-      const newRouteData = {
+      const newRouteData: any = {
         ...routeData,
         code: newCode,
         name: `${routeData.name} (Cópia)`,
         createdAt: FieldValue.serverTimestamp(),
       };
+
+      // Se a rota pertence a um serviço Luna, remover o vínculo
+      // A rota duplicada será uma rota independente
+      if (routeData.serviceId) {
+        delete newRouteData.serviceId;
+        delete newRouteData.serviceCode;
+        // Alterar source para 'rota-exata' já que não faz mais parte do serviço Luna
+        newRouteData.source = "rota-exata";
+      }
 
       // Criar um novo documento
       await db.collection("routes").add(newRouteData);
@@ -345,12 +373,76 @@ export const completeRoute = onCall(
         throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
       }
 
+      // Buscar a rota para verificar se pertence a um serviço
+      const routeDoc = await db.collection("routes").doc(routeId).get();
+
+      if (!routeDoc.exists) {
+        throw new HttpsError("not-found", "Rota não encontrada");
+      }
+
+      const routeData = routeDoc.data();
+
       // Atualizar status da rota para 'completed'
       await db.collection("routes").doc(routeId).update({
         status: "completed",
         completedAt: FieldValue.serverTimestamp(),
         completedBy: auth.uid,
       });
+
+      // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
+      if (routeData?.serviceId) {
+        const serviceId = routeData.serviceId;
+        const serviceRef = db.collection("services").doc(serviceId);
+        const serviceDoc = await serviceRef.get();
+
+        if (serviceDoc.exists) {
+          const serviceData = serviceDoc.data();
+
+          // Buscar todas as rotas do serviço
+          const allServiceRoutes = await db.collection("routes")
+            .where("serviceId", "==", serviceId)
+            .get();
+
+          // Contar rotas concluídas
+          let completedRoutes = 0;
+          let completedDeliveries = 0;
+
+          allServiceRoutes.forEach((doc) => {
+            const route = doc.data();
+            if (route.status === "completed" || route.status === "completed_auto") {
+              completedRoutes++;
+              // Contar entregas concluídas (stops com status completed)
+              if (route.stops) {
+                completedDeliveries += route.stops.filter(
+                  (stop: any) => stop.deliveryStatus === "completed"
+                ).length;
+              }
+            }
+          });
+
+          const totalRoutes = serviceData?.routeIds?.length || 0;
+
+          // Determinar o novo status do serviço
+          let newServiceStatus = serviceData?.status;
+          if (completedRoutes === totalRoutes && totalRoutes > 0) {
+            // Todas as rotas concluídas
+            newServiceStatus = "completed";
+          } else if (completedRoutes > 0 && completedRoutes < totalRoutes) {
+            // Algumas rotas concluídas
+            newServiceStatus = "partial";
+          }
+
+          // Atualizar estatísticas do serviço
+          await serviceRef.update({
+            "stats.completedRoutes": completedRoutes,
+            "stats.completedDeliveries": completedDeliveries,
+            status: newServiceStatus,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+
+          console.log(`📊 Serviço ${serviceId} atualizado: ${completedRoutes}/${totalRoutes} rotas concluídas`);
+        }
+      }
 
       return { ok: true, message: `Rota marcada como concluída com sucesso.` };
     } catch (error: any) {

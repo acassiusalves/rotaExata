@@ -18,12 +18,23 @@ import {
   User,
   Settings,
   Eye,
+  MoreVertical,
+  Copy,
+  Pencil,
+  UserCog,
+  Trash2,
 } from 'lucide-react';
 import { LunnaBadge } from './lunna-badge';
 import type { LunnaService, LunnaServiceStatus, RouteInfo, Driver } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface ServiceCardProps {
   service: LunnaService;
@@ -31,6 +42,13 @@ interface ServiceCardProps {
   onOrganize?: (serviceId: string) => void;
   onExpandRoute?: (routeId: string) => void;
   defaultExpanded?: boolean;
+  onDuplicateRoute?: (routeId: string) => void;
+  onEditRouteName?: (routeId: string) => void;
+  onChangeDriver?: (routeId: string) => void;
+  onCompleteRoute?: (routeId: string) => void;
+  onDeleteRoute?: (routeId: string) => void;
+  isDuplicating?: boolean;
+  userRole?: string;
 }
 
 const statusConfig: Record<LunnaServiceStatus, { label: string; color: string; icon: React.ReactNode }> = {
@@ -75,11 +93,28 @@ export function ServiceCard({
   onOrganize,
   onExpandRoute,
   defaultExpanded = false,
+  onDuplicateRoute,
+  onEditRouteName,
+  onChangeDriver,
+  onCompleteRoute,
+  onDeleteRoute,
+  isDuplicating = false,
+  userRole,
 }: ServiceCardProps) {
   const [isExpanded, setIsExpanded] = React.useState(defaultExpanded);
+  const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
 
   const statusInfo = statusConfig[service.status];
-  const totalStops = service.stats?.totalDeliveries || service.allStops?.length || 0;
+
+  // Calcular total de paradas dinamicamente somando todas as rotas
+  // Isso garante que a contagem esteja sempre sincronizada com as rotas
+  const totalStops = React.useMemo(() => {
+    if (routes.length > 0) {
+      return routes.reduce((sum, route) => sum + (route.data.stops?.length || 0), 0);
+    }
+    // Fallback para quando não há rotas ainda
+    return service.stats?.totalDeliveries || service.allStops?.length || 0;
+  }, [routes, service.stats?.totalDeliveries, service.allStops?.length]);
 
   // Formatar data
   const plannedDate = service.plannedDate instanceof Timestamp
@@ -198,18 +233,27 @@ export function ServiceCard({
                 return (
                   <div
                     key={route.id}
-                    className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer"
-                    onClick={() => onExpandRoute?.(route.id)}
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                   >
-                    <div className="flex items-center gap-3">
+                    <div
+                      className="flex items-center gap-3 flex-1 cursor-pointer"
+                      onClick={() => onExpandRoute?.(route.id)}
+                    >
                       {/* Cor da rota */}
                       <div
                         className="w-3 h-3 rounded-full"
                         style={{ backgroundColor: route.data.color || '#6366f1' }}
                       />
 
-                      {/* Código da rota */}
-                      <span className="font-medium">{route.data.code}</span>
+                      {/* Nome e Código da rota */}
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{route.data.name || route.data.code}</span>
+                        {route.data.name && route.data.code && (
+                          <Badge variant="outline" className="font-mono text-xs">
+                            {route.data.code}
+                          </Badge>
+                        )}
+                      </div>
 
                       {/* Número de paradas */}
                       <span className="text-sm text-muted-foreground flex items-center gap-1">
@@ -238,6 +282,73 @@ export function ServiceCard({
                       <Badge className={`${routeStatus.color} text-white text-xs`}>
                         {routeStatus.label}
                       </Badge>
+
+                      {/* Menu de 3 pontinhos */}
+                      <DropdownMenu open={openDropdownId === route.id} onOpenChange={(open) => setOpenDropdownId(open ? route.id : null)}>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Abrir menu</span>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdownId(null);
+                              onDuplicateRoute?.(route.id);
+                            }}
+                            disabled={isDuplicating}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            <span>{isDuplicating ? 'Duplicando...' : 'Duplicar Rota'}</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdownId(null);
+                              onEditRouteName?.(route.id);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            <span>Editar Nome</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdownId(null);
+                              onChangeDriver?.(route.id);
+                            }}
+                          >
+                            <UserCog className="mr-2 h-4 w-4" />
+                            <span>Trocar Motorista</span>
+                          </DropdownMenuItem>
+                          {(userRole === 'admin' || userRole === 'socio') && (
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenDropdownId(null);
+                                onCompleteRoute?.(route.id);
+                              }}
+                              className="text-green-600 dark:text-green-400"
+                            >
+                              <CheckCircle className="mr-2 h-4 w-4" />
+                              <span>Marcar como Concluída</span>
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdownId(null);
+                              onDeleteRoute?.(route.id);
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            <span>Excluir Rota</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 );
