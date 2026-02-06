@@ -17,6 +17,7 @@ import { DriverTable } from '@/components/drivers/driver-table';
 import { AddDriverDialog } from '@/components/drivers/add-driver-dialog';
 import { DeleteDriverDialog } from '@/components/drivers/delete-driver-dialog';
 import { ForceLogoutDialog } from '@/components/drivers/force-logout-dialog';
+import { ImpersonateDriverDialog } from '@/components/drivers/impersonate-driver-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
@@ -30,6 +31,8 @@ export default function DriversPage() {
   const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const [driverToLogout, setDriverToLogout] = React.useState<Driver | null>(null);
+  const [isImpersonating, setIsImpersonating] = React.useState(false);
+  const [driverToImpersonate, setDriverToImpersonate] = React.useState<Driver | null>(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
   const { toast } = useToast();
 
@@ -148,6 +151,49 @@ export default function DriversPage() {
     }
   };
 
+  const handleImpersonate = async () => {
+    if (!driverToImpersonate) return;
+    setIsImpersonating(true);
+
+    try {
+      const generateTokenFn = httpsCallable<
+        { driverId: string },
+        { ok: boolean; token: string; driverName: string; driverEmail: string; expiresAt: string }
+      >(functions, 'generateDriverImpersonationToken');
+
+      const result = await generateTokenFn({ driverId: driverToImpersonate.id });
+
+      // Abrir nova aba com a página de impersonação
+      const impersonateUrl = `/impersonate-driver?token=${encodeURIComponent(result.data.token)}&driverId=${encodeURIComponent(driverToImpersonate.id)}&driverName=${encodeURIComponent(result.data.driverName)}`;
+
+      const newWindow = window.open(impersonateUrl, '_blank');
+
+      if (!newWindow) {
+        toast({
+          variant: 'destructive',
+          title: 'Popup Bloqueado',
+          description: 'Por favor, permita popups para este site e tente novamente.',
+        });
+      } else {
+        toast({
+          title: 'Modo Teste Ativado!',
+          description: `Abrindo interface do motorista ${result.data.driverName} em nova aba.`,
+        });
+      }
+
+      setDriverToImpersonate(null);
+    } catch (error: any) {
+      console.error('Error generating impersonation token:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Gerar Token',
+        description: error.message || 'Não foi possível gerar o token de impersonação.',
+      });
+    } finally {
+      setIsImpersonating(false);
+    }
+  };
+
   return (
     <>
       <div className="space-y-4">
@@ -182,6 +228,7 @@ export default function DriversPage() {
                 drivers={drivers}
                 onDeleteClick={(driver) => setDriverToDelete(driver)}
                 onForceLogoutClick={(driver) => setDriverToLogout(driver)}
+                onImpersonateClick={(driver) => setDriverToImpersonate(driver)}
               />
             )}
           </CardContent>
@@ -201,6 +248,13 @@ export default function DriversPage() {
         onConfirm={handleForceLogout}
         driverName={driverToLogout?.name}
         isLoading={isLoggingOut}
+      />
+      <ImpersonateDriverDialog
+        isOpen={!!driverToImpersonate}
+        onClose={() => setDriverToImpersonate(null)}
+        onConfirm={handleImpersonate}
+        driverName={driverToImpersonate?.name || ''}
+        isLoading={isImpersonating}
       />
     </>
   );

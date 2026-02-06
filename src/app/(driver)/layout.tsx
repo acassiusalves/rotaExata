@@ -5,7 +5,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import { DriverNavigationDrawer } from '@/components/driver/driver-navigation-drawer';
 import { useAuth } from '@/hooks/use-auth';
 import { useDeviceInfo } from '@/hooks/use-device-info';
-import { Loader2, Bell, Home } from 'lucide-react';
+import { useIsImpersonating, exitImpersonationMode, getImpersonatedDriverName } from '@/hooks/use-impersonation';
+import { Loader2, Bell, Home, X } from 'lucide-react';
 import { NotificationPermissionPrompt } from '@/components/notifications/notification-permission-prompt';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,8 @@ export default function DriverLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const isImpersonating = useIsImpersonating();
+  const impersonatedDriverName = getImpersonatedDriverName();
 
   // Coletar informacoes do dispositivo do motorista
   useDeviceInfo(userRole === 'driver');
@@ -72,6 +75,31 @@ export default function DriverLayout({
 
   return (
     <div className="flex min-h-screen w-full flex-col">
+      {/* Banner de Impersonação - visível apenas quando em modo teste */}
+      {isImpersonating && (
+        <div className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-yellow-400 bg-yellow-100 px-4 py-2 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🧪</span>
+            <span className="font-semibold text-yellow-900">
+              Modo Teste
+            </span>
+            <span className="text-yellow-800">
+              - Visualizando como{' '}
+              <span className="font-medium">{impersonatedDriverName || 'Motorista'}</span>
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={exitImpersonationMode}
+            className="h-7 gap-1 text-yellow-900 hover:bg-yellow-200 hover:text-yellow-900"
+          >
+            <X className="h-4 w-4" />
+            <span className="hidden sm:inline">Sair do Modo Teste</span>
+            <span className="sm:hidden">Sair</span>
+          </Button>
+        </div>
+      )}
       {/* Header do motorista com novo design */}
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:h-16 sm:px-6">
         <DriverNavigationDrawer />

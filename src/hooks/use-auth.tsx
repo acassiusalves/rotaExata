@@ -124,7 +124,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // --- Firestore Presence System (Heartbeat) ---
         // Só configura presença se o Firestore funcionou E o usuário é driver
-        if (firestoreSuccess && role === 'driver') {
+        // E não está em modo de impersonação
+        const isImpersonating = typeof window !== 'undefined' && localStorage.getItem('isImpersonating') === 'true';
+
+        if (firestoreSuccess && role === 'driver' && !isImpersonating) {
             const userFirestoreRef = doc(db, 'users', user.uid);
 
             // Atualizar status para online imediatamente

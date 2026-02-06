@@ -106,7 +106,8 @@ const statusPriority: Record<DriverStatus, number> = {
 
 const getDriverColumns = (
   onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void
+  onForceLogoutClick: (driver: Driver) => void,
+  onImpersonateClick: (driver: Driver) => void
 ): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
@@ -309,10 +310,15 @@ const getDriverColumns = (
                     <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
                     <DropdownMenuItem>Editar</DropdownMenuItem>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => onImpersonateClick(driver)}>
+                       <Smartphone className="mr-2 h-4 w-4" />
+                       Testar como Motorista
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onForceLogoutClick(driver)}>
                        <LogOut className="mr-2 h-4 w-4" />
                        Deslogar Motorista
                     </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
                        <Trash2 className="mr-2 h-4 w-4" />
                        Remover
@@ -328,18 +334,20 @@ const getDriverColumns = (
 export function DriverTable({
   drivers,
   onDeleteClick,
-  onForceLogoutClick
+  onForceLogoutClick,
+  onImpersonateClick
 }: {
   drivers: Driver[],
   onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void
+  onForceLogoutClick: (driver: Driver) => void,
+  onImpersonateClick: (driver: Driver) => void
 }) {
   // Ordenação padrão: status ascendente (online/available primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns = React.useMemo(() => getDriverColumns(onDeleteClick, onForceLogoutClick), [onDeleteClick, onForceLogoutClick]);
+  const columns = React.useMemo(() => getDriverColumns(onDeleteClick, onForceLogoutClick, onImpersonateClick), [onDeleteClick, onForceLogoutClick, onImpersonateClick]);
 
   const table = useReactTable({
     data: drivers,

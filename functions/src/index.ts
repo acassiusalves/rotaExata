@@ -895,3 +895,87 @@ export const forceCleanupOfflineDrivers = onCall(
     };
   }
 );
+
+/* ========== generateDriverImpersonationToken (callable) ========== */
+// Gera um custom token do Firebase para permitir que admins testem a interface do motorista
+export const generateDriverImpersonationToken = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const driverId = String(d.driverId || "").trim();
+
+    // Verificar autenticação
+    const authContext = req.auth;
+    if (!authContext) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+
+    if (!driverId) {
+      throw new HttpsError("invalid-argument", "ID do motorista é obrigatório");
+    }
+
+    try {
+      const auth = getAuth();
+      const db = getFirestore();
+
+      // Verificar permissão do admin (apenas admin, socio ou gestor)
+      const adminDoc = await db.collection("users").doc(authContext.uid).get();
+      const adminData = adminDoc.data();
+      const adminRole = adminData?.role || "";
+
+      if (!["admin", "socio", "gestor"].includes(adminRole)) {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas administradores podem testar como motorista"
+        );
+      }
+
+      // Verificar que o driverId existe e é motorista
+      const driverDoc = await db.collection("users").doc(driverId).get();
+      if (!driverDoc.exists) {
+        throw new HttpsError("not-found", "Motorista não encontrado");
+      }
+
+      const driverData = driverDoc.data();
+      if (driverData?.role !== "driver") {
+        throw new HttpsError(
+          "invalid-argument",
+          "O usuário especificado não é um motorista"
+        );
+      }
+
+      // Criar custom token para o motorista
+      const customToken = await auth.createCustomToken(driverId);
+
+      // Registrar ação de impersonação para auditoria
+      await db.collection("auditLogs").add({
+        action: "driver_impersonation",
+        adminId: authContext.uid,
+        adminEmail: adminData?.email || "",
+        adminName: adminData?.displayName || adminData?.email || "",
+        driverId: driverId,
+        driverEmail: driverData?.email || "",
+        driverName: driverData?.displayName || driverData?.email || "",
+        timestamp: FieldValue.serverTimestamp(),
+        userAgent: req.rawRequest?.headers["user-agent"] || "unknown",
+        expiresAt: new Date(Date.now() + 3600000), // 1 hora
+      });
+
+      console.log(`🧪 Admin ${authContext.uid} gerou token de impersonação para motorista ${driverId}`);
+
+      return {
+        ok: true,
+        token: customToken,
+        driverName: driverData?.displayName || driverData?.email || "",
+        driverEmail: driverData?.email || "",
+        expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hora
+      };
+    } catch (err) {
+      const error = err as any;
+      const msg = error.message || "Falha ao gerar token de impersonação";
+
+      console.error("❌ Erro ao gerar token de impersonação:", error);
+      throw new HttpsError("internal", msg);
+    }
+  }
+);

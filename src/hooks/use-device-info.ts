@@ -171,7 +171,9 @@ export function useDeviceInfo(enabled: boolean = true) {
   const UPDATE_INTERVAL = 60000; // 1 minuto
 
   const updateDeviceInfo = useCallback(async () => {
-    if (!enabled) return;
+    // Não coletar informações durante impersonação
+    const isImpersonating = typeof window !== 'undefined' && localStorage.getItem('isImpersonating') === 'true';
+    if (!enabled || isImpersonating) return;
 
     const currentUser = auth.currentUser;
     if (!currentUser) return;

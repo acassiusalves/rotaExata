@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -756,5 +756,68 @@ exports.forceCleanupOfflineDrivers = (0, https_1.onCall)({ region: "southamerica
         updated: driversToUpdate.length,
         message: `${driversToUpdate.length} motorista(s) marcado(s) como offline`
     };
+});
+/* ========== generateDriverImpersonationToken (callable) ========== */
+// Gera um custom token do Firebase para permitir que admins testem a interface do motorista
+exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const driverId = String(d.driverId || "").trim();
+    // Verificar autenticação
+    const authContext = req.auth;
+    if (!authContext) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    if (!driverId) {
+        throw new https_1.HttpsError("invalid-argument", "ID do motorista é obrigatório");
+    }
+    try {
+        const auth = (0, auth_1.getAuth)();
+        const db = (0, firestore_1.getFirestore)();
+        // Verificar permissão do admin (apenas admin, socio ou gestor)
+        const adminDoc = await db.collection("users").doc(authContext.uid).get();
+        const adminData = adminDoc.data();
+        const adminRole = adminData?.role || "";
+        if (!["admin", "socio", "gestor"].includes(adminRole)) {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem testar como motorista");
+        }
+        // Verificar que o driverId existe e é motorista
+        const driverDoc = await db.collection("users").doc(driverId).get();
+        if (!driverDoc.exists) {
+            throw new https_1.HttpsError("not-found", "Motorista não encontrado");
+        }
+        const driverData = driverDoc.data();
+        if (driverData?.role !== "driver") {
+            throw new https_1.HttpsError("invalid-argument", "O usuário especificado não é um motorista");
+        }
+        // Criar custom token para o motorista
+        const customToken = await auth.createCustomToken(driverId);
+        // Registrar ação de impersonação para auditoria
+        await db.collection("auditLogs").add({
+            action: "driver_impersonation",
+            adminId: authContext.uid,
+            adminEmail: adminData?.email || "",
+            adminName: adminData?.displayName || adminData?.email || "",
+            driverId: driverId,
+            driverEmail: driverData?.email || "",
+            driverName: driverData?.displayName || driverData?.email || "",
+            timestamp: firestore_1.FieldValue.serverTimestamp(),
+            userAgent: req.rawRequest?.headers["user-agent"] || "unknown",
+            expiresAt: new Date(Date.now() + 3600000), // 1 hora
+        });
+        console.log(`🧪 Admin ${authContext.uid} gerou token de impersonação para motorista ${driverId}`);
+        return {
+            ok: true,
+            token: customToken,
+            driverName: driverData?.displayName || driverData?.email || "",
+            driverEmail: driverData?.email || "",
+            expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hora
+        };
+    }
+    catch (err) {
+        const error = err;
+        const msg = error.message || "Falha ao gerar token de impersonação";
+        console.error("❌ Erro ao gerar token de impersonação:", error);
+        throw new https_1.HttpsError("internal", msg);
+    }
 });
 //# sourceMappingURL=index.js.map
