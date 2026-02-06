@@ -73,11 +73,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
 import { useRouter, useParams } from 'next/navigation';
 import { format } from 'date-fns';
@@ -324,6 +319,90 @@ const UnassignedStopItem: React.FC<{
         <div className={`h-2 w-2 rounded-full ${hasValidCoords ? 'bg-black' : 'bg-amber-500'}`} />
         <span className="flex-1 truncate">{stop.customerName || stop.address}</span>
         {!hasValidCoords && <span className="text-xs text-amber-600 flex-shrink-0">sem coordenadas</span>}
+      </div>
+    </div>
+  );
+};
+
+const UnassignedStopCircle: React.FC<{
+  stop: PlaceValue;
+  index: number;
+  onOpenInfo: (stopId: string) => void;
+}> = ({ stop, index, onOpenInfo }) => {
+  const hasValidCoords = stop.lat && stop.lng && stop.lat !== 0 && stop.lng !== 0;
+
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `unassigned-${stop.id ?? stop.placeId ?? index}`,
+    data: { routeKey: 'unassigned', index, stop },
+    disabled: !hasValidCoords,
+  });
+
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...(hasValidCoords ? listeners : {})}
+      {...(hasValidCoords ? attributes : {})}
+      className={`flex items-center justify-center ${
+        hasValidCoords ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-70'
+      }`}
+      title={hasValidCoords ? `${stop.customerName || stop.address?.split(',')[0] || 'Ponto'} - Arraste para uma rota` : 'Sem coordenadas válidas'}
+      onClick={(e) => {
+        if (!isDragging && hasValidCoords) {
+          onOpenInfo(String(stop.id));
+        }
+      }}
+    >
+      {/* Círculo numerado - tamanho igual aos da timeline */}
+      <div className={`
+        relative flex h-6 w-6 items-center justify-center rounded-full
+        ${hasValidCoords
+          ? 'bg-black dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-200'
+          : 'bg-amber-500'
+        }
+      `}>
+        <span className={`text-xs font-semibold ${hasValidCoords ? 'text-white dark:text-black' : 'text-white'}`}>
+          {index + 1}
+        </span>
+
+        {/* Indicador de alerta se não tiver coordenadas */}
+        {!hasValidCoords && (
+          <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 border border-white" />
+        )}
+      </div>
+    </div>
+  );
+};
+
+const UnassignedStopsTimeline: React.FC<{
+  stops: PlaceValue[];
+  onOpenInfo: (stopId: string) => void;
+}> = ({ stops, onOpenInfo }) => {
+  if (stops.length === 0) return null;
+
+  return (
+    <div className="w-full border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <PackagePlus className="h-4 w-4 text-muted-foreground" />
+        <h4 className="text-sm font-medium text-muted-foreground">
+          Serviços não alocados ({stops.length})
+        </h4>
+      </div>
+
+      <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+        {stops.map((stop, index) => (
+          <UnassignedStopCircle
+            key={`unassigned-${stop.id ?? stop.placeId ?? index}`}
+            stop={stop}
+            index={index}
+            onOpenInfo={onOpenInfo}
+          />
+        ))}
       </div>
     </div>
   );
@@ -2498,10 +2577,35 @@ export default function RouteAcompanharPage() {
       if (selectedRouteForNewService === 'unassigned') {
         console.log('📦 [handleAddService] Adicionando aos não alocados');
         setUnassignedStops(prev => [...prev, newStop]);
-        toast({
-          title: 'Serviço Adicionado!',
-          description: 'O novo serviço está na lista de não alocados.',
-        });
+
+        // Salvar no Firestore se for uma rota existente
+        if (routeData?.isExistingRoute && routeData?.currentRouteId) {
+          console.log('💾 [handleAddService] SALVANDO unassignedStops no Firestore - Route ID:', routeData.currentRouteId);
+          try {
+            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            await updateDoc(routeRef, {
+              unassignedStops: arrayUnion(newStop),
+              updatedAt: serverTimestamp(),
+            });
+            console.log('✅ [handleAddService] UnassignedStops SALVO no Firestore com sucesso!');
+            toast({
+              title: 'Serviço Adicionado!',
+              description: 'O novo serviço foi salvo na lista de não alocados.',
+            });
+          } catch (error) {
+            console.error('❌ [handleAddService] Erro ao salvar unassignedStops no Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Aviso',
+              description: 'O ponto foi adicionado localmente, mas pode não persistir após recarregar a página.',
+            });
+          }
+        } else {
+          toast({
+            title: 'Serviço Adicionado!',
+            description: 'O novo serviço está na lista de não alocados.',
+          });
+        }
       } else {
         // Add to route A or B and recalculate
         const targetRoute = selectedRouteForNewService === 'A' ? routeA : routeB;
@@ -4736,37 +4840,20 @@ export default function RouteAcompanharPage() {
                    <Bug className="h-4 w-4" />
                  </Button>
 
+                 {/* Timeline horizontal de pontos não alocados */}
                  {unassignedStops.length > 0 && (
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline" className="relative h-9 w-9 rounded-full">
-                                <PackagePlus className="h-5 w-5" />
-                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                                    {unassignedStops.length}
-                                </span>
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80" onOpenAutoFocus={(e) => e.preventDefault()}>
-                            <div className="grid gap-4">
-                                <div className="space-y-2">
-                                <h4 className="font-medium leading-none">Serviços não alocados</h4>
-                                <p className="text-sm text-muted-foreground">
-                                    Arraste estes serviços para uma das rotas abaixo.
-                                </p>
-                                </div>
-                                <div className="grid gap-2" style={{ pointerEvents: 'auto' }}>
-                                {unassignedStops.map((stop, index) => (
-                                    <UnassignedStopItem
-                                        key={`unassigned-${stop.id ?? stop.placeId ?? index}-${index}`}
-                                        stop={stop}
-                                        index={index}
-                                        onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
-                                    />
-                                ))}
-                                </div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+                   <div className="flex items-center gap-2 pl-4 border-l border-slate-300 dark:border-slate-600">
+                     <div className="flex items-center gap-2">
+                       {unassignedStops.map((stop, index) => (
+                         <UnassignedStopCircle
+                           key={`unassigned-${stop.id ?? stop.placeId ?? index}`}
+                           stop={stop}
+                           index={index}
+                           onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
+                         />
+                       ))}
+                     </div>
+                   </div>
                  )}
               </div>
               <div className='flex items-center gap-2'>

@@ -73,11 +73,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
 import { useRouter, useParams } from 'next/navigation';
 import { format } from 'date-fns';
@@ -324,6 +319,90 @@ const UnassignedStopItem: React.FC<{
         <div className={`h-2 w-2 rounded-full ${hasValidCoords ? 'bg-black' : 'bg-amber-500'}`} />
         <span className="flex-1 truncate">{stop.customerName || stop.address}</span>
         {!hasValidCoords && <span className="text-xs text-amber-600 flex-shrink-0">sem coordenadas</span>}
+      </div>
+    </div>
+  );
+};
+
+const UnassignedStopCircle: React.FC<{
+  stop: PlaceValue;
+  index: number;
+  onOpenInfo: (stopId: string) => void;
+}> = ({ stop, index, onOpenInfo }) => {
+  const hasValidCoords = stop.lat && stop.lng && stop.lat !== 0 && stop.lng !== 0;
+
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `unassigned-${stop.id ?? stop.placeId ?? index}`,
+    data: { routeKey: 'unassigned', index, stop },
+    disabled: !hasValidCoords,
+  });
+
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...(hasValidCoords ? listeners : {})}
+      {...(hasValidCoords ? attributes : {})}
+      className={`flex items-center justify-center ${
+        hasValidCoords ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-70'
+      }`}
+      title={hasValidCoords ? `${stop.customerName || stop.address?.split(',')[0] || 'Ponto'} - Arraste para uma rota` : 'Sem coordenadas válidas'}
+      onClick={(e) => {
+        if (!isDragging && hasValidCoords) {
+          onOpenInfo(String(stop.id));
+        }
+      }}
+    >
+      {/* Círculo numerado - tamanho igual aos da timeline */}
+      <div className={`
+        relative flex h-6 w-6 items-center justify-center rounded-full
+        ${hasValidCoords
+          ? 'bg-black dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-200'
+          : 'bg-amber-500'
+        }
+      `}>
+        <span className={`text-xs font-semibold ${hasValidCoords ? 'text-white dark:text-black' : 'text-white'}`}>
+          {index + 1}
+        </span>
+
+        {/* Indicador de alerta se não tiver coordenadas */}
+        {!hasValidCoords && (
+          <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 border border-white" />
+        )}
+      </div>
+    </div>
+  );
+};
+
+const UnassignedStopsTimeline: React.FC<{
+  stops: PlaceValue[];
+  onOpenInfo: (stopId: string) => void;
+}> = ({ stops, onOpenInfo }) => {
+  if (stops.length === 0) return null;
+
+  return (
+    <div className="w-full border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <PackagePlus className="h-4 w-4 text-muted-foreground" />
+        <h4 className="text-sm font-medium text-muted-foreground">
+          Serviços não alocados ({stops.length})
+        </h4>
+      </div>
+
+      <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+        {stops.map((stop, index) => (
+          <UnassignedStopCircle
+            key={`unassigned-${stop.id ?? stop.placeId ?? index}`}
+            stop={stop}
+            index={index}
+            onOpenInfo={onOpenInfo}
+          />
+        ))}
       </div>
     </div>
   );
@@ -1245,8 +1324,12 @@ export default function ServiceAcompanharPage() {
               setRouteB(null); // Não tem segunda rota
 
               // Carregar unassignedStops do Firestore (pontos adicionados via Lunna)
+              console.log('🔍 [useEffect:loadRouteData] Verificando unassignedStops do Firestore');
+              console.log('🔍 [useEffect:loadRouteData] routeData.unassignedStops:', routeData.unassignedStops);
               if (routeData.unassignedStops && routeData.unassignedStops.length > 0) {
+                console.log('📦 [useEffect:loadRouteData] Encontrados', routeData.unassignedStops.length, 'unassignedStops no Firestore');
                 const validUnassigned = routeData.unassignedStops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+                console.log('✅ [useEffect:loadRouteData] Válidos (com id, lat, lng):', validUnassigned.length);
                 // Deduplicar contra stops já atribuídos à rota (por ID e orderNumber)
                 const assignedIds = new Set(allStops.map((s: PlaceValue) => String(s.id ?? s.placeId)));
                 const assignedOrders = new Set(allStops.map((s: PlaceValue) => s.orderNumber).filter(Boolean));
@@ -1260,8 +1343,12 @@ export default function ServiceAcompanharPage() {
                   if (s.orderNumber) seenOrders.add(s.orderNumber);
                   return true;
                 });
+                console.log('🎯 [useEffect:loadRouteData] Após deduplicação:', dedupedUnassigned.length);
+                console.log('📋 [useEffect:loadRouteData] IDs dos unassigned:', dedupedUnassigned.map(s => s.id));
                 setUnassignedStops(dedupedUnassigned);
                 console.log('📥 [useEffect:loadRouteData] Carregados unassignedStops do Firestore:', dedupedUnassigned.length, '(de', validUnassigned.length, 'totais)');
+              } else {
+                console.log('⚠️ [useEffect:loadRouteData] Nenhum unassignedStop no Firestore');
               }
             } else {
               console.error('❌ [useEffect:loadRouteData] Rota não encontrada no Firestore - ID:', parsedData.currentRouteId);
@@ -1514,9 +1601,38 @@ export default function ServiceAcompanharPage() {
           const stopsWithCoords = parsedData.stops.filter((s) => s.id && s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
           const stopsWithoutCoords = parsedData.stops.filter((s) => s.id && (!s.lat || !s.lng || s.lat === 0 || s.lng === 0));
 
-          if (stopsWithoutCoords.length > 0 || stopsWithCoords.length > 0) {
-            setUnassignedStops([...stopsWithoutCoords, ...stopsWithCoords]);
-            console.log('📦 [useEffect:loadRouteData] Stops não atribuídos:', stopsWithoutCoords.length + stopsWithCoords.length);
+          // Buscar unassignedStops salvos no Firestore (de qualquer rota do serviço)
+          let firestoreUnassigned: PlaceValue[] = [];
+          if (serviceExistingRoutes && serviceExistingRoutes.length > 0) {
+            try {
+              console.log('🔍 [useEffect:loadRouteData] Buscando unassignedStops da primeira rota do serviço');
+              const firstRouteDoc = await getDoc(doc(db, 'routes', serviceExistingRoutes[0].id));
+              if (firstRouteDoc.exists()) {
+                const firstRouteData = firstRouteDoc.data();
+                if (firstRouteData.unassignedStops && firstRouteData.unassignedStops.length > 0) {
+                  firestoreUnassigned = firstRouteData.unassignedStops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
+                  console.log('📦 [useEffect:loadRouteData] unassignedStops do Firestore:', firestoreUnassigned.length);
+                }
+              }
+            } catch (error) {
+              console.error('❌ [useEffect:loadRouteData] Erro ao buscar unassignedStops do Firestore:', error);
+            }
+          }
+
+          // Combinar stops sem coordenadas + stops com coordenadas + unassigned do Firestore
+          // Deduplicar por ID
+          const allUnassigned = [...stopsWithoutCoords, ...stopsWithCoords, ...firestoreUnassigned];
+          const seenIds = new Set<string>();
+          const dedupedUnassigned = allUnassigned.filter(s => {
+            const sid = String(s.id ?? s.placeId);
+            if (seenIds.has(sid)) return false;
+            seenIds.add(sid);
+            return true;
+          });
+
+          if (dedupedUnassigned.length > 0) {
+            setUnassignedStops(dedupedUnassigned);
+            console.log('📦 [useEffect:loadRouteData] Stops não atribuídos (total após dedup):', dedupedUnassigned.length);
           }
 
           setIsLoading(false);
@@ -2490,11 +2606,109 @@ export default function ServiceAcompanharPage() {
       // Add to selected route or unassigned
       if (selectedRouteForNewService === 'unassigned') {
         console.log('📦 [handleAddService] Adicionando aos não alocados');
-        setUnassignedStops(prev => [...prev, newStop]);
-        toast({
-          title: 'Serviço Adicionado!',
-          description: 'O novo serviço está na lista de não alocados.',
+        console.log('📊 [handleAddService] routeData completo:', {
+          isExistingRoute: routeData?.isExistingRoute,
+          currentRouteId: routeData?.currentRouteId,
+          isService: routeData?.isService,
+          serviceId: routeData?.serviceId,
+          existingServiceRoutes: routeData?.existingServiceRoutes?.length,
         });
+        setUnassignedStops(prev => [...prev, newStop]);
+
+        // Salvar no Firestore
+        // Para serviços: salvar em TODAS as rotas do serviço
+        // Para rotas individuais: salvar na rota específica
+        if (routeData?.isService && routeData?.serviceId) {
+          console.log('💾 [handleAddService] É um SERVIÇO - salvando em todas as rotas do serviço');
+
+          // Coletar todos os IDs de rotas do serviço (A, B, e dinâmicas)
+          const allRouteIds: string[] = [];
+          if (serviceRouteIds.A) allRouteIds.push(serviceRouteIds.A);
+          if (serviceRouteIds.B) allRouteIds.push(serviceRouteIds.B);
+          dynamicRoutes.forEach(dr => {
+            if (dr.firestoreId) allRouteIds.push(dr.firestoreId);
+          });
+
+          console.log('📋 [handleAddService] IDs das rotas encontradas:', allRouteIds);
+
+          if (allRouteIds.length === 0) {
+            console.warn('⚠️ [handleAddService] Nenhuma rota encontrada para o serviço - buscando do Firestore');
+            // Fallback: buscar rotas diretamente do Firestore
+            try {
+              const routesQuery = query(collection(db, 'routes'), where('serviceId', '==', routeData.serviceId));
+              const routesSnapshot = await getDocs(routesQuery);
+              routesSnapshot.docs.forEach(doc => {
+                allRouteIds.push(doc.id);
+              });
+              console.log('📋 [handleAddService] IDs das rotas do Firestore:', allRouteIds);
+            } catch (error) {
+              console.error('❌ [handleAddService] Erro ao buscar rotas do Firestore:', error);
+            }
+          }
+
+          if (allRouteIds.length > 0) {
+            try {
+              // Salvar em TODAS as rotas do serviço
+              const updatePromises = allRouteIds.map(async (routeId) => {
+                const routeRef = doc(db, 'routes', routeId);
+                console.log(`💾 [handleAddService] Atualizando rota ${routeId}`);
+                await updateDoc(routeRef, {
+                  unassignedStops: arrayUnion(newStop),
+                  updatedAt: serverTimestamp(),
+                });
+              });
+
+              await Promise.all(updatePromises);
+              console.log('✅ [handleAddService] UnassignedStops SALVO em TODAS as rotas do serviço!');
+              toast({
+                title: 'Serviço Adicionado!',
+                description: 'O novo serviço foi salvo na lista de não alocados.',
+              });
+            } catch (error) {
+              console.error('❌ [handleAddService] Erro ao salvar unassignedStops no Firestore:', error);
+              toast({
+                variant: 'destructive',
+                title: 'Aviso',
+                description: 'O ponto foi adicionado localmente, mas pode não persistir após recarregar a página.',
+              });
+            }
+          } else {
+            console.error('❌ [handleAddService] Nenhuma rota encontrada para salvar!');
+            toast({
+              variant: 'destructive',
+              title: 'Erro',
+              description: 'Nenhuma rota encontrada para salvar o ponto não alocado.',
+            });
+          }
+        } else if (routeData?.isExistingRoute && routeData?.currentRouteId) {
+          console.log('💾 [handleAddService] É uma ROTA INDIVIDUAL - salvando na rota específica');
+          console.log('💾 [handleAddService] Route ID:', routeData.currentRouteId);
+          try {
+            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            await updateDoc(routeRef, {
+              unassignedStops: arrayUnion(newStop),
+              updatedAt: serverTimestamp(),
+            });
+            console.log('✅ [handleAddService] UnassignedStops SALVO no Firestore com sucesso!');
+            toast({
+              title: 'Serviço Adicionado!',
+              description: 'O novo serviço foi salvo na lista de não alocados.',
+            });
+          } catch (error) {
+            console.error('❌ [handleAddService] Erro ao salvar unassignedStops no Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Aviso',
+              description: 'O ponto foi adicionado localmente, mas pode não persistir após recarregar a página.',
+            });
+          }
+        } else {
+          console.warn('⚠️ [handleAddService] NÃO salvando no Firestore - não é serviço nem rota existente');
+          toast({
+            title: 'Serviço Adicionado!',
+            description: 'O novo serviço está na lista de não alocados (apenas local).',
+          });
+        }
       } else {
         // Add to route A or B and recalculate
         const targetRoute = selectedRouteForNewService === 'A' ? routeA : routeB;
@@ -4729,37 +4943,21 @@ export default function ServiceAcompanharPage() {
                    <Bug className="h-4 w-4" />
                  </Button>
 
+                 {/* Timeline horizontal de pontos não alocados */}
                  {unassignedStops.length > 0 && (
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline" className="relative h-9 w-9 rounded-full">
-                                <PackagePlus className="h-5 w-5" />
-                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                                    {unassignedStops.length}
-                                </span>
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80" onOpenAutoFocus={(e) => e.preventDefault()}>
-                            <div className="grid gap-4">
-                                <div className="space-y-2">
-                                <h4 className="font-medium leading-none">Serviços não alocados</h4>
-                                <p className="text-sm text-muted-foreground">
-                                    Arraste estes serviços para uma das rotas abaixo.
-                                </p>
-                                </div>
-                                <div className="grid gap-2" style={{ pointerEvents: 'auto' }}>
-                                {unassignedStops.map((stop, index) => (
-                                    <UnassignedStopItem
-                                        key={`unassigned-${stop.id ?? stop.placeId ?? index}-${index}`}
-                                        stop={stop}
-                                        index={index}
-                                        onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
-                                    />
-                                ))}
-                                </div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+                   <div className="flex items-center gap-2 pl-4 border-l border-slate-300 dark:border-slate-600">
+                     <span className="text-xs font-medium text-muted-foreground">Não Alocados</span>
+                     <div className="flex items-center gap-2">
+                       {unassignedStops.map((stop, index) => (
+                         <UnassignedStopCircle
+                           key={`unassigned-${stop.id ?? stop.placeId ?? index}`}
+                           stop={stop}
+                           index={index}
+                           onOpenInfo={(id) => mapApiRef.current?.openStopInfo(id)}
+                         />
+                       ))}
+                     </div>
+                   </div>
                  )}
               </div>
               <div className='flex items-center gap-2'>
@@ -4823,17 +5021,13 @@ export default function ServiceAcompanharPage() {
                 </DropdownMenu>
                 <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
                   <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" disabled className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">
+                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
                       <Wand2 className="mr-2 h-4 w-4" />
                       Organizar
                     </TabsTrigger>
                     <TabsTrigger value="assign" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
                       <User className="mr-2 h-4 w-4" />
                       Atribuir
-                    </TabsTrigger>
-                    <TabsTrigger value="review" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <Check className="mr-2 h-4 w-4" />
-                      Revisar
                     </TabsTrigger>
                   </TabsList>
                 </div>
@@ -5089,113 +5283,96 @@ export default function ServiceAcompanharPage() {
 
             <TabsContent value="assign" className="m-0">
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {routesForTable.length > 0 ? routesForTable.map(routeItem => (
-                  <Card key={routeItem.key}>
-                    <CardHeader>
-                      <CardTitle>{routeItem.name}</CardTitle>
-                      <CardDescription>Atribua um motorista para esta rota.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Select 
-                        value={assignedDrivers[routeItem.key] || ''}
-                        onValueChange={(driverId) => handleAssignDriver(routeItem.key, driverId)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Escolha um motorista disponível..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableDrivers.map((driver) => (
-                              <SelectItem key={driver.id} value={driver.id}>
-                                <div className="flex items-center gap-3">
-                                  <Avatar className='h-6 w-6'>
-                                    <AvatarImage src={driver.avatarUrl} alt={driver.name} />
-                                    <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
-                                  </Avatar>
-                                  <span>{driver.name}</span>
-                                  <span className="ml-auto text-xs text-muted-foreground">
-                                    {driver.vehicle.type}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                       <p className="mt-2 text-xs text-muted-foreground">
-                        Todos os motoristas cadastrados são mostrados.
-                      </p>
-                    </CardContent>
-                  </Card>
-                )) : (
-                     <div className="lg:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
-                        Nenhuma rota pendente para atribuir.
-                    </div>
+                {routesForTable.length > 0 ? routesForTable.map(routeItem => {
+                  const driver = availableDrivers.find(d => d.id === assignedDrivers[routeItem.key]);
+                  const isSavingRoute = isSaving[routeItem.key];
+
+                  return (
+                    <Card key={routeItem.key}>
+                      <CardHeader>
+                        <CardTitle>{routeItem.name}</CardTitle>
+                        <CardDescription>
+                          {routeItem.data.stops.length} paradas • {formatDistance(routeItem.data.distanceMeters)} km • {formatDuration(routeItem.data.duration)}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium mb-2 block">Motorista</label>
+                          <Select
+                            value={assignedDrivers[routeItem.key] || ''}
+                            onValueChange={(driverId) => handleAssignDriver(routeItem.key, driverId)}
+                            disabled={isSavingRoute}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Escolha um motorista disponível..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableDrivers.map((driver) => (
+                                <SelectItem key={driver.id} value={driver.id}>
+                                  <div className="flex items-center gap-3">
+                                    <Avatar className='h-6 w-6'>
+                                      <AvatarImage src={driver.avatarUrl} alt={driver.name} />
+                                      <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
+                                    </Avatar>
+                                    <span>{driver.name}</span>
+                                    <span className="ml-auto text-xs text-muted-foreground">
+                                      {driver.vehicle.type}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {driver && (
+                          <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/50">
+                            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Motorista Selecionado</span>
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6">
+                                <AvatarImage src={driver.avatarUrl} alt={driver.name} />
+                                <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{driver.name}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="text-xs text-slate-600 dark:text-slate-400">
+                          Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
+                        </div>
+                      </CardContent>
+                      <CardFooter className="flex gap-2">
+                        {routeData?.isExistingRoute ? (
+                          <Button
+                            className="w-full"
+                            onClick={() => handleUpdateExistingRoute(routeItem.key)}
+                            disabled={isSavingRoute || !driver}
+                          >
+                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                            {isSavingRoute ? 'Salvando...' : 'Salvar Alterações'}
+                          </Button>
+                        ) : (
+                          <Button
+                            className="w-full"
+                            onClick={() => handleDispatchRoute(routeItem.key)}
+                            disabled={isSavingRoute || !driver}
+                          >
+                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
+                            {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
+                          </Button>
+                        )}
+                      </CardFooter>
+                    </Card>
+                  )
+                }) : (
+                  <div className="lg:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
+                    Nenhuma rota pendente para atribuir.
+                  </div>
                 )}
               </div>
             </TabsContent>
 
-            <TabsContent value="review" className="m-0">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {routesForTable.length > 0 ? routesForTable.map(routeItem => {
-                        const driver = availableDrivers.find(d => d.id === assignedDrivers[routeItem.key]);
-                        const isSavingRoute = isSaving[routeItem.key];
-
-                        return (
-                            <Card key={routeItem.key}>
-                                <CardHeader>
-                                    <CardTitle>{routeItem.name}</CardTitle>
-                                    <CardDescription>
-                                        {routeItem.data.stops.length} paradas • {formatDistance(routeItem.data.distanceMeters)} km • {formatDuration(routeItem.data.duration)}
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/50">
-                                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Motorista</span>
-                                        {driver ? (
-                                            <div className="flex items-center gap-2">
-                                                <Avatar className="h-6 w-6">
-                                                    <AvatarImage src={driver.avatarUrl} alt={driver.name} />
-                                                    <AvatarFallback>{driver.name.charAt(0)}</AvatarFallback>
-                                                </Avatar>
-                                                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{driver.name}</span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-sm font-medium text-destructive">Não Atribuído</span>
-                                        )}
-                                    </div>
-                                    <div className="text-xs text-slate-600 dark:text-slate-400">
-                                        Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
-                                    </div>
-                                </CardContent>
-                                <CardFooter className="flex gap-2">
-                                     {routeData?.isExistingRoute ? (
-                                        <Button
-                                            className="w-full"
-                                            onClick={() => handleUpdateExistingRoute(routeItem.key)}
-                                            disabled={isSavingRoute}
-                                        >
-                                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                                            {isSavingRoute ? 'Salvando...' : 'Salvar Alterações'}
-                                        </Button>
-                                     ) : (
-                                        <Button
-                                            className="w-full"
-                                            onClick={() => handleDispatchRoute(routeItem.key)}
-                                            disabled={isSavingRoute || !driver}
-                                        >
-                                            {isSavingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Truck className="mr-2 h-4 w-4" />}
-                                            {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
-                                        </Button>
-                                     )}
-                                </CardFooter>
-                            </Card>
-                        )
-                    }) : (
-                        <div className="lg:col-span-2 flex h-48 items-center justify-center text-muted-foreground">
-                            Nenhuma rota pendente para revisar.
-                        </div>
-                    )}
-                </div>
-            </TabsContent>
           </div>
           <DragOverlay
             dropAnimation={{
