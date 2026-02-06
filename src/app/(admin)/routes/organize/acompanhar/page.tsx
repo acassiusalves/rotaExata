@@ -3732,14 +3732,18 @@ export default function OrganizeRoutePage() {
             duration: '0s',
             updatedAt: serverTimestamp(),
           });
-        } else {
+        } else if (routeInfo) {
           await updateDoc(routeRef, {
             stops: stopsToSave,
-            ...(routeInfo ? {
-              encodedPolyline: routeInfo.encodedPolyline,
-              distanceMeters: routeInfo.distanceMeters,
-              duration: routeInfo.duration,
-            } : {}),
+            encodedPolyline: routeInfo.encodedPolyline,
+            distanceMeters: routeInfo.distanceMeters,
+            duration: routeInfo.duration,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // computeRoute failed - save stops only
+          await updateDoc(routeRef, {
+            stops: stopsToSave,
             updatedAt: serverTimestamp(),
           });
         }
@@ -3835,14 +3839,18 @@ export default function OrganizeRoutePage() {
             duration: '0s',
             updatedAt: serverTimestamp(),
           });
-        } else {
+        } else if (routeInfo) {
           await updateDoc(routeRef, {
             stops: stopsToSave,
-            ...(routeInfo ? {
-              encodedPolyline: routeInfo.encodedPolyline,
-              distanceMeters: routeInfo.distanceMeters,
-              duration: routeInfo.duration,
-            } : {}),
+            encodedPolyline: routeInfo.encodedPolyline,
+            distanceMeters: routeInfo.distanceMeters,
+            duration: routeInfo.duration,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // computeRoute failed - save stops only
+          await updateDoc(routeRef, {
+            stops: stopsToSave,
             updatedAt: serverTimestamp(),
           });
         }
@@ -4281,6 +4289,9 @@ export default function OrganizeRoutePage() {
       routesToCreate: newRoutesToCreate.length
     });
 
+    // Track routes that need driver notifications
+    const routesWithChanges: Array<{ routeId: string; driverId: string; changes: any[] }> = [];
+
     try {
       // First, create new routes (dynamic routes C, D, E, etc.)
       const createdRouteIds: Record<string, string> = {};
@@ -4354,8 +4365,6 @@ export default function OrganizeRoutePage() {
       }
 
       // Then, batch update existing routes
-      const routesWithChanges: Array<{ routeId: string; driverId: string; changes: any[] }> = [];
-
       if (routeUpdates.length > 0) {
         const batch = writeBatch(db);
 

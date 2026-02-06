@@ -134,13 +134,19 @@ export function markModifiedStops(
       return currPriority < prevPriority ? curr : prev;
     });
 
-    return {
+    const modifiedStop: any = {
       ...stop,
       wasModified: true,
       modifiedAt: Timestamp.now(),
       modificationType: primaryChange.changeType,
-      originalSequence: primaryChange.changeType === 'sequence' ? primaryChange.oldValue : undefined,
     };
+
+    // Only add originalSequence if it's a sequence change (avoid undefined in Firestore)
+    if (primaryChange.changeType === 'sequence') {
+      modifiedStop.originalSequence = primaryChange.oldValue;
+    }
+
+    return modifiedStop;
   });
 }
 
