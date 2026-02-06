@@ -440,9 +440,19 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Add origin marker
     if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number' &&
         isFinite(origin.lat) && isFinite(origin.lng)) {
+      console.log('📍 [RouteMap] Criando marcador de origem:', {
+        address: origin.address,
+        lat: origin.lat,
+        lng: origin.lng,
+        originObject: origin
+      });
+
+      // Usar lat/lng explicitamente para garantir posicionamento correto
+      const originPosition = { lat: origin.lat, lng: origin.lng };
+
       const originMarker = new google.maps.marker.AdvancedMarkerElement({
         map,
-        position: origin,
+        position: originPosition,
         content: new google.maps.marker.PinElement({
           background: '#111827', // dark-gray
           borderColor: '#F9FAFB', // near-white for contrast
@@ -452,7 +462,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         title: "Origem"
       });
       markersRef.current.push(originMarker as any); // cast because of type mismatch
-      bounds.extend(origin);
+      bounds.extend(originPosition);
     }
     
     // helper para criar marker+info e indexar por id

@@ -1037,12 +1037,16 @@ export default function OrganizeRoutePage() {
         draftRouteId: parsedData.draftRouteId,
         stopsCount: parsedData.stops?.length || 0,
         hasOrigin: !!parsedData.origin,
+        originAddress: parsedData.origin?.address,
+        originLat: parsedData.origin?.lat,
+        originLng: parsedData.origin?.lng,
         routeDate: parsedData.routeDate,
         period: parsedData.period,
         isService: parsedData.isService,
         serviceId: parsedData.serviceId,
         serviceCode: parsedData.serviceCode,
       });
+      console.log('📦 [useEffect:loadRouteData] Origin completo do parsedData:', parsedData.origin);
       setRouteData(parsedData);
 
       // Se for uma rota existente, buscar dados atualizados do Firestore

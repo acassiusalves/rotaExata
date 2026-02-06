@@ -303,11 +303,15 @@ export default function ServiceOrganizePage() {
 
         console.log('📦 [ServiceOrganize] Salvando no sessionStorage:', {
           stopsCount: routeData.stops.length,
-          origin: routeData.origin?.address,
+          hasOrigin: !!routeData.origin,
+          originAddress: routeData.origin?.address,
+          originLat: routeData.origin?.lat,
+          originLng: routeData.origin?.lng,
           serviceCode: routeData.serviceCode,
           isService: routeData.isService,
           existingRoutes: existingServiceRoutes.length,
         });
+        console.log('📦 [ServiceOrganize] Origin completo:', routeData.origin);
 
         sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
 
