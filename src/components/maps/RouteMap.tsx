@@ -53,24 +53,14 @@ const createInfoWindowContent = (
         <span style="color: #666;">Janela:</span>
         <span>${stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
 
-        ${stop.street ? `
+        ${stop.rua || stop.street ? `
           <span style="color: #666; align-self: start;">Rua:</span>
-          <p style="margin: 0; word-break: break-word;">${stop.street}</p>
+          <p style="margin: 0; word-break: break-word;">${stop.rua || stop.street}</p>
         ` : ''}
 
-        ${stop.neighborhood ? `
-          <span style="color: #666; align-self: start;">Bairro:</span>
-          <p style="margin: 0; word-break: break-word;">${stop.neighborhood}</p>
-        ` : ''}
-
-        ${stop.city ? `
-          <span style="color: #666; align-self: start;">Cidade:</span>
-          <p style="margin: 0; word-break: break-word;">${stop.city}${stop.state ? ` - ${stop.state}` : ''}</p>
-        ` : ''}
-
-        ${stop.zipCode ? `
-          <span style="color: #666; align-self: start;">CEP:</span>
-          <p style="margin: 0; word-break: break-word;">${stop.zipCode}</p>
+        ${stop.numero ? `
+          <span style="color: #666; align-self: start;">Número:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.numero}</p>
         ` : ''}
 
         ${stop.complemento ? `
@@ -78,7 +68,22 @@ const createInfoWindowContent = (
           <p style="margin: 0; word-break: break-word;">${stop.complemento}</p>
         ` : ''}
 
-        ${!stop.street && address ? `
+        ${stop.bairro || stop.neighborhood ? `
+          <span style="color: #666; align-self: start;">Bairro:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.bairro || stop.neighborhood}</p>
+        ` : ''}
+
+        ${stop.cidade || stop.city ? `
+          <span style="color: #666; align-self: start;">Cidade:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.cidade || stop.city}${stop.state ? ` - ${stop.state}` : ''}</p>
+        ` : ''}
+
+        ${stop.cep || stop.zipCode ? `
+          <span style="color: #666; align-self: start;">CEP:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.cep || stop.zipCode}</p>
+        ` : ''}
+
+        ${!stop.rua && !stop.street && address ? `
           <span style="color: #666; align-self: start;">Endereço:</span>
           <p style="margin: 0; word-break: break-word;">${address}</p>
         ` : ''}

@@ -41,6 +41,12 @@ export type PlaceValue = {
   city?: string;         // Cidade
   state?: string;        // Estado/UF
   zipCode?: string;      // CEP formatado
+  // Campos separados de endereço (padrão brasileiro)
+  rua?: string;          // Nome da rua/avenida
+  numero?: string;       // Número do endereço
+  bairro?: string;       // Bairro
+  cidade?: string;       // Cidade
+  cep?: string;          // CEP
   // Campos de validação de endereço
   originalAddressParts?: Record<string, string>;
   validationIssues?: string[];

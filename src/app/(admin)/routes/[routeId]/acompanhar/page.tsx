@@ -5618,12 +5618,28 @@ export default function RouteAcompanharPage() {
             </div>
             <Separator />
             <div className="grid grid-cols-[100px_1fr] items-start gap-4">
-              <span className="text-sm font-medium text-muted-foreground">Endereço</span>
-              <p className="text-sm">{selectedStopInfo?.address || '-'}</p>
+              <span className="text-sm font-medium text-muted-foreground">Rua</span>
+              <p className="text-sm">{selectedStopInfo?.rua || '-'}</p>
+            </div>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Número</span>
+              <p className="text-sm">{selectedStopInfo?.numero || '-'}</p>
             </div>
             <div className="grid grid-cols-[100px_1fr] items-start gap-4">
               <span className="text-sm font-medium text-muted-foreground">Complemento</span>
               <p className="text-sm">{selectedStopInfo?.complemento || '-'}</p>
+            </div>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Bairro</span>
+              <p className="text-sm">{selectedStopInfo?.bairro || '-'}</p>
+            </div>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">Cidade</span>
+              <p className="text-sm">{selectedStopInfo?.cidade || '-'}</p>
+            </div>
+            <div className="grid grid-cols-[100px_1fr] items-start gap-4">
+              <span className="text-sm font-medium text-muted-foreground">CEP</span>
+              <p className="text-sm">{selectedStopInfo?.cep || '-'}</p>
             </div>
             <Separator />
             <div className="grid grid-cols-[100px_1fr] items-start gap-4">
