@@ -1598,7 +1598,9 @@ export default function ServiceAcompanharPage() {
           }
 
           // Stops não atribuídos → unassignedStops
-          const stopsWithCoords = parsedData.stops.filter((s) => s.id && s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
+          // APENAS buscar do Firestore os stops explicitamente marcados como não alocados
+          // NÃO incluir stops do allStops do serviço que não estão em rotas (eles ficam "soltos" propositalmente)
+
           const stopsWithoutCoords = parsedData.stops.filter((s) => s.id && (!s.lat || !s.lng || s.lat === 0 || s.lng === 0));
 
           // Buscar unassignedStops salvos no Firestore (de qualquer rota do serviço)
@@ -1619,9 +1621,10 @@ export default function ServiceAcompanharPage() {
             }
           }
 
-          // Combinar stops sem coordenadas + stops com coordenadas + unassigned do Firestore
+          // Combinar APENAS stops sem coordenadas + unassigned do Firestore
+          // NÃO incluir stops com coordenadas que não estão em rotas (parsedData.stops)
           // Deduplicar por ID
-          const allUnassigned = [...stopsWithoutCoords, ...stopsWithCoords, ...firestoreUnassigned];
+          const allUnassigned = [...stopsWithoutCoords, ...firestoreUnassigned];
           const seenIds = new Set<string>();
           const dedupedUnassigned = allUnassigned.filter(s => {
             const sid = String(s.id ?? s.placeId);
@@ -3499,10 +3502,18 @@ export default function ServiceAcompanharPage() {
           if (dynRoute?.firestoreId) existingDraftId = dynRoute.firestoreId;
         }
 
+        // Converter routeTime (morning/afternoon/evening) para hora HH:mm
+        const timeMap: Record<string, string> = {
+            'morning': '08:00',
+            'afternoon': '14:00',
+            'evening': '18:00',
+        };
+        const timeStr = timeMap[routeData.routeTime] || routeData.routeTime;
+
         const routeDocData: Record<string, any> = {
             name: routeName,
             status: 'dispatched',
-            plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
+            plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${timeStr}`),
             origin: routeData.origin,
             stops: routeToSave.stops,
             distanceMeters: routeToSave.distanceMeters,
@@ -3734,7 +3745,44 @@ export default function ServiceAcompanharPage() {
     // Check unassigned stops
     if (!routeKey && unassignedStops.some(s => String(s.id ?? s.placeId) === stopId)) {
       // Remove from unassigned stops
-      setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
+      const updatedUnassigned = unassignedStops.filter(s => String(s.id ?? s.placeId) !== stopId);
+      setUnassignedStops(updatedUnassigned);
+
+      // Salvar no Firestore
+      if (routeData.isService && routeData.serviceId) {
+        try {
+          const allRouteIds: string[] = [];
+          if (serviceRouteIds.A) allRouteIds.push(serviceRouteIds.A);
+          if (serviceRouteIds.B) allRouteIds.push(serviceRouteIds.B);
+          dynamicRoutes.forEach(dr => {
+            if (dr.firestoreId) allRouteIds.push(dr.firestoreId);
+          });
+
+          if (allRouteIds.length > 0) {
+            const updatePromises = allRouteIds.map(async (routeId) => {
+              const routeRef = doc(db, 'routes', routeId);
+              await updateDoc(routeRef, {
+                unassignedStops: updatedUnassigned,
+                updatedAt: serverTimestamp(),
+              });
+            });
+            await Promise.all(updatePromises);
+          }
+        } catch (error) {
+          console.error('❌ Erro ao salvar unassignedStops:', error);
+        }
+      } else if (routeData.isExistingRoute && routeData.currentRouteId) {
+        try {
+          const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          await updateDoc(routeRef, {
+            unassignedStops: updatedUnassigned,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (error) {
+          console.error('❌ Erro ao salvar unassignedStops:', error);
+        }
+      }
+
       toast({ title: 'Parada removida!', description: 'A parada foi removida dos serviços não alocados.' });
       return;
     }
@@ -3765,11 +3813,14 @@ export default function ServiceAcompanharPage() {
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
           const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          const updatedUnassigned = [...unassignedStops, stopToMove];
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
             distanceMeters: 0,
             duration: '0s',
+            unassignedStops: updatedUnassigned,
+            updatedAt: serverTimestamp(),
           });
         } catch (error) {
           console.error('❌ Erro ao atualizar Firestore:', error);
@@ -3778,6 +3829,31 @@ export default function ServiceAcompanharPage() {
             title: 'Erro ao salvar',
             description: 'A parada foi removida localmente, mas não foi salva no servidor.',
           });
+        }
+      }
+      // Para serviços: salvar unassignedStops em TODAS as rotas
+      else if (routeData.isService && routeData.serviceId) {
+        try {
+          const allRouteIds: string[] = [];
+          if (serviceRouteIds.A) allRouteIds.push(serviceRouteIds.A);
+          if (serviceRouteIds.B) allRouteIds.push(serviceRouteIds.B);
+          dynamicRoutes.forEach(dr => {
+            if (dr.firestoreId) allRouteIds.push(dr.firestoreId);
+          });
+
+          if (allRouteIds.length > 0) {
+            const updatedUnassigned = [...unassignedStops, stopToMove];
+            const updatePromises = allRouteIds.map(async (routeId) => {
+              const routeRef = doc(db, 'routes', routeId);
+              await updateDoc(routeRef, {
+                unassignedStops: updatedUnassigned,
+                updatedAt: serverTimestamp(),
+              });
+            });
+            await Promise.all(updatePromises);
+          }
+        } catch (error) {
+          console.error('❌ Erro ao salvar unassignedStops:', error);
         }
       }
 
@@ -3794,11 +3870,14 @@ export default function ServiceAcompanharPage() {
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const updatedUnassigned = [...unassignedStops, stopToMove];
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
+              unassignedStops: updatedUnassigned,
+              updatedAt: serverTimestamp(),
             });
           } catch (error) {
             console.error('❌ Erro ao atualizar Firestore:', error);
@@ -3807,6 +3886,31 @@ export default function ServiceAcompanharPage() {
               title: 'Erro ao salvar',
               description: 'A parada foi removida localmente, mas não foi salva no servidor.',
             });
+          }
+        }
+        // Para serviços: salvar unassignedStops em TODAS as rotas
+        else if (routeData.isService && routeData.serviceId) {
+          try {
+            const allRouteIds: string[] = [];
+            if (serviceRouteIds.A) allRouteIds.push(serviceRouteIds.A);
+            if (serviceRouteIds.B) allRouteIds.push(serviceRouteIds.B);
+            dynamicRoutes.forEach(dr => {
+              if (dr.firestoreId) allRouteIds.push(dr.firestoreId);
+            });
+
+            if (allRouteIds.length > 0) {
+              const updatedUnassigned = [...unassignedStops, stopToMove];
+              const updatePromises = allRouteIds.map(async (routeId) => {
+                const routeRef = doc(db, 'routes', routeId);
+                await updateDoc(routeRef, {
+                  unassignedStops: updatedUnassigned,
+                  updatedAt: serverTimestamp(),
+                });
+              });
+              await Promise.all(updatePromises);
+            }
+          } catch (error) {
+            console.error('❌ Erro ao salvar unassignedStops:', error);
           }
         }
       }
