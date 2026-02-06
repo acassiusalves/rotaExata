@@ -210,6 +210,7 @@ export default function ReportsPage() {
   const [selectedPeriod, setSelectedPeriod] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
+  const [dateFilterType, setDateFilterType] = React.useState<'completed' | 'planned'>('planned');
 
   // Dialog
   const [selectedDelivery, setSelectedDelivery] = React.useState<DeliveryReport | null>(null);
@@ -267,22 +268,61 @@ export default function ReportsPage() {
   };
 
   React.useEffect(() => {
+    // Buscar todas as rotas concluídas (sem filtro de data na query)
+    // O filtro de data será aplicado no lado do cliente
     const q = query(
       collection(db, 'routes'),
-      where('plannedDate', '>=', Timestamp.fromDate(startDate)),
-      where('plannedDate', '<=', Timestamp.fromDate(endDate)),
-      orderBy('plannedDate', 'desc')
+      where('status', 'in', ['completed', 'completed_auto'])
     );
 
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
         const routesData: RouteDocument[] = [];
+        const start = startOfDay(startDate);
+        const end = endOfDay(endDate);
+
         querySnapshot.forEach((doc) => {
-          routesData.push({
-            id: doc.id,
-            ...doc.data(),
-          } as RouteDocument);
+          const routeData = { id: doc.id, ...doc.data() } as RouteDocument;
+
+          // Filtrar por data baseado no tipo selecionado
+          let dateToCheck: Date | null = null;
+
+          if (dateFilterType === 'planned') {
+            dateToCheck = routeData.plannedDate?.toDate();
+          } else {
+            // Para completedAt, precisamos verificar se pelo menos uma parada foi concluída
+            const completedStops = routeData.stops.filter(s => s.completedAt);
+            if (completedStops.length > 0) {
+              // Usar a última data de conclusão
+              const dates = completedStops.map(s =>
+                s.completedAt instanceof Timestamp ? s.completedAt.toDate() : s.completedAt
+              ).filter(Boolean) as Date[];
+              if (dates.length > 0) {
+                dateToCheck = new Date(Math.max(...dates.map(d => d.getTime())));
+              }
+            }
+          }
+
+          // Incluir apenas se a data estiver dentro do intervalo
+          if (dateToCheck && dateToCheck >= start && dateToCheck <= end) {
+            routesData.push(routeData);
+          }
+        });
+
+        // Ordenar por data (mais recente primeiro)
+        routesData.sort((a, b) => {
+          const dateA = dateFilterType === 'planned'
+            ? a.plannedDate?.toMillis() || 0
+            : Math.max(...(a.stops.filter(s => s.completedAt).map(s =>
+                (s.completedAt instanceof Timestamp ? s.completedAt.toMillis() : new Date(s.completedAt!).getTime())
+              ) || [0]));
+          const dateB = dateFilterType === 'planned'
+            ? b.plannedDate?.toMillis() || 0
+            : Math.max(...(b.stops.filter(s => s.completedAt).map(s =>
+                (s.completedAt instanceof Timestamp ? s.completedAt.toMillis() : new Date(s.completedAt!).getTime())
+              ) || [0]));
+          return dateB - dateA;
         });
 
         setRoutes(routesData);
@@ -332,7 +372,7 @@ export default function ReportsPage() {
     );
 
     return () => unsubscribe();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, dateFilterType]);
 
   React.useEffect(() => {
     let filtered = [...deliveries];
@@ -969,7 +1009,7 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
             <div className="space-y-2">
               <label className="text-sm font-medium">Buscar</label>
               <div className="relative">
@@ -984,7 +1024,20 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Data</label>
+              <label className="text-sm font-medium">Filtrar por</label>
+              <Select value={dateFilterType} onValueChange={(value: 'completed' | 'planned') => setDateFilterType(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="planned">Data Planejada</SelectItem>
+                  <SelectItem value="completed">Data de Conclusão</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Período</label>
               <DatePickerWithPresets
                 startDate={startDate}
                 endDate={endDate}
