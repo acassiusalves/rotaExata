@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from '@/lib/firebase/impersonation';
 import { Loader2 } from 'lucide-react';
 
-export default function ImpersonateDriverPage() {
+function ImpersonateDriverContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -111,4 +111,19 @@ export default function ImpersonateDriverPage() {
   }
 
   return null;
+}
+
+export default function ImpersonateDriverPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen flex-col items-center justify-center bg-muted/40">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          <h1 className="text-2xl font-semibold">Carregando...</h1>
+        </div>
+      </div>
+    }>
+      <ImpersonateDriverContent />
+    </Suspense>
+  );
 }
