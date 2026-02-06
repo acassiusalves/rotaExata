@@ -430,6 +430,7 @@ export default function OrganizeRoutePage() {
   // Firestore IDs para rotas A e B (quando salvas como draft no contexto de serviço)
   const [serviceRouteIds, setServiceRouteIds] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
   const [highlightedStops, setHighlightedStops] = React.useState<string[]>([]);
+  const [showTimePreferenceMarkers, setShowTimePreferenceMarkers] = React.useState(false); // Toggle para mostrar pedidos com horário
   const [driverLocation, setDriverLocation] = React.useState<{lat: number; lng: number; heading?: number} | null>(null);
   const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
 
@@ -4636,6 +4637,7 @@ export default function OrganizeRoutePage() {
             highlightedStopIds={highlightedStops}
             driverLocation={driverLocation || undefined}
             driverLocations={driverLocations}
+            showTimePreferenceMarkers={showTimePreferenceMarkers}
           />
         </div>
 
@@ -4656,6 +4658,17 @@ export default function OrganizeRoutePage() {
                      onChange={(e) => setSearchQuery(e.target.value)}
                    />
                  </div>
+                 {/* Toggle para visualização de pedidos com horário */}
+                 <Button
+                   variant={showTimePreferenceMarkers ? "default" : "outline"}
+                   size="icon"
+                   className="h-9 w-9 rounded-full"
+                   onClick={() => setShowTimePreferenceMarkers(!showTimePreferenceMarkers)}
+                   title={showTimePreferenceMarkers ? "Ocultar diferenciação de pedidos com horário" : "Mostrar diferenciação de pedidos com horário"}
+                 >
+                   <Clock className="h-4 w-4" />
+                 </Button>
+
                  {/* Debug Logs Export Button */}
                  <Button
                    variant="outline"

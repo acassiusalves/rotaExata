@@ -53,11 +53,35 @@ const createInfoWindowContent = (
         <span style="color: #666;">Janela:</span>
         <span>${stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '--'}</span>
 
-        <span style="color: #666; align-self: start;">Endereço:</span>
-        <p style="margin: 0; word-break: break-word;">${address}</p>
+        ${stop.street ? `
+          <span style="color: #666; align-self: start;">Rua:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.street}</p>
+        ` : ''}
 
-        <span style="color: #666; align-self: start;">Complemento:</span>
-        <p style="margin: 0; word-break: break-word;">${stop.complemento || '--'}</p>
+        ${stop.neighborhood ? `
+          <span style="color: #666; align-self: start;">Bairro:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.neighborhood}</p>
+        ` : ''}
+
+        ${stop.city ? `
+          <span style="color: #666; align-self: start;">Cidade:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.city}${stop.state ? ` - ${stop.state}` : ''}</p>
+        ` : ''}
+
+        ${stop.zipCode ? `
+          <span style="color: #666; align-self: start;">CEP:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.zipCode}</p>
+        ` : ''}
+
+        ${stop.complemento ? `
+          <span style="color: #666; align-self: start;">Complemento:</span>
+          <p style="margin: 0; word-break: break-word;">${stop.complemento}</p>
+        ` : ''}
+
+        ${!stop.street && address ? `
+          <span style="color: #666; align-self: start;">Endereço:</span>
+          <p style="margin: 0; word-break: break-word;">${address}</p>
+        ` : ''}
 
         <span style="color: #666; align-self: start;">Obs:</span>
         <p style="margin: 0; word-break: break-word; font-style: italic;">${stop.notes || '--'}</p>
@@ -240,10 +264,11 @@ type Props = {
   onEditStop?: (stopId: string) => void;
   onRefreshDriverLocation?: (driverId: string) => void;
   highlightedStopIds?: string[];
+  showTimePreferenceMarkers?: boolean;
 };
 
 export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMap(
-  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop, onRefreshDriverLocation, highlightedStopIds = [] }: Props,
+  { origin, stops, routes, unassignedStops, height = 360, driverLocation, driverLocations, onRemoveStop, onEditStop, onRefreshDriverLocation, highlightedStopIds = [], showTimePreferenceMarkers = false }: Props,
   ref
 ) {
   const divRef = React.useRef<HTMLDivElement | null>(null);
@@ -440,13 +465,6 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Add origin marker
     if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number' &&
         isFinite(origin.lat) && isFinite(origin.lng)) {
-      console.log('📍 [RouteMap] Criando marcador de origem:', {
-        address: origin.address,
-        lat: origin.lat,
-        lng: origin.lng,
-        originObject: origin
-      });
-
       // Usar lat/lng explicitamente para garantir posicionamento correto
       const originPosition = { lat: origin.lat, lng: origin.lng };
 
@@ -511,9 +529,9 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
       // Criar elemento de conteúdo do marcador
       let markerContent: HTMLElement;
 
-      // Definir cores para marcadores com preferência de horário
+      // Definir cores para marcadores com preferência de horário (somente se o toggle estiver ativo)
       // Rosa/magenta para pendentes, verde para concluídos
-      if (hasTimePreference && !isHighlighted && !isCompleted && !isFailed && !isNewlyAdded) {
+      if (hasTimePreference && showTimePreferenceMarkers && !isHighlighted && !isCompleted && !isFailed && !isNewlyAdded) {
         markerBackground = '#ec4899'; // Rosa/magenta para entregas com horário
         markerBorder = '#db2777';
       }
@@ -656,7 +674,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
     // Always update the full data check to trigger marker re-render
     previousRoutesDataRef.current = currentRoutesDataCheck;
 
-  }, [mapReady, origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds]);
+  }, [mapReady, origin, stops, routes, unassignedStops, onRemoveStop, onEditStop, highlightedStopIds, showTimePreferenceMarkers]);
 
   // Update driver location marker (single)
   React.useEffect(() => {

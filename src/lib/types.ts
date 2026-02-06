@@ -35,6 +35,12 @@ export type PlaceValue = {
   hasTimePreference?: boolean; // Se o ponto tem preferência de horário de entrega
   addressString?: string;
   complemento?: string;
+  // Campos de endereço estruturado (para melhor visualização no InfoWindow)
+  street?: string;        // Rua + número combinados (ex: "Rua A, 123")
+  neighborhood?: string;  // Bairro
+  city?: string;         // Cidade
+  state?: string;        // Estado/UF
+  zipCode?: string;      // CEP formatado
   // Campos de validação de endereço
   originalAddressParts?: Record<string, string>;
   validationIssues?: string[];

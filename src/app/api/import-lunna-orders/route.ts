@@ -315,6 +315,12 @@ export async function POST(request: NextRequest) {
           orderNumber: result.order.number,
           complemento: result.client.complemento,
           addressString: result.addressString.replace(', Brasil', ''),
+          // Campos estruturados para exibição no InfoWindow
+          street: `${result.client.rua}, ${result.client.numero}`,
+          neighborhood: result.client.bairro,
+          city: result.client.cidade,
+          state: 'GO', // Assumindo Goiânia
+          zipCode: result.client.cep,
           deliveryStatus: 'pending',
           ...lunnaFields,
           ...timeWindowFields,
@@ -334,6 +340,12 @@ export async function POST(request: NextRequest) {
           orderNumber: result.order.number,
           complemento: result.client.complemento,
           addressString: result.addressString.replace(', Brasil', ''),
+          // Campos estruturados para exibição no InfoWindow
+          street: `${result.client.rua}, ${result.client.numero}`,
+          neighborhood: result.client.bairro,
+          city: result.client.cidade,
+          state: 'GO', // Assumindo Goiânia
+          zipCode: result.client.cep,
           deliveryStatus: 'pending',
           hasValidationIssues: true,
           validationIssues: ['Endereço não foi geocodificado. Necessário editar manualmente.'],
