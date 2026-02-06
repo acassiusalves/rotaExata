@@ -77,26 +77,28 @@ export default function DriverLayout({
     <div className="flex min-h-screen w-full flex-col">
       {/* Banner de Impersonação - visível apenas quando em modo teste */}
       {isImpersonating && (
-        <div className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-yellow-400 bg-yellow-100 px-4 py-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🧪</span>
-            <span className="font-semibold text-yellow-900">
-              Modo Teste
-            </span>
-            <span className="text-yellow-800">
-              - Visualizando como{' '}
-              <span className="font-medium">{impersonatedDriverName || 'Motorista'}</span>
-            </span>
+        <div className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-yellow-400 bg-yellow-100 px-3 py-2 text-xs sm:text-sm">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <span className="text-base flex-shrink-0">🧪</span>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0">
+              <span className="font-semibold text-yellow-900 whitespace-nowrap">
+                Modo Teste
+              </span>
+              <span className="text-yellow-800 truncate">
+                <span className="hidden sm:inline">- Visualizando como </span>
+                <span className="sm:hidden">como </span>
+                <span className="font-medium">{impersonatedDriverName || 'Motorista'}</span>
+              </span>
+            </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={exitImpersonationMode}
-            className="h-7 gap-1 text-yellow-900 hover:bg-yellow-200 hover:text-yellow-900"
+            className="h-7 gap-1 text-yellow-900 hover:bg-yellow-200 hover:text-yellow-900 flex-shrink-0 px-2"
           >
-            <X className="h-4 w-4" />
-            <span className="hidden sm:inline">Sair do Modo Teste</span>
-            <span className="sm:hidden">Sair</span>
+            <X className="h-3.5 w-3.5" />
+            <span className="sr-only">Sair do Modo Teste</span>
           </Button>
         </div>
       )}
