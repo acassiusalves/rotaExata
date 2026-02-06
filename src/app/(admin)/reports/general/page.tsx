@@ -882,14 +882,14 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <div className="flex-1 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <FileText className="h-8 w-8" />
             Relatórios
-          </h1>
+          </h2>
           <p className="text-muted-foreground">
             Análise detalhada de entregas e rotas
           </p>
