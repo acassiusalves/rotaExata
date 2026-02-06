@@ -47,55 +47,100 @@ function parseAddress(address: string, complemento?: string): {
   state?: string;
   zipCode?: string;
 } {
-  // Exemplo de endereço: "Av. Iguatemi - Parque Itália, Aparecida de Goiânia - GO, 74968-740, Brasil"
+  // Formatos possíveis:
+  // 1. "Av. Iguatemi - Parque Itália, Aparecida de Goiânia - GO, 74968-740, Brasil"
+  // 2. "Av. Dr. Jose Hermano, 8 - Vila Jardim Vitoria, Goiânia - GO, 74470-515, Brasil"
+  // 3. "Rua X, Bairro Y, Cidade - Estado, CEP, Brasil"
 
   // Remover ", Brasil" do final
-  const cleanAddress = address.replace(/, Brasil$/, '');
+  let cleanAddress = address.replace(/, Brasil$/, '');
 
   // Dividir por vírgulas
   const parts = cleanAddress.split(',').map(p => p.trim());
 
   const result: any = {};
 
+  // Identificar CEP (formato: XXXXX-XXX ou apenas dígitos)
+  const cepRegex = /\b\d{5}-?\d{3}\b/;
+  let cepIndex = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (cepRegex.test(parts[i])) {
+      result.zipCode = parts[i].match(cepRegex)?.[0];
+      cepIndex = i;
+      break;
+    }
+  }
+
+  // Identificar Cidade - Estado (formato: "Cidade - UF")
+  let cityStateIndex = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (i === cepIndex) continue; // Pular CEP
+
+    // Verificar se tem formato "Cidade - UF" (2 letras maiúsculas)
+    if (parts[i].includes(' - ') && /\b[A-Z]{2}\b/.test(parts[i])) {
+      const [cityPart, statePart] = parts[i].split(' - ').map(s => s.trim());
+      result.city = cityPart;
+      result.state = statePart;
+      cityStateIndex = i;
+      break;
+    }
+  }
+
+  // Se não encontrou cidade-estado no formato padrão, última parte antes do CEP pode ser a cidade
+  if (!result.city && cepIndex > 0) {
+    const potentialCity = parts[cepIndex - 1];
+    if (potentialCity && !potentialCity.includes(' - ')) {
+      result.city = potentialCity;
+      cityStateIndex = cepIndex - 1;
+    }
+  }
+
+  // Primeira parte: Rua (e possivelmente bairro se tiver " - ")
   if (parts.length >= 1) {
-    // Primeira parte: Rua e possivelmente bairro
     const firstPart = parts[0];
 
-    // Tentar separar rua de bairro pelo " - "
+    // Se tem " - ", pode ser "Rua - Bairro" ou "Rua, Número - Bairro"
     if (firstPart.includes(' - ')) {
-      const [streetPart, neighborhoodPart] = firstPart.split(' - ');
-      result.street = streetPart.trim();
-      result.neighborhood = neighborhoodPart.trim();
+      const splitDash = firstPart.split(' - ');
+      result.street = splitDash[0].trim();
+
+      // Se há mais de uma parte após o " - ", a última é o bairro
+      if (splitDash.length > 1) {
+        result.neighborhood = splitDash.slice(1).join(' - ').trim();
+      }
     } else {
       result.street = firstPart;
     }
   }
 
-  if (parts.length >= 2) {
-    // Segunda parte: Cidade - Estado
-    const secondPart = parts[1];
+  // Segunda parte (se não for cidade-estado e não for CEP): provavelmente é bairro
+  if (parts.length >= 2 && cityStateIndex !== 1 && cepIndex !== 1) {
+    if (!result.neighborhood) {
+      const secondPart = parts[1];
 
-    if (secondPart.includes(' - ')) {
-      const [cityPart, statePart] = secondPart.split(' - ');
-      result.city = cityPart.trim();
-      result.state = statePart.trim();
-    } else {
-      result.city = secondPart;
+      // Se já tem cidade-estado identificada em outra parte, esta é o bairro
+      if (result.city || secondPart.includes(' - ')) {
+        // Se tem " - " pode ser "Número - Bairro"
+        if (secondPart.includes(' - ')) {
+          const splitDash = secondPart.split(' - ');
+          // Se a primeira parte é só número, adicionar à rua
+          if (/^\d+$/.test(splitDash[0].trim())) {
+            result.street = result.street + ', ' + splitDash[0].trim();
+          }
+          result.neighborhood = splitDash.slice(/^\d+$/.test(splitDash[0].trim()) ? 1 : 0).join(' - ').trim();
+        } else {
+          result.neighborhood = secondPart;
+        }
+      }
     }
   }
 
-  if (parts.length >= 3) {
-    // Terceira parte: CEP
-    result.zipCode = parts[2].trim();
-  }
-
-  // Se não encontrou neighborhood na primeira parte, tenta na segunda
-  if (!result.neighborhood && parts.length >= 2 && !parts[1].includes(' - ')) {
-    result.neighborhood = parts[1];
-    if (parts.length >= 3) {
-      result.city = parts[2];
+  // Limpar campos undefined ou vazios
+  Object.keys(result).forEach(key => {
+    if (!result[key] || result[key] === '') {
+      delete result[key];
     }
-  }
+  });
 
   return result;
 }

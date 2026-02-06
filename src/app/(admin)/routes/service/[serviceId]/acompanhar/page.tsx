@@ -79,7 +79,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -387,8 +387,10 @@ const EditableRouteName: React.FC<{
   );
 };
 
-export default function OrganizeRoutePage() {
+export default function ServiceAcompanharPage() {
   const router = useRouter();
+  const params = useParams();
+  const serviceId = params.serviceId as string;
   const { toast } = useToast();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
 
@@ -1027,25 +1029,49 @@ export default function OrganizeRoutePage() {
   }, [routeData?.isExistingRoute, routeData?.currentRouteId]);
 
   React.useEffect(() => {
-    // ===== REDIRECT TEMPORÁRIO: Migrar para novas URLs =====
-    const storedData = sessionStorage.getItem('newRouteData');
-    console.log('📦 [useEffect:loadRouteData] sessionStorage "newRouteData":', storedData ? 'ENCONTRADO' : 'NÃO ENCONTRADO');
+    // ===== NOVA IMPLEMENTAÇÃO: Carregar dados usando serviceId da URL =====
+    if (!serviceId) {
+      console.error('❌ [useEffect:loadServiceData] serviceId não encontrado na URL');
+      router.push('/routes');
+      return;
+    }
 
-    if (storedData) {
-      const parsedData: RouteData = JSON.parse(storedData);
+    console.log('📦 [useEffect:loadServiceData] Carregando serviço da URL:', serviceId);
 
-      // Redirecionar para nova URL baseada no tipo de dados
-      if (parsedData.isService && parsedData.serviceId) {
-        console.log('🔄 [useEffect:loadRouteData] Redirecionando para URL de serviço:', parsedData.serviceId);
-        router.replace(`/routes/service/${parsedData.serviceId}/acompanhar`);
-        return;
-      } else if (parsedData.isExistingRoute && parsedData.currentRouteId) {
-        console.log('🔄 [useEffect:loadRouteData] Redirecionando para URL de rota:', parsedData.currentRouteId);
-        router.replace(`/routes/${parsedData.currentRouteId}/acompanhar`);
-        return;
-      }
+    const loadServiceData = async () => {
+      setIsLoading(true);
+      try {
+        // Buscar dados do serviço
+        const serviceDoc = await getDoc(doc(db, 'services', serviceId));
 
-      // Se chegou aqui, ainda não tem redirecionamento específico - manter lógica antiga por compatibilidade
+        if (!serviceDoc.exists()) {
+          console.error('❌ [useEffect:loadServiceData] Serviço não encontrado:', serviceId);
+          toast({
+            title: 'Serviço não encontrado',
+            description: 'O serviço solicitado não existe.',
+            variant: 'destructive',
+          });
+          router.push('/routes');
+          return;
+        }
+
+        const serviceData = serviceDoc.data();
+        console.log('✅ [useEffect:loadServiceData] Serviço carregado:', {
+          id: serviceId,
+          code: serviceData.code,
+          allStops: serviceData.allStops?.length || 0,
+        });
+
+        // Criar parsedData no formato esperado pelo código existente
+        const parsedData: RouteData = {
+          origin: serviceData.origin,
+          stops: serviceData.allStops || [],
+          routeDate: new Date().toISOString(),
+          routeTime: 'morning',
+          isService: true,
+          serviceId: serviceId,
+          serviceCode: serviceData.code,
+        };
       console.log('📦 [useEffect:loadRouteData] Dados parseados:', {
         isExistingRoute: parsedData.isExistingRoute,
         currentRouteId: parsedData.currentRouteId,
@@ -1768,10 +1794,19 @@ export default function OrganizeRoutePage() {
 
         processNewRoute();
       }
-    } else {
-      router.push('/routes/new');
+    } catch (error) {
+      console.error('❌ [useEffect:loadServiceData] Erro ao carregar serviço:', error);
+      setIsLoading(false);
+      toast({
+        title: 'Erro ao carregar serviço',
+        description: 'Ocorreu um erro ao carregar os dados do serviço.',
+        variant: 'destructive',
+      });
     }
-  }, [router]);
+    };
+
+    loadServiceData();
+  }, [serviceId, router, toast]);
 
   // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
   React.useEffect(() => {

@@ -457,8 +457,9 @@ export default function RoutesPage() {
         color: route.color,
       }
     };
-    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
-    router.push('/routes/organize/acompanhar'); // Redirecionar para página de acompanhamento
+    // Não precisa mais do sessionStorage - usar URL diretamente
+    // sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+    router.push(`/routes/${route.id}/acompanhar`); // Redirecionar para página de acompanhamento com routeId na URL
   }
 
   const handleEditDraft = (route: RouteDocument) => {
@@ -637,9 +638,10 @@ export default function RoutesPage() {
           color: route.color,
         },
       };
-      sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+      // Não precisa mais do sessionStorage - usar URL diretamente
+      // sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
     }
-    router.push('/routes/organize/acompanhar');
+    router.push(`/routes/${routeId}/acompanhar`); // Usar routeId na URL
   };
 
   return (

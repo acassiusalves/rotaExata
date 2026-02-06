@@ -313,10 +313,11 @@ export default function ServiceOrganizePage() {
         });
         console.log('📦 [ServiceOrganize] Origin completo:', routeData.origin);
 
-        sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+        // Não precisa mais do sessionStorage - usar URL diretamente
+        // sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
 
-        // Redirecionar para a página de organização
-        router.push('/routes/organize/acompanhar');
+        // Redirecionar para a nova URL com serviceId
+        router.push(`/routes/service/${serviceId}/acompanhar`);
       } catch (err) {
         console.error('Erro ao carregar serviço:', err);
         setError('Erro ao carregar dados do serviço');

@@ -79,7 +79,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -387,8 +387,10 @@ const EditableRouteName: React.FC<{
   );
 };
 
-export default function OrganizeRoutePage() {
+export default function RouteAcompanharPage() {
   const router = useRouter();
+  const params = useParams();
+  const routeId = params.routeId as string;
   const { toast } = useToast();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
 
@@ -1027,25 +1029,56 @@ export default function OrganizeRoutePage() {
   }, [routeData?.isExistingRoute, routeData?.currentRouteId]);
 
   React.useEffect(() => {
-    // ===== REDIRECT TEMPORÁRIO: Migrar para novas URLs =====
-    const storedData = sessionStorage.getItem('newRouteData');
-    console.log('📦 [useEffect:loadRouteData] sessionStorage "newRouteData":', storedData ? 'ENCONTRADO' : 'NÃO ENCONTRADO');
+    // ===== NOVA IMPLEMENTAÇÃO: Carregar dados usando routeId da URL =====
+    if (!routeId) {
+      console.error('❌ [useEffect:loadRouteData] routeId não encontrado na URL');
+      router.push('/routes');
+      return;
+    }
 
-    if (storedData) {
-      const parsedData: RouteData = JSON.parse(storedData);
+    console.log('📦 [useEffect:loadRouteData] Carregando rota da URL:', routeId);
 
-      // Redirecionar para nova URL baseada no tipo de dados
-      if (parsedData.isService && parsedData.serviceId) {
-        console.log('🔄 [useEffect:loadRouteData] Redirecionando para URL de serviço:', parsedData.serviceId);
-        router.replace(`/routes/service/${parsedData.serviceId}/acompanhar`);
-        return;
-      } else if (parsedData.isExistingRoute && parsedData.currentRouteId) {
-        console.log('🔄 [useEffect:loadRouteData] Redirecionando para URL de rota:', parsedData.currentRouteId);
-        router.replace(`/routes/${parsedData.currentRouteId}/acompanhar`);
-        return;
-      }
+    const loadRouteData = async () => {
+      setIsLoading(true);
+      try {
+        // Buscar dados da rota
+        const routeDoc = await getDoc(doc(db, 'routes', routeId));
 
-      // Se chegou aqui, ainda não tem redirecionamento específico - manter lógica antiga por compatibilidade
+        if (!routeDoc.exists()) {
+          console.error('❌ [useEffect:loadRouteData] Rota não encontrada:', routeId);
+          toast({
+            title: 'Rota não encontrada',
+            description: 'A rota solicitada não existe.',
+            variant: 'destructive',
+          });
+          router.push('/routes');
+          return;
+        }
+
+        const routeData = routeDoc.data();
+        console.log('✅ [useEffect:loadRouteData] Rota carregada:', {
+          id: routeId,
+          name: routeData.name,
+          code: routeData.code,
+          stops: routeData.stops?.length || 0,
+        });
+
+        // Criar parsedData no formato esperado pelo código existente
+        const parsedData: RouteData = {
+          origin: routeData.origin,
+          stops: routeData.stops || [],
+          routeDate: new Date().toISOString(),
+          routeTime: 'morning',
+          isExistingRoute: true,
+          currentRouteId: routeId,
+          routeName: routeData.name || routeData.code,
+          existingRouteData: {
+            distanceMeters: routeData.distanceMeters || 0,
+            duration: routeData.duration || '0s',
+            encodedPolyline: routeData.encodedPolyline || '',
+            color: routeData.color || '#e60000',
+          },
+        };
       console.log('📦 [useEffect:loadRouteData] Dados parseados:', {
         isExistingRoute: parsedData.isExistingRoute,
         currentRouteId: parsedData.currentRouteId,
@@ -1768,10 +1801,19 @@ export default function OrganizeRoutePage() {
 
         processNewRoute();
       }
-    } else {
-      router.push('/routes/new');
+    } catch (error) {
+      console.error('❌ [useEffect:loadRouteData] Erro ao carregar rota:', error);
+      setIsLoading(false);
+      toast({
+        title: 'Erro ao carregar rota',
+        description: 'Ocorreu um erro ao carregar os dados da rota.',
+        variant: 'destructive',
+      });
     }
-  }, [router]);
+    };
+
+    loadRouteData();
+  }, [routeId, router, toast]);
 
   // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
   React.useEffect(() => {
