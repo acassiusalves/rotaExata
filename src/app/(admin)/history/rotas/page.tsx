@@ -133,6 +133,7 @@ export default function HistoryRoutesPage() {
   const [selectedPeriod, setSelectedPeriod] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 30));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
+  const [dateFilterType, setDateFilterType] = React.useState<'completed' | 'planned'>('completed');
 
   // Buscar todas as rotas concluídas
   React.useEffect(() => {
@@ -212,13 +213,19 @@ export default function HistoryRoutesPage() {
     const start = startOfDay(startDate);
     const end = endOfDay(endDate);
     filtered = filtered.filter(route => {
-      if (!route.completedAt) return false;
-      const completedDate = route.completedAt.toDate();
-      return completedDate >= start && completedDate <= end;
+      if (dateFilterType === 'completed') {
+        if (!route.completedAt) return false;
+        const completedDate = route.completedAt.toDate();
+        return completedDate >= start && completedDate <= end;
+      } else {
+        if (!route.plannedDate) return false;
+        const plannedDateObj = route.plannedDate.toDate();
+        return plannedDateObj >= start && plannedDateObj <= end;
+      }
     });
 
     setFilteredRoutes(filtered);
-  }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate]);
+  }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate, dateFilterType]);
 
   const handleOpenDetails = (route: RouteDocument) => {
     setSelectedRoute(route);
@@ -254,7 +261,7 @@ export default function HistoryRoutesPage() {
             <CardDescription>Refine sua busca de rotas concluídas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               {/* Campo de busca */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Buscar</label>
@@ -267,6 +274,20 @@ export default function HistoryRoutesPage() {
                     className="pl-8"
                   />
                 </div>
+              </div>
+
+              {/* Filtro de tipo de data */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Filtrar por</label>
+                <Select value={dateFilterType} onValueChange={(value: 'completed' | 'planned') => setDateFilterType(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="completed">Data de Conclusão</SelectItem>
+                    <SelectItem value="planned">Data Planejada</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Filtro de intervalo de datas */}
