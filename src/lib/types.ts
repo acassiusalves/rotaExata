@@ -386,6 +386,22 @@ export type StopTier = {
   bonus: number;
 };
 
+export type CityInfo = {
+  name: string;
+  placeId: string;
+  fullName: string; // Nome completo com estado (ex: "Goiânia, GO")
+};
+
+export type PricingZone = {
+  id: string;
+  name: string;
+  price: number;
+  description?: string;
+  cities?: CityInfo[]; // Lista de cidades validadas pelo Google Maps
+  maxDistanceKm?: number; // Distância máxima da empresa (opcional)
+  excludeLocations?: string[]; // Locais excluídos (ex: ["hospitais", "clínicas"])
+};
+
 export type TimeBonusConfig = {
   enabled: boolean;
   multiplier: number;
@@ -395,7 +411,13 @@ export type EarningsRules = {
   id: string;
   version: number;
 
-  // Compensação base
+  // Modo de precificação
+  pricingMode: 'zone' | 'distance' | 'hybrid'; // zona, distância ou híbrido
+
+  // Zonas de precificação (para modo 'zone' ou 'hybrid')
+  pricingZones?: PricingZone[];
+
+  // Compensação base (para modo 'distance' ou 'hybrid')
   basePayPerRoute: number;
   pricePerKm: number;
 

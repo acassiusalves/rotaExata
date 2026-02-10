@@ -64,9 +64,33 @@ export function calculateRouteEarnings(
   // 3. Conta pedidos Lunna
   const lunnaOrderCount = route.lunnaOrderIds?.length || 0;
 
-  // 4. Cálculos base
-  const basePay = rules.basePayPerRoute;
-  const distanceEarnings = distanceKm * rules.pricePerKm;
+  // 4. Cálculos base - varia conforme modo de precificação
+  let basePay = 0;
+  let distanceEarnings = 0;
+
+  if (rules.pricingMode === 'zone' && rules.pricingZones && rules.pricingZones.length > 0) {
+    // Modo de precificação por zona
+    // Usa a primeira zona como padrão (você pode implementar lógica mais complexa baseada na localização)
+    basePay = rules.pricingZones[0].price;
+    distanceEarnings = 0; // Não usa distância neste modo
+  } else if (rules.pricingMode === 'distance') {
+    // Modo de precificação por distância (original)
+    basePay = rules.basePayPerRoute;
+    distanceEarnings = distanceKm * rules.pricePerKm;
+  } else {
+    // Modo híbrido: usa zona como base e adiciona distância extra
+    if (rules.pricingZones && rules.pricingZones.length > 0) {
+      basePay = rules.pricingZones[0].price;
+      // Calcula distância além da zona
+      const zoneMaxDistance = rules.pricingZones[0].maxDistanceKm || 0;
+      const extraDistance = Math.max(0, distanceKm - zoneMaxDistance);
+      distanceEarnings = extraDistance * rules.pricePerKm;
+    } else {
+      basePay = rules.basePayPerRoute;
+      distanceEarnings = distanceKm * rules.pricePerKm;
+    }
+  }
+
   const deliveryBonuses = successfulDeliveries * rules.bonusPerDelivery;
   const failedAttemptBonuses = failedWithAttempt * rules.bonusPerFailedAttempt;
   const lunnaBonus = lunnaOrderCount * rules.lunnaOrderBonus;
