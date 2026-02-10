@@ -32,6 +32,56 @@ function toDate(timestamp: Date | Timestamp): Date {
 }
 
 /**
+ * Calcula a distância entre dois pontos em km usando a fórmula de Haversine
+ */
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Raio da Terra em km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Determina a zona de precificação de uma parada baseado na cidade e distância da origem
+ * @param stop - Parada da rota
+ * @param origin - Origem da rota
+ * @returns Valor da parada em reais
+ */
+function calculateStopPrice(stop: PlaceValue, origin?: PlaceValue): number {
+  const city = (stop.cidade || stop.city || '').toLowerCase().trim();
+  const neighborhood = (stop.bairro || stop.neighborhood || '').toLowerCase().trim();
+
+  // Cidades de R$ 20
+  const citiesR20 = ['senador canedo', 'canedo', 'trindade', 'goianira'];
+  if (citiesR20.some(c => city.includes(c) || neighborhood.includes(c))) {
+    return 20;
+  }
+
+  // Goiânia e Aparecida de Goiânia - depende da distância da origem
+  const citiesGoianiaArea = ['goiânia', 'goiania', 'aparecida', 'aparecida de goiania', 'aparecida de goiânia'];
+  const isGoianiaArea = citiesGoianiaArea.some(c => city.includes(c) || neighborhood.includes(c));
+
+  if (isGoianiaArea && origin && origin.lat && origin.lng && stop.lat && stop.lng) {
+    const distance = calculateDistance(origin.lat, origin.lng, stop.lat, stop.lng);
+    // Até 7km = R$ 5, acima de 7km = R$ 10
+    return distance <= 7 ? 5 : 10;
+  }
+
+  // Padrão para Goiânia/Aparecida se não conseguir calcular distância
+  if (isGoianiaArea) {
+    return 5;
+  }
+
+  // Padrão para cidades não mapeadas
+  return 10;
+}
+
+/**
  * Calcula os ganhos de um motorista para uma rota completada
  * @param route - Dados da rota completada
  * @param rules - Regras de ganhos ativas
@@ -64,35 +114,29 @@ export function calculateRouteEarnings(
   // 3. Conta pedidos Lunna
   const lunnaOrderCount = route.lunnaOrderIds?.length || 0;
 
-  // 4. Cálculos base - varia conforme modo de precificação
-  let basePay = 0;
-  let distanceEarnings = 0;
+  // 4. Calcula valor baseado em paradas (nova lógica por zona/distância)
+  // Pega a origem da rota (primeiro ponto ou origem definida)
+  const origin = (route as any).origin || route.stops[0];
 
-  if (rules.pricingMode === 'zone' && rules.pricingZones && rules.pricingZones.length > 0) {
-    // Modo de precificação por zona
-    // Usa a primeira zona como padrão (você pode implementar lógica mais complexa baseada na localização)
-    basePay = rules.pricingZones[0].price;
-    distanceEarnings = 0; // Não usa distância neste modo
-  } else if (rules.pricingMode === 'distance') {
-    // Modo de precificação por distância (original)
-    basePay = rules.basePayPerRoute;
-    distanceEarnings = distanceKm * rules.pricePerKm;
-  } else {
-    // Modo híbrido: usa zona como base e adiciona distância extra
-    if (rules.pricingZones && rules.pricingZones.length > 0) {
-      basePay = rules.pricingZones[0].price;
-      // Calcula distância além da zona
-      const zoneMaxDistance = rules.pricingZones[0].maxDistanceKm || 0;
-      const extraDistance = Math.max(0, distanceKm - zoneMaxDistance);
-      distanceEarnings = extraDistance * rules.pricePerKm;
-    } else {
-      basePay = rules.basePayPerRoute;
-      distanceEarnings = distanceKm * rules.pricePerKm;
+  let basePay = 0;
+  let deliveryBonuses = 0;
+  let failedAttemptBonuses = 0;
+
+  // Calcula o valor de cada parada individualmente
+  for (const stop of route.stops) {
+    const stopValue = calculateStopPrice(stop, origin);
+
+    if (stop.deliveryStatus === 'completed') {
+      deliveryBonuses += stopValue;
+    } else if (stop.deliveryStatus === 'failed' && stop.wentToLocation === true) {
+      // Tentativa falhada onde foi ao local = 20% do valor da parada
+      failedAttemptBonuses += stopValue * 0.2;
     }
   }
 
-  const deliveryBonuses = successfulDeliveries * rules.bonusPerDelivery;
-  const failedAttemptBonuses = failedWithAttempt * rules.bonusPerFailedAttempt;
+  // Distância não é mais usada diretamente, mas mantemos para compatibilidade
+  const distanceEarnings = 0;
+
   const lunnaBonus = lunnaOrderCount * rules.lunnaOrderBonus;
 
   // 5. Bônus de volume (tiers de paradas)

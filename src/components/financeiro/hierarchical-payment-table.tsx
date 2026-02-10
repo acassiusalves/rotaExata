@@ -50,9 +50,10 @@ import { MarkAsPaidDialog } from './mark-as-paid-dialog';
 import { CancelPaymentDialog } from './cancel-payment-dialog';
 import { EditPaymentDialog } from './edit-payment-dialog';
 import { StopDetailsDialog } from './stop-details-dialog';
+import { EditStopValueDialog } from './edit-stop-value-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
-import { approvePayment } from '@/lib/payment-actions';
+import { approvePayment, updateStopValue } from '@/lib/payment-actions';
 import {
   Tooltip,
   TooltipContent,
@@ -90,6 +91,7 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
   const [expandedServices, setExpandedServices] = React.useState<Set<string>>(new Set());
   const [expandedRoutes, setExpandedRoutes] = React.useState<Set<string>>(new Set());
   const [routeStops, setRouteStops] = React.useState<Map<string, any[]>>(new Map());
+  const [routeOrigins, setRouteOrigins] = React.useState<Map<string, any>>(new Map());
   const [loadingStops, setLoadingStops] = React.useState<Set<string>>(new Set());
 
   const [selectedPayment, setSelectedPayment] = React.useState<DriverPayment | null>(null);
@@ -101,6 +103,10 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
   const [selectedStop, setSelectedStop] = React.useState<any>(null);
   const [selectedStopNumber, setSelectedStopNumber] = React.useState<number>(0);
   const [stopDetailsOpen, setStopDetailsOpen] = React.useState(false);
+
+  const [editStopValueOpen, setEditStopValueOpen] = React.useState(false);
+  const [selectedStopIndex, setSelectedStopIndex] = React.useState<number>(0);
+  const [selectedStopValue, setSelectedStopValue] = React.useState<number>(0);
 
   const { toast } = useToast();
   const { user } = useAuth();
@@ -270,6 +276,7 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
         if (routeDoc.exists()) {
           const routeData = routeDoc.data();
           setRouteStops((prev) => new Map(prev).set(routeId, routeData.stops || []));
+          setRouteOrigins((prev) => new Map(prev).set(routeId, routeData.origin || routeData.stops[0]));
         }
       } catch (error) {
         console.error('Erro ao carregar stops:', error);
@@ -390,29 +397,139 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
     setStopDetailsOpen(true);
   };
 
-  // Calcula o valor pago por ponto baseado no breakdown do pagamento
-  const calculateStopValue = (payment: DriverPayment, stop: any) => {
-    const { breakdown, routeStats } = payment;
-    const totalStops = routeStats.totalStops;
+  const openEditStopValue = (payment: DriverPayment, stop: any, stopIndex: number, currentValue: number) => {
+    setSelectedPayment(payment);
+    setSelectedStop(stop);
+    setSelectedStopIndex(stopIndex);
+    setSelectedStopNumber(stopIndex + 1);
+    setSelectedStopValue(currentValue);
+    setEditStopValueOpen(true);
+  };
 
-    if (totalStops === 0) return 0;
+  const handleSaveStopValue = async (newValue: number, reason: string) => {
+    if (!selectedPayment || !user) return;
 
-    // Valor base por parada (distribui a base igualmente)
-    const baseValuePerStop = breakdown.basePay / totalStops;
+    try {
+      await updateStopValue(
+        selectedPayment.id,
+        selectedPayment.routeId,
+        selectedStopIndex,
+        newValue,
+        user.uid,
+        reason
+      );
 
-    // Bônus por entrega bem-sucedida
-    let stopBonus = 0;
+      toast({
+        title: 'Valor Atualizado',
+        description: `O valor da Parada ${selectedStopNumber} foi atualizado com sucesso.`,
+      });
+
+      // Força recarregamento dos stops da rota
+      setRouteStops((prev) => {
+        const next = new Map(prev);
+        next.delete(selectedPayment.routeId);
+        return next;
+      });
+      setRouteOrigins((prev) => {
+        const next = new Map(prev);
+        next.delete(selectedPayment.routeId);
+        return next;
+      });
+
+      // Recarrega os stops
+      if (expandedRoutes.has(selectedPayment.routeId)) {
+        setTimeout(async () => {
+          try {
+            const routeDoc = await getDoc(doc(db, 'routes', selectedPayment.routeId));
+            if (routeDoc.exists()) {
+              const routeData = routeDoc.data();
+              setRouteStops((prev) => new Map(prev).set(selectedPayment.routeId, routeData.stops || []));
+              setRouteOrigins((prev) => new Map(prev).set(selectedPayment.routeId, routeData.origin || routeData.stops[0]));
+            }
+          } catch (error) {
+            console.error('Erro ao recarregar stops:', error);
+          }
+        }, 500);
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Não foi possível atualizar o valor.',
+      });
+      throw error; // Re-throw para o diálogo não fechar
+    }
+  };
+
+  /**
+   * Calcula a distância entre dois pontos em km usando a fórmula de Haversine
+   */
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Raio da Terra em km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  /**
+   * Determina o valor de uma parada baseado na cidade e distância da origem
+   */
+  const calculateStopPriceFromLocation = (stop: any, origin?: any): number => {
+    const city = (stop.cidade || stop.city || '').toLowerCase().trim();
+    const neighborhood = (stop.bairro || stop.neighborhood || '').toLowerCase().trim();
+
+    // Cidades de R$ 20
+    const citiesR20 = ['senador canedo', 'canedo', 'trindade', 'goianira'];
+    if (citiesR20.some((c: string) => city.includes(c) || neighborhood.includes(c))) {
+      return 20;
+    }
+
+    // Goiânia e Aparecida de Goiânia - depende da distância da origem
+    const citiesGoianiaArea = ['goiânia', 'goiania', 'aparecida', 'aparecida de goiania', 'aparecida de goiânia'];
+    const isGoianiaArea = citiesGoianiaArea.some((c: string) => city.includes(c) || neighborhood.includes(c));
+
+    if (isGoianiaArea && origin && origin.lat && origin.lng && stop.lat && stop.lng) {
+      const distance = calculateDistance(origin.lat, origin.lng, stop.lat, stop.lng);
+      // Até 7km = R$ 5, acima de 7km = R$ 10
+      return distance <= 7 ? 5 : 10;
+    }
+
+    // Padrão para Goiânia/Aparecida se não conseguir calcular distância
+    if (isGoianiaArea) {
+      return 5;
+    }
+
+    // Padrão para cidades não mapeadas
+    return 10;
+  };
+
+  // Calcula o valor pago por ponto
+  const calculateStopValue = (payment: DriverPayment, stop: any, stopIndex?: number, origin?: any) => {
+    // Se houver valor customizado para esta parada, usa ele
+    if (stopIndex !== undefined && (payment as any).customStopValues?.[stopIndex]) {
+      return (payment as any).customStopValues[stopIndex].value;
+    }
+
+    // Calcula valor baseado na localização
+    const stopPrice = calculateStopPriceFromLocation(stop, origin);
+
+    // Se a entrega foi completada, retorna o valor cheio
     if (stop.deliveryStatus === 'completed') {
-      stopBonus = breakdown.deliveryBonuses / (routeStats.successfulDeliveries || 1);
+      return stopPrice;
     }
 
-    // Bônus por tentativa falhada (se foi ao local)
+    // Se falhou mas foi ao local, retorna 20% do valor
     if (stop.deliveryStatus === 'failed' && stop.wentToLocation) {
-      stopBonus = breakdown.failedAttemptBonuses / (routeStats.failedWithAttempt || 1);
+      return stopPrice * 0.2;
     }
 
-    // Total da parada
-    return baseValuePerStop + stopBonus;
+    // Paradas não completadas não geram pagamento
+    return 0;
   };
 
   return (
@@ -611,7 +728,9 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
                             </TableRow>
                           ) : (
                             (routeStops.get(route.payment.routeId) || []).map((stop, idx) => {
-                              const stopValue = calculateStopValue(route.payment, stop);
+                              const origin = routeOrigins.get(route.payment.routeId);
+                              const stopValue = calculateStopValue(route.payment, stop, idx, origin);
+                              const hasCustomValue = !!(route.payment as any).customStopValues?.[idx];
                               return (
                                 <TableRow key={`${route.payment.routeId}-stop-${idx}`} className="bg-muted/20 hover:bg-muted/30">
                                   <TableCell className="pl-24">
@@ -636,18 +755,37 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
                                     </div>
                                   </TableCell>
                                   <TableCell>
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <div className="text-xs font-medium text-primary cursor-help">
-                                            {formatCurrency(stopValue)}
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          <p className="text-xs">Valor pago nesta parada</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
+                                    <div className="flex items-center gap-2">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <div className="text-xs font-medium text-primary cursor-help">
+                                              {formatCurrency(stopValue)}
+                                            </div>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="text-xs">
+                                              {hasCustomValue ? 'Valor customizado' : 'Valor pago nesta parada'}
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      {route.payment.status !== 'paid' && route.payment.status !== 'cancelled' && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0"
+                                          onClick={() => openEditStopValue(route.payment, stop, idx, stopValue)}
+                                        >
+                                          <Edit className="h-3 w-3 text-muted-foreground hover:text-primary" />
+                                        </Button>
+                                      )}
+                                      {hasCustomValue && (
+                                        <Badge variant="outline" className="text-xs">
+                                          Editado
+                                        </Badge>
+                                      )}
+                                    </div>
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex items-center gap-2">
@@ -711,12 +849,22 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
 
       {/* Dialog de detalhes da parada */}
       {selectedStop && (
-        <StopDetailsDialog
-          stop={selectedStop}
-          stopNumber={selectedStopNumber}
-          open={stopDetailsOpen}
-          onOpenChange={setStopDetailsOpen}
-        />
+        <>
+          <StopDetailsDialog
+            stop={selectedStop}
+            stopNumber={selectedStopNumber}
+            open={stopDetailsOpen}
+            onOpenChange={setStopDetailsOpen}
+          />
+          <EditStopValueDialog
+            open={editStopValueOpen}
+            onOpenChange={setEditStopValueOpen}
+            stop={selectedStop}
+            stopNumber={selectedStopNumber}
+            currentValue={selectedStopValue}
+            onSave={handleSaveStopValue}
+          />
+        </>
       )}
     </div>
   );

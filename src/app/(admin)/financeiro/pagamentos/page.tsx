@@ -115,8 +115,11 @@ export default function PagamentosPage() {
 
     // Filtro de data da rota (prioriza routeCreatedAt)
     if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      // Cria a data no fuso horário local (não UTC)
+      const [year, month, day] = startDate.split('-').map(Number);
+      const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+
+      const beforeFilter = filtered.length;
       filtered = filtered.filter((p) => {
         const routeDate = p.routeCreatedAt || p.routePlannedDate || p.routeCompletedAt;
         const dateObj = routeDate instanceof Date
@@ -124,13 +127,37 @@ export default function PagamentosPage() {
           : 'toDate' in routeDate
             ? routeDate.toDate()
             : new Date(routeDate);
-        return dateObj >= start;
+
+        // Normaliza a data do pagamento para comparação (apenas dia/mês/ano no fuso local)
+        const normalizedDate = new Date(
+          dateObj.getFullYear(),
+          dateObj.getMonth(),
+          dateObj.getDate(),
+          0, 0, 0, 0
+        );
+
+        const passes = normalizedDate >= start;
+
+        // Log apenas os primeiros 3 pagamentos para debug
+        if (filtered.length < 3) {
+          console.log(`Filtro Data Inicial - ${p.routeCode}:`, {
+            routeDate: normalizedDate.toLocaleDateString('pt-BR'),
+            startDate: start.toLocaleDateString('pt-BR'),
+            passes
+          });
+        }
+
+        return passes;
       });
+      console.log(`Após filtro de data inicial (>= ${startDate}): ${beforeFilter} -> ${filtered.length}`);
     }
 
     if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // Cria a data no fuso horário local (não UTC)
+      const [year, month, day] = endDate.split('-').map(Number);
+      const end = new Date(year, month - 1, day, 23, 59, 59, 999);
+
+      const beforeFilter = filtered.length;
       filtered = filtered.filter((p) => {
         const routeDate = p.routeCreatedAt || p.routePlannedDate || p.routeCompletedAt;
         const dateObj = routeDate instanceof Date
@@ -138,8 +165,18 @@ export default function PagamentosPage() {
           : 'toDate' in routeDate
             ? routeDate.toDate()
             : new Date(routeDate);
-        return dateObj <= end;
+
+        // Normaliza a data do pagamento para comparação (apenas dia/mês/ano no fuso local)
+        const normalizedDate = new Date(
+          dateObj.getFullYear(),
+          dateObj.getMonth(),
+          dateObj.getDate(),
+          0, 0, 0, 0
+        );
+
+        return normalizedDate <= end;
       });
+      console.log(`Após filtro de data final (<= ${endDate}): ${beforeFilter} -> ${filtered.length}`);
     }
 
     // Busca por código de rota ou nome do motorista

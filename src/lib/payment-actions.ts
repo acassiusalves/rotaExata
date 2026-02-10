@@ -450,3 +450,118 @@ export async function updatePaymentValue(
     );
   }
 }
+
+/**
+ * Atualiza o valor de uma parada específica no pagamento
+ * @param paymentId - ID do pagamento
+ * @param routeId - ID da rota
+ * @param stopIndex - Índice da parada (0-based)
+ * @param newStopValue - Novo valor da parada
+ * @param userId - ID do usuário que está fazendo a alteração
+ * @param reason - Motivo da alteração
+ */
+export async function updateStopValue(
+  paymentId: string,
+  routeId: string,
+  stopIndex: number,
+  newStopValue: number,
+  userId: string,
+  reason: string
+): Promise<void> {
+  try {
+    const paymentRef = doc(db, 'driverPayments', paymentId);
+    const paymentDoc = await getDoc(paymentRef);
+
+    if (!paymentDoc.exists()) {
+      throw new Error('Pagamento não encontrado');
+    }
+
+    const payment = paymentDoc.data() as DriverPayment;
+
+    if (payment.status === 'paid') {
+      throw new Error(
+        'Pagamento já foi pago. Para ajustar, cancele e crie um novo pagamento.'
+      );
+    }
+
+    if (!reason || reason.trim().length === 0) {
+      throw new Error('Motivo da alteração é obrigatório');
+    }
+
+    // Busca a rota para obter os dados da parada
+    const routeDoc = await getDoc(doc(db, 'routes', routeId));
+    if (!routeDoc.exists()) {
+      throw new Error('Rota não encontrada');
+    }
+
+    const routeData = routeDoc.data();
+    const stops = routeData.stops || [];
+
+    if (stopIndex < 0 || stopIndex >= stops.length) {
+      throw new Error('Índice de parada inválido');
+    }
+
+    const stop = stops[stopIndex];
+
+    // Calcula o valor atual da parada
+    const { breakdown, routeStats } = payment;
+    const totalStops = routeStats.totalStops;
+    const baseValuePerStop = breakdown.basePay / totalStops;
+
+    let currentStopValue = baseValuePerStop;
+    if (stop.deliveryStatus === 'completed') {
+      currentStopValue += breakdown.deliveryBonuses / (routeStats.successfulDeliveries || 1);
+    } else if (stop.deliveryStatus === 'failed' && stop.wentToLocation) {
+      currentStopValue += breakdown.failedAttemptBonuses / (routeStats.failedWithAttempt || 1);
+    }
+
+    const difference = newStopValue - currentStopValue;
+
+    // Atualiza o valor total do pagamento
+    const newTotalEarnings = payment.totalEarnings + difference;
+
+    // Cria nota de alteração
+    const changeNote = `[${new Date().toLocaleString('pt-BR')}] Valor da Parada ${stopIndex + 1} alterado por ${userId}\n` +
+      `Cliente: ${stop.customerName || 'Não especificado'}\n` +
+      `Valor anterior: R$ ${currentStopValue.toFixed(2)}\n` +
+      `Valor novo: R$ ${newStopValue.toFixed(2)}\n` +
+      `Diferença: ${difference > 0 ? '+' : ''}R$ ${difference.toFixed(2)}\n` +
+      `Total do pagamento atualizado: R$ ${newTotalEarnings.toFixed(2)}\n` +
+      `Motivo: ${reason.trim()}`;
+
+    const updatedNotes = payment.notes
+      ? `${payment.notes}\n\n${changeNote}`
+      : changeNote;
+
+    // Armazena a alteração customizada da parada em um mapa
+    const customStopValues = (payment as any).customStopValues || {};
+    customStopValues[stopIndex] = {
+      value: newStopValue,
+      originalValue: currentStopValue,
+      updatedBy: userId,
+      updatedAt: Timestamp.now(),
+      reason: reason.trim(),
+    };
+
+    const updateData = {
+      totalEarnings: newTotalEarnings,
+      notes: updatedNotes,
+      customStopValues,
+      manuallyEdited: true,
+      manualEditBy: userId,
+      manualEditAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    };
+
+    // Remove undefined antes de salvar
+    const cleanData = removeUndefined(updateData);
+
+    await setDoc(paymentRef, cleanData, { merge: true });
+  } catch (error) {
+    throw new Error(
+      `Erro ao atualizar valor da parada: ${
+        error instanceof Error ? error.message : 'Erro desconhecido'
+      }`
+    );
+  }
+}
