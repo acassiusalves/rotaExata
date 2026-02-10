@@ -190,14 +190,12 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
       if (!window._dateLogged) {
         console.log('🔍 DADOS DE DATA DO PRIMEIRO PAGAMENTO:', {
           routeCode: payment.routeCode,
-          routeCompletedAt: payment.routeCompletedAt,
           routePlannedDate: payment.routePlannedDate,
-          routeCreatedAt: payment.routeCreatedAt,
+          routeCompletedAt: payment.routeCompletedAt,
           createdAt: payment.createdAt,
           types: {
-            routeCompletedAt: typeof payment.routeCompletedAt,
             routePlannedDate: typeof payment.routePlannedDate,
-            routeCreatedAt: typeof payment.routeCreatedAt,
+            routeCompletedAt: typeof payment.routeCompletedAt,
             createdAt: typeof payment.createdAt
           }
         });
@@ -205,10 +203,10 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
       }
 
       // Converte a data da rota para Date
-      // Prioridade: routeCreatedAt (data de criação da rota) > routePlannedDate > routeCompletedAt > createdAt (data de criação do pagamento)
+      // Usa routePlannedDate (data planejada da rota) - igual à página de relatórios
       const completedDate: Date =
-        convertToDate(payment.routeCreatedAt) ||
         convertToDate(payment.routePlannedDate) ||
+        convertToDate(payment.routeCreatedAt) ||
         convertToDate(payment.routeCompletedAt) ||
         convertToDate(payment.createdAt) ||
         new Date(0);
@@ -637,7 +635,6 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
                         </TableCell>
                         <TableCell className="text-sm">
                           {formatDate(
-                            route.payment.routeCreatedAt ||
                             route.payment.routePlannedDate ||
                             route.payment.routeCompletedAt ||
                             route.payment.createdAt

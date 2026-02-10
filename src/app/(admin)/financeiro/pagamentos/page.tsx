@@ -60,10 +60,10 @@ export default function PagamentosPage() {
           paymentsData.push({ id: doc.id, ...doc.data() } as DriverPayment);
         });
 
-        // Ordena por routeCreatedAt (data da rota) quando disponível
+        // Ordena por routePlannedDate (data planejada da rota) - igual à página de relatórios
         paymentsData.sort((a, b) => {
-          const dateA = a.routeCreatedAt || a.routePlannedDate || a.routeCompletedAt;
-          const dateB = b.routeCreatedAt || b.routePlannedDate || b.routeCompletedAt;
+          const dateA = a.routePlannedDate || a.routeCompletedAt || a.createdAt;
+          const dateB = b.routePlannedDate || b.routeCompletedAt || b.createdAt;
 
           const timeA = dateA instanceof Timestamp ? dateA.toMillis() : new Date(dateA).getTime();
           const timeB = dateB instanceof Timestamp ? dateB.toMillis() : new Date(dateB).getTime();
@@ -113,7 +113,7 @@ export default function PagamentosPage() {
       console.log(`Após filtro de motorista (${driverFilter}):`, filtered.length);
     }
 
-    // Filtro de data da rota (prioriza routeCreatedAt)
+    // Filtro de data da rota (usa routePlannedDate - data planejada)
     if (startDate) {
       // Cria a data no fuso horário local (não UTC)
       const [year, month, day] = startDate.split('-').map(Number);
@@ -121,7 +121,7 @@ export default function PagamentosPage() {
 
       const beforeFilter = filtered.length;
       filtered = filtered.filter((p) => {
-        const routeDate = p.routeCreatedAt || p.routePlannedDate || p.routeCompletedAt;
+        const routeDate = p.routePlannedDate || p.routeCompletedAt || p.createdAt;
         const dateObj = routeDate instanceof Date
           ? routeDate
           : 'toDate' in routeDate
@@ -159,7 +159,7 @@ export default function PagamentosPage() {
 
       const beforeFilter = filtered.length;
       filtered = filtered.filter((p) => {
-        const routeDate = p.routeCreatedAt || p.routePlannedDate || p.routeCompletedAt;
+        const routeDate = p.routePlannedDate || p.routeCompletedAt || p.createdAt;
         const dateObj = routeDate instanceof Date
           ? routeDate
           : 'toDate' in routeDate
@@ -317,8 +317,8 @@ export default function PagamentosPage() {
   // Exporta para CSV
   const handleExport = () => {
     const csvData = filteredPayments.map((p) => {
-      // Prioriza routeCreatedAt (data de criação da rota)
-      const dataRota = p.routeCreatedAt || p.routePlannedDate || p.routeCompletedAt;
+      // Usa routePlannedDate (data planejada da rota) - igual à página de relatórios
+      const dataRota = p.routePlannedDate || p.routeCompletedAt || p.createdAt;
       const dataFormatada = dataRota instanceof Timestamp
         ? dataRota.toDate().toLocaleDateString('pt-BR')
         : new Date(dataRota).toLocaleDateString('pt-BR');
