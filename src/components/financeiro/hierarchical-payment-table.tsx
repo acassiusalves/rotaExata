@@ -175,7 +175,17 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
 
         try {
           if (date instanceof Date) return date;
-          if (typeof date === 'object' && 'toDate' in date) return date.toDate();
+
+          // Tenta chamar toDate se existir (Firestore Timestamp)
+          if (typeof date === 'object' && 'toDate' in date && typeof date.toDate === 'function') {
+            return date.toDate();
+          }
+
+          // Se é um objeto com seconds (Timestamp serializado)
+          if (typeof date === 'object' && 'seconds' in date && typeof date.seconds === 'number') {
+            return new Date(date.seconds * 1000);
+          }
+
           if (typeof date === 'string' || typeof date === 'number') {
             const d = new Date(date);
             return isNaN(d.getTime()) ? null : d;
@@ -197,6 +207,11 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
             routePlannedDate: typeof payment.routePlannedDate,
             routeCompletedAt: typeof payment.routeCompletedAt,
             createdAt: typeof payment.createdAt
+          },
+          hasToDateMethod: {
+            routePlannedDate: payment.routePlannedDate && typeof payment.routePlannedDate === 'object' && 'toDate' in payment.routePlannedDate,
+            routeCompletedAt: payment.routeCompletedAt && typeof payment.routeCompletedAt === 'object' && 'toDate' in payment.routeCompletedAt,
+            createdAt: payment.createdAt && typeof payment.createdAt === 'object' && 'toDate' in payment.createdAt
           }
         });
         window._dateLogged = true;
@@ -210,6 +225,16 @@ export function HierarchicalPaymentTable({ payments }: PaymentTableProps) {
         convertToDate(payment.routeCompletedAt) ||
         convertToDate(payment.createdAt) ||
         new Date(0);
+
+      // Log adicional para debug da conversão de data
+      if (!window._dateLogged) {
+        console.log('📅 DATA CONVERTIDA:', {
+          routeCode: payment.routeCode,
+          completedDate: completedDate,
+          completedDateString: completedDate.toLocaleDateString('pt-BR'),
+          timestamp: completedDate.getTime()
+        });
+      }
 
       if (!groups.has(serviceId)) {
         groups.set(serviceId, {

@@ -355,16 +355,21 @@ export async function fixPaymentsWithoutDriver(): Promise<number> {
 
       const routeData = routeDoc.data();
 
-      if (!routeData.driverInfo || !routeData.driverInfo.id || !routeData.driverInfo.name) {
-        console.warn(`Rota ${payment.routeId} sem driverInfo`);
+      // Pega driverId da rota (campo driverId ou driverInfo.id)
+      const driverId = routeData.driverId || routeData.driverInfo?.id;
+      const driverName = routeData.driverInfo?.name;
+
+      if (!driverId || !driverName) {
+        console.warn(`Rota ${payment.routeId} sem informações de motorista completas (driverId: ${driverId}, driverName: ${driverName})`);
         continue;
       }
 
       // Atualiza o pagamento com dados do motorista e data de criação da rota
       const updateData = {
-        driverId: routeData.driverInfo.id,
-        driverName: routeData.driverInfo.name,
+        driverId: driverId,
+        driverName: driverName,
         routeCreatedAt: routeData.createdAt, // Adiciona data de criação da rota se não existir
+        routePlannedDate: routeData.plannedDate, // Adiciona data planejada da rota
       };
 
       const cleanData = removeUndefined(updateData);

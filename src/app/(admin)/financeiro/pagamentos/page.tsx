@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { db } from '@/lib/firebase/client';
-import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
@@ -47,10 +47,9 @@ export default function PagamentosPage() {
 
   // Carrega pagamentos em tempo real
   React.useEffect(() => {
-    const paymentsQuery = query(
-      collection(db, 'driverPayments'),
-      orderBy('routeCompletedAt', 'desc')
-    );
+    // Não usa orderBy do Firestore para evitar problemas com índices
+    // A ordenação é feita no cliente após carregar os dados
+    const paymentsQuery = collection(db, 'driverPayments');
 
     const unsubscribe = onSnapshot(
       paymentsQuery,
@@ -119,14 +118,25 @@ export default function PagamentosPage() {
       const [year, month, day] = startDate.split('-').map(Number);
       const start = new Date(year, month - 1, day, 0, 0, 0, 0);
 
+      console.log(`📅 Filtro Data Inicial: ${start.toLocaleDateString('pt-BR')} (${startDate})`);
+
       const beforeFilter = filtered.length;
+      let debugCount = 0;
       filtered = filtered.filter((p) => {
         const routeDate = p.routePlannedDate || p.routeCompletedAt || p.createdAt;
+
+        if (!routeDate) {
+          console.warn(`⚠️ Pagamento ${p.routeCode} sem data!`);
+          return false;
+        }
+
         const dateObj = routeDate instanceof Date
           ? routeDate
-          : 'toDate' in routeDate
+          : 'toDate' in routeDate && typeof routeDate.toDate === 'function'
             ? routeDate.toDate()
-            : new Date(routeDate);
+            : typeof routeDate === 'object' && 'seconds' in routeDate && typeof routeDate.seconds === 'number'
+              ? new Date((routeDate as any).seconds * 1000)
+              : new Date(routeDate as any);
 
         // Normaliza a data do pagamento para comparação (apenas dia/mês/ano no fuso local)
         const normalizedDate = new Date(
@@ -138,18 +148,22 @@ export default function PagamentosPage() {
 
         const passes = normalizedDate >= start;
 
-        // Log apenas os primeiros 3 pagamentos para debug
-        if (filtered.length < 3) {
-          console.log(`Filtro Data Inicial - ${p.routeCode}:`, {
-            routeDate: normalizedDate.toLocaleDateString('pt-BR'),
-            startDate: start.toLocaleDateString('pt-BR'),
+        // Log dos primeiros 5 itens e dos que passam no filtro
+        if (debugCount < 5 || passes) {
+          console.log(`${passes ? '✅' : '❌'} ${p.routeCode}:`, {
+            routePlannedDate: p.routePlannedDate ? 'EXISTS' : 'NULL',
+            dateObj: dateObj.toLocaleDateString('pt-BR'),
+            normalized: normalizedDate.toLocaleDateString('pt-BR'),
+            start: start.toLocaleDateString('pt-BR'),
+            comparison: `${normalizedDate.getTime()} >= ${start.getTime()}`,
             passes
           });
+          debugCount++;
         }
 
         return passes;
       });
-      console.log(`Após filtro de data inicial (>= ${startDate}): ${beforeFilter} -> ${filtered.length}`);
+      console.log(`📊 Após filtro de data inicial (>= ${startDate}): ${beforeFilter} -> ${filtered.length}`);
     }
 
     if (endDate) {
@@ -157,26 +171,50 @@ export default function PagamentosPage() {
       const [year, month, day] = endDate.split('-').map(Number);
       const end = new Date(year, month - 1, day, 23, 59, 59, 999);
 
+      console.log(`📅 Filtro Data Final: ${end.toLocaleDateString('pt-BR')} (${endDate})`);
+
       const beforeFilter = filtered.length;
+      let debugCount = 0;
       filtered = filtered.filter((p) => {
         const routeDate = p.routePlannedDate || p.routeCompletedAt || p.createdAt;
+
+        if (!routeDate) {
+          return false;
+        }
+
         const dateObj = routeDate instanceof Date
           ? routeDate
-          : 'toDate' in routeDate
+          : 'toDate' in routeDate && typeof routeDate.toDate === 'function'
             ? routeDate.toDate()
-            : new Date(routeDate);
+            : typeof routeDate === 'object' && 'seconds' in routeDate && typeof routeDate.seconds === 'number'
+              ? new Date((routeDate as any).seconds * 1000)
+              : new Date(routeDate as any);
 
         // Normaliza a data do pagamento para comparação (apenas dia/mês/ano no fuso local)
         const normalizedDate = new Date(
           dateObj.getFullYear(),
           dateObj.getMonth(),
           dateObj.getDate(),
-          0, 0, 0, 0
+          23, 59, 59, 999
         );
 
-        return normalizedDate <= end;
+        const passes = normalizedDate <= end;
+
+        // Log dos primeiros 5 itens e dos que passam no filtro
+        if (debugCount < 5 || passes) {
+          console.log(`${passes ? '✅' : '❌'} ${p.routeCode}:`, {
+            dateObj: dateObj.toLocaleDateString('pt-BR'),
+            normalized: normalizedDate.toLocaleDateString('pt-BR'),
+            end: end.toLocaleDateString('pt-BR'),
+            comparison: `${normalizedDate.getTime()} <= ${end.getTime()}`,
+            passes
+          });
+          debugCount++;
+        }
+
+        return passes;
       });
-      console.log(`Após filtro de data final (<= ${endDate}): ${beforeFilter} -> ${filtered.length}`);
+      console.log(`📊 Após filtro de data final (<= ${endDate}): ${beforeFilter} -> ${filtered.length}`);
     }
 
     // Busca por código de rota ou nome do motorista
