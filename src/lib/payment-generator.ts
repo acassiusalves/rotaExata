@@ -131,6 +131,7 @@ export async function generatePendingPayments(
           driverName: routeData.driverInfo.name,
           routeCompletedAt: routeData.completedAt,
           routePlannedDate: routeData.plannedDate || routeData.completedAt,
+          routeCreatedAt: routeData.createdAt, // Data de criação da rota
           calculatedAt: Timestamp.now(),
           breakdown: calculation.breakdown,
           routeStats: calculation.routeStats,
@@ -255,6 +256,7 @@ export async function generatePaymentForRoute(
       driverName: routeData.driverInfo.name,
       routeCompletedAt: routeData.completedAt,
       routePlannedDate: routeData.plannedDate || routeData.completedAt,
+      routeCreatedAt: routeData.createdAt, // Data de criação da rota
       calculatedAt: Timestamp.now(),
       breakdown: calculation.breakdown,
       routeStats: calculation.routeStats,

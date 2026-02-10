@@ -486,6 +486,16 @@ service cloud.firestore {
       allow delete: if isAppAdmin();
     }
 
+    // ===== LUNNA SERVICES COLLECTION (Serviços Lunna para tabela hierárquica) =====
+    match /lunnaServices/{serviceId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
     // ===== IMPORT JOBS COLLECTION (Importação em segundo plano) =====
     match /import_jobs/{jobId} {
       // Qualquer usuário autenticado pode ler e listar jobs
@@ -505,20 +515,21 @@ service cloud.firestore {
 
     // ===== EARNINGS RULES COLLECTION (Regras de Ganhos) =====
     match /earningsRules/{ruleId} {
-      // Admin e Socio podem ler e escrever
-      allow read, write: if isAuthed() &&
+      // Qualquer usuário autenticado pode ler
+      allow read, list, get: if isAuthed();
+      // Admin e Socio podem escrever
+      allow write, create, update, delete: if isAuthed() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
-      // Gestor pode apenas ler
-      allow read: if isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'gestor';
     }
 
     // ===== DRIVER PAYMENTS COLLECTION (Pagamentos aos Motoristas) =====
     match /driverPayments/{paymentId} {
-      // Admin e Socio podem fazer tudo
-      allow read, create, delete, list: if isAuthed() &&
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list, get: if isAuthed();
+
+      // Admin e Socio podem criar e deletar
+      allow create, delete: if isAuthed() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
 
@@ -526,11 +537,6 @@ service cloud.firestore {
       allow update: if isAuthed() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
-
-      // Gestor pode ler pagamentos
-      allow read, list: if isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'gestor';
     }
   }
 }

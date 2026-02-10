@@ -458,6 +458,7 @@ export type DriverPayment = {
   // Datas
   routeCompletedAt: Timestamp | Date;
   routePlannedDate: Timestamp | Date;
+  routeCreatedAt?: Timestamp | Date; // Data de criação da rota
   calculatedAt: Timestamp | Date;
   paidAt?: Timestamp | Date;
 

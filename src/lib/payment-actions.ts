@@ -259,6 +259,7 @@ export async function recalculatePayment(
     // Atualiza pagamento
     const updatedPayment: DriverPayment = {
       ...payment,
+      routeCreatedAt: routeData.createdAt || payment.routeCreatedAt, // Preserva ou atualiza data de criação da rota
       breakdown: calculation.breakdown,
       routeStats: calculation.routeStats,
       totalEarnings: calculation.totalEarnings,
@@ -318,6 +319,63 @@ export async function addPaymentNote(
   } catch (error) {
     throw new Error(
       `Erro ao adicionar nota ao pagamento: ${
+        error instanceof Error ? error.message : 'Erro desconhecido'
+      }`
+    );
+  }
+}
+
+/**
+ * Corrige pagamentos sem driverId/driverName buscando da rota
+ * @returns Número de pagamentos corrigidos
+ */
+export async function fixPaymentsWithoutDriver(): Promise<number> {
+  try {
+    const { collection, query, getDocs, doc, getDoc, setDoc } = await import('firebase/firestore');
+    const { db } = await import('./firebase/client');
+
+    const paymentsSnapshot = await getDocs(collection(db, 'driverPayments'));
+    let fixed = 0;
+
+    for (const paymentDoc of paymentsSnapshot.docs) {
+      const payment = paymentDoc.data() as DriverPayment;
+
+      // Se já tem driverId e driverName, pula
+      if (payment.driverId && payment.driverName) {
+        continue;
+      }
+
+      // Busca a rota para pegar os dados do motorista
+      const routeDoc = await getDoc(doc(db, 'routes', payment.routeId));
+
+      if (!routeDoc.exists()) {
+        console.warn(`Rota não encontrada para pagamento ${payment.id}`);
+        continue;
+      }
+
+      const routeData = routeDoc.data();
+
+      if (!routeData.driverInfo || !routeData.driverInfo.id || !routeData.driverInfo.name) {
+        console.warn(`Rota ${payment.routeId} sem driverInfo`);
+        continue;
+      }
+
+      // Atualiza o pagamento com dados do motorista e data de criação da rota
+      const updateData = {
+        driverId: routeData.driverInfo.id,
+        driverName: routeData.driverInfo.name,
+        routeCreatedAt: routeData.createdAt, // Adiciona data de criação da rota se não existir
+      };
+
+      const cleanData = removeUndefined(updateData);
+      await setDoc(doc(db, 'driverPayments', payment.id), cleanData, { merge: true });
+      fixed++;
+    }
+
+    return fixed;
+  } catch (error) {
+    throw new Error(
+      `Erro ao corrigir pagamentos: ${
         error instanceof Error ? error.message : 'Erro desconhecido'
       }`
     );
