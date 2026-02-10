@@ -110,5 +110,35 @@ service cloud.firestore {
     match /services/{serviceId} {
       allow read, create, update, delete, list: if isAppAdmin();
     }
+
+    // RULES FOR EARNINGS RULES (Regras de Ganhos)
+    match /earningsRules/{ruleId} {
+      // Admin e Socio podem ler e escrever
+      allow read, write: if isAuthed() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
+      // Gestor pode apenas ler
+      allow read: if isAuthed() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'gestor';
+    }
+
+    // RULES FOR DRIVER PAYMENTS (Pagamentos aos Motoristas)
+    match /driverPayments/{paymentId} {
+      // Admin e Socio podem fazer tudo
+      allow read, create, delete, list: if isAuthed() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
+
+      // Admin, Socio e Gestor podem atualizar (para aprovar e marcar como pago)
+      allow update: if isAuthed() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
+
+      // Gestor pode ler pagamentos
+      allow read, list: if isAuthed() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'gestor';
+    }
   }
 }

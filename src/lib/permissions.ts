@@ -53,6 +53,14 @@ export const permissionGroups = [
     ],
   },
   {
+    name: 'Financeiro',
+    pages: [
+      { path: '/financeiro', name: 'Financeiro', description: 'Menu principal do financeiro' },
+      { path: '/financeiro/regras', name: 'Regras de Ganhos', description: 'Configurar regras de cálculo de ganhos' },
+      { path: '/financeiro/pagamentos', name: 'Pagamentos', description: 'Gerenciar pagamentos aos motoristas' },
+    ],
+  },
+  {
     name: 'Sistema',
     pages: [
       { path: '/notifications', name: 'Notificações', description: 'Central de notificações' },
@@ -87,6 +95,11 @@ export const defaultPagePermissions: Record<string, RoleKey[]> = {
   '/reports': ['admin', 'socio', 'gestor'],
   '/reports/general': ['admin', 'socio', 'gestor'],
   '/reports/numbers': ['admin', 'socio', 'gestor'],
+
+  // Financeiro
+  '/financeiro': ['admin', 'socio'],
+  '/financeiro/regras': ['admin', 'socio'],
+  '/financeiro/pagamentos': ['admin', 'socio', 'gestor'],
 
   // Sistema
   '/notifications': ['admin', 'socio', 'gestor'],

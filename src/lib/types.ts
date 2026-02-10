@@ -349,3 +349,122 @@ export type LunnaClient = {
   cidade: string;
   cep: string;
 };
+
+// ============================================
+// TIPOS PARA SISTEMA FINANCEIRO
+// ============================================
+
+export type PaymentStatus = 'pending' | 'approved' | 'paid' | 'cancelled';
+
+export type PaymentMethod = 'pix' | 'bank_transfer' | 'cash' | 'other';
+
+export type PaymentBreakdown = {
+  basePay: number;
+  distanceEarnings: number;
+  deliveryBonuses: number;
+  failedAttemptBonuses: number;
+  timeBonusMultiplier: number;
+  timeBonusAmount: number;
+  stopTierBonus: number;
+  lunnaBonus: number;
+  subtotal: number;
+};
+
+export type RouteStats = {
+  distanceKm: number;
+  totalStops: number;
+  successfulDeliveries: number;
+  failedDeliveries: number;
+  failedWithAttempt: number;
+  lunnaOrderCount: number;
+  duration: string;
+};
+
+export type StopTier = {
+  minStops: number;
+  maxStops: number;
+  bonus: number;
+};
+
+export type TimeBonusConfig = {
+  enabled: boolean;
+  multiplier: number;
+};
+
+export type EarningsRules = {
+  id: string;
+  version: number;
+
+  // Compensação base
+  basePayPerRoute: number;
+  pricePerKm: number;
+
+  // Bônus por entrega
+  bonusPerDelivery: number;
+  bonusPerFailedAttempt: number;
+
+  // Multiplicadores de horário
+  bonuses: {
+    earlyMorning: TimeBonusConfig;  // 6h-8h
+    lateNight: TimeBonusConfig;     // 20h-23h
+    weekend: TimeBonusConfig;       // Sábado/Domingo
+  };
+
+  // Faixas de volume de entregas
+  stopTiers: StopTier[];
+
+  // Bônus especiais
+  lunnaOrderBonus: number;
+
+  // Status e metadados
+  active: boolean;
+  notes: string;
+  createdAt: Timestamp | Date;
+  updatedAt: Timestamp | Date;
+  updatedBy: string;
+};
+
+export type DriverPayment = {
+  id: string;
+
+  // Referências
+  routeId: string;
+  routeCode: string;
+  driverId: string;
+  driverName: string;
+
+  // Datas
+  routeCompletedAt: Timestamp | Date;
+  routePlannedDate: Timestamp | Date;
+  calculatedAt: Timestamp | Date;
+  paidAt?: Timestamp | Date;
+
+  // Detalhamento de ganhos
+  breakdown: PaymentBreakdown;
+
+  // Estatísticas da rota (desnormalizado)
+  routeStats: RouteStats;
+
+  // Total de ganhos
+  totalEarnings: number;
+
+  // Status do pagamento
+  status: PaymentStatus;
+  paymentMethod?: PaymentMethod;
+  paymentReference?: string;
+
+  // Versão das regras usada (para auditoria)
+  rulesVersion: number;
+
+  // Notas e auditoria
+  notes?: string;
+  approvedBy?: string;
+  approvedAt?: Timestamp | Date;
+  paidBy?: string;
+  cancelledBy?: string;
+  cancelledAt?: Timestamp | Date;
+  cancellationReason?: string;
+
+  createdAt: Timestamp | Date;
+  updatedAt: Timestamp | Date;
+};
