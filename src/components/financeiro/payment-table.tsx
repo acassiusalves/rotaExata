@@ -35,7 +35,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { MoreHorizontal, CheckCircle, XCircle, Eye, ChevronsUpDown } from 'lucide-react';
+import { MoreHorizontal, CheckCircle, XCircle, Eye, ChevronsUpDown, Edit } from 'lucide-react';
 import type { DriverPayment, PaymentStatus, Timestamp } from '@/lib/types';
 import { formatCurrency } from '@/lib/earnings-calculator';
 import { useToast } from '@/hooks/use-toast';
@@ -44,6 +44,7 @@ import { approvePayment, approvePaymentsBatch } from '@/lib/payment-actions';
 import { PaymentDetailsDialog } from './payment-details-dialog';
 import { MarkAsPaidDialog } from './mark-as-paid-dialog';
 import { CancelPaymentDialog } from './cancel-payment-dialog';
+import { EditPaymentDialog } from './edit-payment-dialog';
 
 interface PaymentTableProps {
   payments: DriverPayment[];
@@ -63,6 +64,7 @@ export function PaymentTable({ payments }: PaymentTableProps) {
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [payDialogOpen, setPayDialogOpen] = React.useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = React.useState(false);
+  const [editDialogOpen, setEditDialogOpen] = React.useState(false);
   const [isApproving, setIsApproving] = React.useState(false);
 
   const { toast } = useToast();
@@ -230,37 +232,54 @@ export function PaymentTable({ payments }: PaymentTableProps) {
         </Button>
       ),
       cell: ({ row }) => (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="font-bold text-primary cursor-help">
-                {formatCurrency(row.original.totalEarnings)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Base:</span>
-                  <span>{formatCurrency(row.original.breakdown.basePay)}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Distância:</span>
-                  <span>{formatCurrency(row.original.breakdown.distanceEarnings)}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Entregas:</span>
-                  <span>{formatCurrency(row.original.breakdown.deliveryBonuses)}</span>
-                </div>
-                {row.original.breakdown.timeBonusAmount > 0 && (
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Bônus Horário:</span>
-                    <span>{formatCurrency(row.original.breakdown.timeBonusAmount)}</span>
+        <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="font-bold text-primary cursor-help">
+                  {formatCurrency(row.original.totalEarnings)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className="space-y-1 text-sm">
+                  <div key="base" className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Base:</span>
+                    <span>{formatCurrency(row.original.breakdown.basePay)}</span>
                   </div>
-                )}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+                  <div key="distance" className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Distância:</span>
+                    <span>{formatCurrency(row.original.breakdown.distanceEarnings)}</span>
+                  </div>
+                  <div key="deliveries" className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Entregas:</span>
+                    <span>{formatCurrency(row.original.breakdown.deliveryBonuses)}</span>
+                  </div>
+                  {row.original.breakdown.timeBonusAmount > 0 && (
+                    <div key="timeBonus" className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Bônus Horário:</span>
+                      <span>{formatCurrency(row.original.breakdown.timeBonusAmount)}</span>
+                    </div>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {row.original.manuallyEdited && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="text-xs">
+                    <Edit className="h-3 w-3 mr-1" />
+                    Manual
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">Valor editado manualmente</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
       ),
     },
     {
@@ -301,6 +320,21 @@ export function PaymentTable({ payments }: PaymentTableProps) {
                 <Eye className="mr-2 h-4 w-4" />
                 Ver Detalhes
               </DropdownMenuItem>
+
+              {(payment.status === 'pending' || payment.status === 'approved') && (
+                <>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSelectedPayment(payment);
+                      setEditDialogOpen(true);
+                    }}
+                  >
+                    <Edit className="mr-2 h-4 w-4" />
+                    Editar Valor
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
 
               {payment.status === 'pending' && (
                 <>
@@ -453,6 +487,11 @@ export function PaymentTable({ payments }: PaymentTableProps) {
             payment={selectedPayment}
             open={detailsOpen}
             onOpenChange={setDetailsOpen}
+          />
+          <EditPaymentDialog
+            payment={selectedPayment}
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
           />
           <MarkAsPaidDialog
             payment={selectedPayment}

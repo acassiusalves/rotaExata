@@ -18,6 +18,22 @@ export interface GeneratePaymentsResult {
   errors: Array<{ routeId: string; error: string }>;
 }
 
+// Remove campos undefined de um objeto recursivamente
+function removeUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefined);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.entries(obj).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = removeUndefined(value);
+      }
+      return acc;
+    }, {} as any);
+  }
+  return obj;
+}
+
 /**
  * Gera pagamentos pendentes para rotas completadas que ainda não têm pagamento
  * @param startDate - Data inicial para filtrar rotas (opcional)
@@ -132,7 +148,10 @@ export async function generatePendingPayments(
           id: paymentRef.id,
         };
 
-        await setDoc(paymentRef, paymentWithId);
+        // Remove campos undefined antes de salvar
+        const cleanPayment = removeUndefined(paymentWithId);
+
+        await setDoc(paymentRef, cleanPayment);
         newPayments.push(paymentWithId);
       } catch (error) {
         errors.push({
@@ -246,7 +265,10 @@ export async function generatePaymentForRoute(
       updatedAt: Timestamp.now(),
     };
 
-    await setDoc(paymentRef, payment);
+    // Remove campos undefined antes de salvar
+    const cleanPayment = removeUndefined(payment);
+
+    await setDoc(paymentRef, cleanPayment);
 
     return payment;
   } catch (error) {

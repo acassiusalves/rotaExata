@@ -487,6 +487,11 @@ export type DriverPayment = {
   cancelledAt?: Timestamp | Date;
   cancellationReason?: string;
 
+  // Edição manual
+  manuallyEdited?: boolean;
+  manualEditBy?: string;
+  manualEditAt?: Timestamp | Date;
+
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
 };

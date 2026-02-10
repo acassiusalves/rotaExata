@@ -73,6 +73,22 @@ const rulesSchema = z.object({
 
 type RulesFormValues = z.infer<typeof rulesSchema>;
 
+// Remove campos undefined de um objeto recursivamente
+function removeUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefined);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.entries(obj).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = removeUndefined(value);
+      }
+      return acc;
+    }, {} as any);
+  }
+  return obj;
+}
+
 export default function RegrasPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -101,7 +117,6 @@ export default function RegrasPage() {
           price: 10,
           description: '',
           cities: 'Goiânia, Aparecida de Goiânia',
-          maxDistanceKm: undefined,
           excludeLocations: '',
         },
         {
@@ -110,7 +125,6 @@ export default function RegrasPage() {
           price: 20,
           description: '',
           cities: 'Senador Canedo, Trindade, Goianira',
-          maxDistanceKm: undefined,
           excludeLocations: '',
         },
       ],
@@ -201,6 +215,28 @@ export default function RegrasPage() {
     const subscription = form.watch(() => {
       const values = form.getValues();
       try {
+        // Converte zonas para preview (remove undefined)
+        const zonesForPreview = values.pricingZones?.map(z => {
+          const zone: any = {
+            id: z.id,
+            name: z.name,
+            price: z.price,
+          };
+          if (z.description) zone.description = z.description;
+          if (z.cities) {
+            const cities = z.cities.split(',').map(c => c.trim()).filter(Boolean);
+            if (cities.length > 0) zone.cities = cities;
+          }
+          if (z.maxDistanceKm !== undefined && z.maxDistanceKm !== null && z.maxDistanceKm !== '') {
+            zone.maxDistanceKm = z.maxDistanceKm;
+          }
+          if (z.excludeLocations) {
+            const excludes = z.excludeLocations.split(',').map(l => l.trim()).filter(Boolean);
+            if (excludes.length > 0) zone.excludeLocations = excludes;
+          }
+          return zone;
+        });
+
         const rules: EarningsRules = {
           id: 'active',
           version: currentVersion,
@@ -209,15 +245,7 @@ export default function RegrasPage() {
           updatedAt: new Date(),
           updatedBy: user?.uid || '',
           pricingMode: values.pricingMode,
-          pricingZones: values.pricingZones?.map(z => ({
-            id: z.id,
-            name: z.name,
-            price: z.price,
-            description: z.description,
-            cities: z.cities?.split(',').map(c => c.trim()).filter(Boolean),
-            maxDistanceKm: z.maxDistanceKm,
-            excludeLocations: z.excludeLocations?.split(',').map(l => l.trim()).filter(Boolean),
-          })),
+          pricingZones: zonesForPreview,
           basePayPerRoute: values.basePayPerRoute,
           pricePerKm: values.pricePerKm,
           bonusPerDelivery: values.bonusPerDelivery,
@@ -258,22 +286,32 @@ export default function RegrasPage() {
     try {
       const rulesRef = doc(db, 'earningsRules', 'active');
 
-      // Converte zonas para formato do Firestore
-      const zonesForDb = data.pricingZones?.map(z => ({
-        id: z.id,
-        name: z.name,
-        price: z.price,
-        description: z.description,
-        cities: z.cities?.split(',').map(c => c.trim()).filter(Boolean),
-        maxDistanceKm: z.maxDistanceKm,
-        excludeLocations: z.excludeLocations?.split(',').map(l => l.trim()).filter(Boolean),
-      }));
+      // Converte zonas para formato do Firestore (remove campos undefined)
+      const zonesForDb = data.pricingZones?.map(z => {
+        const zone: any = {
+          id: z.id,
+          name: z.name,
+          price: z.price,
+        };
+        if (z.description) zone.description = z.description;
+        if (z.cities) {
+          const cities = z.cities.split(',').map(c => c.trim()).filter(Boolean);
+          if (cities.length > 0) zone.cities = cities;
+        }
+        if (z.maxDistanceKm !== undefined && z.maxDistanceKm !== null && z.maxDistanceKm !== '') {
+          zone.maxDistanceKm = z.maxDistanceKm;
+        }
+        if (z.excludeLocations) {
+          const excludes = z.excludeLocations.split(',').map(l => l.trim()).filter(Boolean);
+          if (excludes.length > 0) zone.excludeLocations = excludes;
+        }
+        return zone;
+      });
 
-      const newRules: EarningsRules = {
+      const newRules: any = {
         id: 'active',
         version: currentVersion + 1,
         pricingMode: data.pricingMode,
-        pricingZones: zonesForDb,
         basePayPerRoute: data.basePayPerRoute,
         pricePerKm: data.pricePerKm,
         bonusPerDelivery: data.bonusPerDelivery,
@@ -282,13 +320,23 @@ export default function RegrasPage() {
         stopTiers: data.stopTiers,
         lunnaOrderBonus: data.lunnaOrderBonus,
         active: true,
-        notes: data.notes || '',
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         updatedBy: user.uid,
       };
 
-      await setDoc(rulesRef, newRules);
+      // Adiciona campos opcionais apenas se tiverem valor
+      if (zonesForDb && zonesForDb.length > 0) {
+        newRules.pricingZones = zonesForDb;
+      }
+      if (data.notes) {
+        newRules.notes = data.notes;
+      }
+
+      // Remove todos os campos undefined recursivamente
+      const cleanRules = removeUndefined(newRules);
+
+      await setDoc(rulesRef, cleanRules);
       setCurrentVersion(currentVersion + 1);
 
       toast({

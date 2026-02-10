@@ -3,6 +3,22 @@ import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { calculateRouteEarnings, type RouteForCalculation } from './earnings-calculator';
 import type { EarningsRules, DriverPayment, PaymentMethod } from './types';
 
+// Remove campos undefined de um objeto recursivamente
+function removeUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefined);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.entries(obj).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = removeUndefined(value);
+      }
+      return acc;
+    }, {} as any);
+  }
+  return obj;
+}
+
 /**
  * Aprova um pagamento pendente
  * @param paymentId - ID do pagamento
@@ -253,7 +269,10 @@ export async function recalculatePayment(
         : `Recalculado em ${new Date().toLocaleString('pt-BR')}`,
     };
 
-    await setDoc(paymentRef, updatedPayment, { merge: true });
+    // Remove campos undefined antes de salvar
+    const cleanPayment = removeUndefined(updatedPayment);
+
+    await setDoc(paymentRef, cleanPayment, { merge: true });
 
     return updatedPayment;
   } catch (error) {
@@ -299,6 +318,75 @@ export async function addPaymentNote(
   } catch (error) {
     throw new Error(
       `Erro ao adicionar nota ao pagamento: ${
+        error instanceof Error ? error.message : 'Erro desconhecido'
+      }`
+    );
+  }
+}
+
+/**
+ * Atualiza o valor de um pagamento manualmente
+ * @param paymentId - ID do pagamento
+ * @param newValue - Novo valor total
+ * @param userId - ID do usuário que está fazendo a alteração
+ * @param reason - Motivo da alteração
+ */
+export async function updatePaymentValue(
+  paymentId: string,
+  newValue: number,
+  userId: string,
+  reason: string
+): Promise<void> {
+  try {
+    const paymentRef = doc(db, 'driverPayments', paymentId);
+    const paymentDoc = await getDoc(paymentRef);
+
+    if (!paymentDoc.exists()) {
+      throw new Error('Pagamento não encontrado');
+    }
+
+    const payment = paymentDoc.data() as DriverPayment;
+
+    if (payment.status === 'paid') {
+      throw new Error(
+        'Pagamento já foi pago. Para ajustar, cancele e crie um novo pagamento.'
+      );
+    }
+
+    if (!reason || reason.trim().length === 0) {
+      throw new Error('Motivo da alteração é obrigatório');
+    }
+
+    const oldValue = payment.totalEarnings;
+    const difference = newValue - oldValue;
+
+    // Cria nota de alteração
+    const changeNote = `[${new Date().toLocaleString('pt-BR')}] Valor alterado manualmente por ${userId}\n` +
+      `Valor anterior: R$ ${oldValue.toFixed(2)}\n` +
+      `Valor novo: R$ ${newValue.toFixed(2)}\n` +
+      `Diferença: ${difference > 0 ? '+' : ''}R$ ${difference.toFixed(2)}\n` +
+      `Motivo: ${reason.trim()}`;
+
+    const updatedNotes = payment.notes
+      ? `${payment.notes}\n\n${changeNote}`
+      : changeNote;
+
+    const updateData = {
+      totalEarnings: newValue,
+      notes: updatedNotes,
+      manuallyEdited: true,
+      manualEditBy: userId,
+      manualEditAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    };
+
+    // Remove undefined antes de salvar
+    const cleanData = removeUndefined(updateData);
+
+    await setDoc(paymentRef, cleanData, { merge: true });
+  } catch (error) {
+    throw new Error(
+      `Erro ao atualizar valor do pagamento: ${
         error instanceof Error ? error.message : 'Erro desconhecido'
       }`
     );

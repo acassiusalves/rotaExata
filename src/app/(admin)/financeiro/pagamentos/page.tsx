@@ -329,11 +329,11 @@ export default function PagamentosPage() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
-                <SelectItem value="approved">Aprovado</SelectItem>
-                <SelectItem value="paid">Pago</SelectItem>
-                <SelectItem value="cancelled">Cancelado</SelectItem>
+                <SelectItem key="all" value="all">Todos os Status</SelectItem>
+                <SelectItem key="pending" value="pending">Pendente</SelectItem>
+                <SelectItem key="approved" value="approved">Aprovado</SelectItem>
+                <SelectItem key="paid" value="paid">Pago</SelectItem>
+                <SelectItem key="cancelled" value="cancelled">Cancelado</SelectItem>
               </SelectContent>
             </Select>
 
@@ -343,7 +343,7 @@ export default function PagamentosPage() {
                 <SelectValue placeholder="Motorista" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os Motoristas</SelectItem>
+                <SelectItem key="all" value="all">Todos os Motoristas</SelectItem>
                 {drivers.map((driver) => (
                   <SelectItem key={driver.id} value={driver.id}>
                     {driver.name}

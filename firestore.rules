@@ -3,115 +3,507 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ===== FUNÇÕES DE AUTENTICAÇÃO =====
     function isAuthed() {
       return request.auth != null;
     }
 
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isAppAdmin() {
-      return isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
+      return isAuthed() && getUserData().role in ['admin', 'socio', 'gestor', 'manager'];
+    }
+
+    function isAdmin() {
+      return isAuthed() && getUserData().role == 'admin';
     }
 
     function isOwner(userId) {
       return isAuthed() && request.auth.uid == userId;
     }
 
-    // AUTH USERS CAN READ/WRITE THEIR OWN USER DOCUMENT
+    // ===== USERS COLLECTION =====
     match /users/{userId} {
-      // Qualquer usuário autenticado pode ler seu próprio documento
-      allow read: if isOwner(userId);
-      // Qualquer usuário autenticado pode atualizar seu próprio documento
-      allow update: if isOwner(userId);
-      // Apenas admins podem criar e deletar usuários
+      allow read: if isOwner(userId) || isAppAdmin();
+      allow update: if isOwner(userId) || isAppAdmin();
       allow create, delete: if isAppAdmin();
-      // Admins podem ler qualquer usuário
-      allow read, list: if isAppAdmin();
-
-      // Users can read/write their own settings subcollection
-      match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
-      }
+      // Permitir list para usuários autenticados (vendedores precisam ver lista de vendedores para criar pedidos)
+      allow list: if isAuthed();
     }
 
-    // A COURIER CAN READ/WRITE TO ITS OWN DOCUMENT
+    // ===== COURIERS COLLECTION =====
     match /couriers/{courierId} {
       allow read, update: if isOwner(courierId);
       allow create: if isAppAdmin();
     }
 
-    // A COURIER CAN READ/WRITE TO ITS OWN TOKEN SUBCOLLECTION
     match /couriers/{courierId}/tokens/{tokenId} {
       allow read, write: if isOwner(courierId);
     }
 
-    // RULES FOR ROUTES
+    // ===== ROUTES COLLECTION =====
     match /routes/{routeId} {
-      // Admins can do anything
       allow create, delete, read, list, update: if isAppAdmin();
-      // Drivers can only read routes assigned to them
-      allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
-      // Drivers can list/query routes assigned to them (required for queries)
-      allow list: if isAuthed() && request.auth.uid != null;
-      // Drivers can update their assigned routes (e.g., change status)
-      allow update: if isAuthed() && resource.data.driverId == request.auth.uid;
+      allow read, update: if isAuthed() && resource.data.driverId == request.auth.uid;
+    }
 
-      // Allow read/write to subcollections within routes
-      match /{document=**} {
-        allow read, write: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+    // ===== COUNTERS COLLECTION (para geração de códigos sequenciais) =====
+    // Vendedores precisam acessar para gerar números de pedidos
+    match /counters/{counterId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== SETTINGS COLLECTION =====
+    match /settings/{settingId} {
+      allow read, write: if isAppAdmin();
+      // Permitir leitura pública para catálogos públicos
+      allow read: if true;
+    }
+
+    // ===== LOCATION UPDATE REQUESTS =====
+    match /locationUpdateRequests/{driverId} {
+      allow create, update: if isAppAdmin();
+      allow read, delete: if isAuthed() && driverId == request.auth.uid;
+    }
+
+    // ===== PRODUCTS COLLECTION =====
+    match /products/{productId} {
+      // Leitura pública para catálogos públicos
+      allow read, list: if true;
+      // Escrita apenas autenticados
+      allow write: if isAuthed();
+    }
+
+    // ===== STOCK COLLECTION =====
+    match /stock/{stockId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== SALES COLLECTION =====
+    match /sales/{saleId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== PURCHASES COLLECTION =====
+    match /purchases/{purchaseId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== SUPPLIERS COLLECTION =====
+    match /suppliers/{supplierId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== VARIÁVEIS COLLECTION =====
+    match /variaveis/{variavelId} {
+      // Permitir leitura para qualquer usuário autenticado (vendedores precisam ver formas de pagamento, etc)
+      allow read, list: if isAuthed();
+      // Apenas admins podem criar, atualizar e deletar
+      allow write: if isAppAdmin();
+    }
+
+    // ===== INTEGRAÇÕES GLOBAIS =====
+    match /integrations/{integrationId} {
+      allow read, write: if isAuthed();
+      // Permitir escrita sem autenticação para OAuth callbacks (server-side)
+      allow write: if true;
+
+      // Subcollection de contas do Google Contacts
+      match /accounts/{accountId} {
+        allow read, create: if isAuthed();
+        allow update, delete: if isAppAdmin();
       }
     }
 
-    // RULES FOR SETTINGS
-    match /settings/{settingId} {
-      // Admins can read and write settings
-      allow read, write: if isAppAdmin();
-      // Authenticated users can read settings (drivers need to check validation settings)
+    // ===== CLIENTES COLLECTION =====
+    match /clientes/{clienteId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== MOVIMENTAÇÕES COLLECTION =====
+    match /movimentacoes/{movimentacaoId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== MOVIMENTAÇÕES DE ESTOQUE COLLECTION =====
+    match /movimentacoesEstoque/{movimentacaoId} {
+      // Qualquer usuário autenticado pode ler e criar movimentações
+      allow read, create: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== PRODUTOS COLLECTION =====
+    match /produtos/{produtoId} {
+      // Leitura pública para catálogos públicos
+      allow read, list: if true;
+      // Escrita apenas autenticados
+      allow write: if isAuthed();
+    }
+
+    // ===== FORNECEDORES COLLECTION =====
+    match /fornecedores/{fornecedorId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== VENDAS COLLECTION =====
+    match /vendas/{vendaId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== PEDIDOS COLLECTION =====
+    match /pedidos/{pedidoId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== ORDERS COLLECTION (English alias for pedidos) =====
+    match /orders/{orderId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== CLIENTS COLLECTION (English alias for clientes) =====
+    match /clients/{clientId} {
+      allow read, write: if isAuthed();
+    }
+
+    // ===== CATÁLOGOS COLLECTION =====
+    match /catalogos/{catalogoId} {
+      // Usuários autenticados podem criar, editar e deletar
+      allow create, update, delete: if isAuthed();
+
+      // Leitura pública (validação de público/privado é feita no código)
+      allow get, list: if true;
+    }
+
+    // ===== CATÁLOGO INTERAÇÕES (Analytics) =====
+    match /catalogo_interacoes/{interacaoId} {
+      // Permite criar interações sem autenticação (tracking público)
+      allow create: if true;
+      // Apenas autenticados podem ler
+      allow read, list: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== CATÁLOGO INTERESSES (Leads) =====
+    match /catalogo_interesses/{interesseId} {
+      // Permite criar interesse sem autenticação (formulário público)
+      allow create: if true;
+      // Apenas autenticados podem ler
+      allow read, list: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CATÁLOGO LIKES (Curtidas) =====
+    match /catalogo_likes/{likeId} {
+      // Permite criar likes sem autenticação (público)
+      allow create: if true;
+      // Apenas autenticados podem ler
+      allow read, list: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CATÁLOGO ANALYTICS (Analytics detalhado) =====
+    match /catalogo_analytics/{analyticsId} {
+      // Permite criar analytics sem autenticação (tracking público)
+      allow create: if true;
+      // Permite atualizar sem autenticação (para atualizar comportamento ao sair da página)
+      allow update: if true;
+      // Apenas autenticados podem ler
+      allow read, list: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CATÁLOGO PRESENÇA (Usuários ativos em tempo real) =====
+    match /catalogo_presenca/{presencaId} {
+      // Permite criar e atualizar sem autenticação (tracking público de presença)
+      allow create, update: if true;
+      // Apenas autenticados podem ler
+      allow read, list: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== AUDIT LOGS =====
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthed();
+      allow update, delete: if false;
+    }
+
+    // ===== WORKFLOW - ESTADOS =====
+    match /estados_workflow/{estadoId} {
+      // Qualquer usuário autenticado pode ler e escrever (TEMPORÁRIO PARA TESTE)
+      allow read, write: if isAuthed();
+    }
+
+    // ===== WORKFLOW - TRANSIÇÕES =====
+    match /transicoes_workflow/{transicaoId} {
+      // Qualquer usuário autenticado pode ler e escrever (TEMPORÁRIO PARA TESTE)
+      allow read, write: if isAuthed();
+    }
+
+    // ===== WORKFLOW - SITUAÇÕES (NOVA COLEÇÃO) =====
+    match /situacoes/{situacaoId} {
+      // Qualquer usuário autenticado pode ler e escrever
+      allow read, write: if isAuthed();
+    }
+
+    // ===== HISTÓRICO DE ESTOQUE =====
+    match /historico_estoque/{historicoId} {
+      // Qualquer usuário autenticado pode ler e criar
+      allow read, create: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== HISTÓRICO DE MOVIMENTAÇÕES DE PEDIDOS =====
+    match /historico_movimentacoes/{movimentacaoId} {
+      // Qualquer usuário autenticado pode ler e criar
+      allow read, create: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== PICKING REGISTROS =====
+    match /picking_registros/{registroId} {
+      // Qualquer usuário autenticado pode ler e criar
+      allow read, create: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== RETORNO REGISTROS =====
+    match /retorno_registros/{registroId} {
+      // Qualquer usuário autenticado pode ler e criar
+      allow read, create: if isAuthed();
+      // Apenas admins podem atualizar ou deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== CRÉDITOS DE CLIENTES =====
+    match /creditos_clientes/{creditoId} {
+      // Qualquer usuário autenticado pode ler, criar e atualizar
+      allow read, create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== PEDIDOS DE COMPRA =====
+    match /pedidos_compra/{pedidoId} {
+      // Qualquer usuário autenticado pode ler, listar e criar
+      allow read, list, create: if isAuthed();
+      // Apenas admins podem atualizar e deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== ENTRADAS DE COMPRA =====
+    match /entradas_compra/{entradaId} {
+      // Qualquer usuário autenticado pode ler, listar e criar
+      allow read, list, create: if isAuthed();
+      // Apenas admins podem atualizar e deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== LEMBRETES COLLECTION =====
+    match /lembretes/{lembreteId} {
+      // Qualquer usuário autenticado pode criar e atualizar lembretes
+      allow create, update: if isAuthed();
+      // Vendedores podem ler apenas seus próprios lembretes
+      // Admins e gestores podem ler todos
+      allow read: if isAuthed() && (
+        isAppAdmin() ||
+        resource.data.vendedorId == request.auth.uid
+      );
+      // Listar lembretes com filtro por vendedor
+      allow list: if isAuthed();
+      // Apenas admins e gestores podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== NOTIFICAÇÕES COLLECTION =====
+    match /notificacoes/{notificacaoId} {
+      // Sistema pode criar notificações (via Cloud Functions ou direto no código)
+      allow create: if isAuthed();
+      // Usuários só podem ler suas próprias notificações
+      allow read: if isAuthed() && resource.data.usuarioId == request.auth.uid;
+      // Usuários podem atualizar (marcar como lida) suas próprias notificações
+      allow update: if isAuthed() && resource.data.usuarioId == request.auth.uid;
+      // Usuários podem deletar suas próprias notificações
+      allow delete: if isAuthed() && resource.data.usuarioId == request.auth.uid;
+      // Permitir listar notificações do próprio usuário
+      allow list: if isAuthed();
+    }
+
+    // ===== CRM - LEADS =====
+    match /crm_leads/{leadId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CRM - CONVERSATIONS =====
+    match /crm_conversations/{conversationId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CRM - MESSAGES =====
+    match /crm_messages/{messageId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar
+      allow create: if isAuthed();
+      // Apenas admins podem atualizar e deletar
+      allow update, delete: if isAppAdmin();
+    }
+
+    // ===== CRM - SETTINGS =====
+    match /crm_settings/{settingId} {
+      // Qualquer usuário autenticado pode ler
       allow read: if isAuthed();
+      // Apenas admins podem escrever
+      allow write: if isAppAdmin();
     }
 
-    // RULES FOR LOCATION UPDATE REQUESTS
-    match /locationUpdateRequests/{driverId} {
-      // Admins can create location update requests
-      allow create, update: if isAppAdmin();
-      // Drivers can read their own location update requests
-      allow read: if isAuthed() && driverId == request.auth.uid;
-      // Drivers can delete their own processed requests
-      allow delete: if isAuthed() && driverId == request.auth.uid;
+    // ===== EVOLUTION WHATSAPP - INSTANCES =====
+    match /evo_instances/{instanceId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
     }
 
-    // RULES FOR ROUTE CHANGE NOTIFICATIONS
-    match /routeChangeNotifications/{routeId} {
-      // Admins can do anything with notifications
-      allow read, create, update, delete: if isAppAdmin();
-      // Drivers can read and update notifications for their routes
-      allow read, update: if isAuthed() && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+    // ===== EVOLUTION WHATSAPP - LEADS =====
+    match /evo_leads/{leadId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
     }
 
-    // RULES FOR COUNTERS (used for generating route codes)
-    match /counters/{counterId} {
-      // Only admins can read and write counters
-      allow read, write: if isAppAdmin();
+    // ===== EVOLUTION WHATSAPP - CONVERSATIONS =====
+    match /evo_conversations/{conversationId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
     }
 
-    // RULES FOR NOTIFICATIONS
-    match /notifications/{notificationId} {
-      // Admins and managers can read, create, update, and delete notifications
-      allow read, create, update, delete: if isAppAdmin();
-      // Drivers can read their own notifications
-      allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
-      // Drivers can update only 'opened' and 'openedAt' fields of their own notifications
-      allow update: if isAuthed()
-        && resource.data.driverId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt']);
+    // ===== EVOLUTION WHATSAPP - MESSAGES =====
+    match /evo_messages/{messageId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar
+      allow create: if isAuthed();
+      // Apenas admins podem atualizar e deletar
+      allow update, delete: if isAppAdmin();
     }
 
-    // RULES FOR SERVICES (Luna Services - agrupamento de rotas)
+    // ===== EVOLUTION WHATSAPP - SETTINGS =====
+    match /evo_settings/{settingId} {
+      // Qualquer usuário autenticado pode ler
+      allow read: if isAuthed();
+      // Apenas admins podem escrever
+      allow write: if isAppAdmin();
+    }
+
+    // ===== EVOLUTION WHATSAPP - QUICK REPLIES =====
+    match /evo_quick_replies/{replyId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== EVOLUTION WHATSAPP - USER PREFERENCES (leads fixados, etc) =====
+    match /evo_user_preferences/{userId} {
+      // Usuário pode ler e escrever apenas suas próprias preferências
+      allow read, write: if isOwner(userId);
+    }
+
+    // ===== PHOTO PACKS (Pacotes de Fotos para WhatsApp) =====
+    match /photoPacks/{packId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== TAGS COLLECTION =====
+    match /tags/{tagId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== TAGS DE CATÁLOGO COLLECTION =====
+    match /tags_catalogo/{tagId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== WHATSAPP NUMBERS (Números salvos para catálogos) =====
+    match /whatsapp_numbers/{numberId} {
+      allow read, list: if isAuthed();
+      allow create, update: if isAuthed();
+      allow delete: if isAuthed();
+    }
+
+    // ===== SERVICES COLLECTION (Rota Exata - Serviços de entrega) =====
     match /services/{serviceId} {
-      allow read, create, update, delete, list: if isAppAdmin();
+      allow read, list: if isAuthed();
+      allow create, update: if isAuthed();
+      allow delete: if isAppAdmin();
     }
 
-    // RULES FOR EARNINGS RULES (Regras de Ganhos)
+    // ===== IMPORT JOBS COLLECTION (Importação em segundo plano) =====
+    match /import_jobs/{jobId} {
+      // Qualquer usuário autenticado pode ler e listar jobs
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar jobs
+      allow create: if isAuthed();
+      // Qualquer usuário autenticado pode atualizar (para cancelamento)
+      allow update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+
+      // Subcoleção de dados do job
+      match /data/{chunkId} {
+        allow read, write: if isAuthed();
+      }
+    }
+
+    // ===== EARNINGS RULES COLLECTION (Regras de Ganhos) =====
     match /earningsRules/{ruleId} {
       // Admin e Socio podem ler e escrever
       allow read, write: if isAuthed() &&
@@ -123,7 +515,7 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'gestor';
     }
 
-    // RULES FOR DRIVER PAYMENTS (Pagamentos aos Motoristas)
+    // ===== DRIVER PAYMENTS COLLECTION (Pagamentos aos Motoristas) =====
     match /driverPayments/{paymentId} {
       // Admin e Socio podem fazer tudo
       allow read, create, delete, list: if isAuthed() &&
