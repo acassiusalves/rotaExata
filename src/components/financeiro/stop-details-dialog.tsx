@@ -110,12 +110,22 @@ export function StopDetailsDialog({
                       Endereço
                     </p>
                     <p className="text-sm">
-                      {stop.address?.formattedAddress || 'Endereço não disponível'}
+                      {stop.addressString || stop.address?.formattedAddress || stop.address || 'Endereço não disponível'}
                     </p>
+                    {stop.complemento && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {stop.complemento}
+                      </p>
+                    )}
+                    {(stop.bairro || stop.cidade) && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {[stop.bairro, stop.cidade, stop.state].filter(Boolean).join(', ')}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                {stop.address?.coordinates && (
+                {(stop.lat && stop.lng) && (
                   <div className="flex items-start gap-3">
                     <Navigation className="h-5 w-5 text-muted-foreground mt-0.5" />
                     <div className="flex-1">
@@ -123,8 +133,7 @@ export function StopDetailsDialog({
                         Coordenadas
                       </p>
                       <p className="text-sm font-mono text-xs">
-                        {stop.address.coordinates.latitude.toFixed(6)},{' '}
-                        {stop.address.coordinates.longitude.toFixed(6)}
+                        {stop.lat.toFixed(6)}, {stop.lng.toFixed(6)}
                       </p>
                     </div>
                   </div>
@@ -186,6 +195,18 @@ export function StopDetailsDialog({
                   </div>
                 )}
 
+                {stop.orderNumber && (
+                  <div className="flex items-start gap-3">
+                    <Package className="h-5 w-5 text-muted-foreground mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Número do Pedido
+                      </p>
+                      <p className="text-sm font-mono">{stop.orderNumber}</p>
+                    </div>
+                  </div>
+                )}
+
                 {stop.notes && (
                   <div className="flex items-start gap-3">
                     <MessageSquare className="h-5 w-5 text-muted-foreground mt-0.5" />
@@ -228,7 +249,7 @@ export function StopDetailsDialog({
                   </div>
                 </div>
 
-                {stop.customerPhone && (
+                {(stop.customerPhone || stop.phone) && (
                   <div className="flex items-start gap-3">
                     <Phone className="h-5 w-5 text-muted-foreground mt-0.5" />
                     <div className="flex-1">
@@ -236,10 +257,10 @@ export function StopDetailsDialog({
                         Telefone
                       </p>
                       <a
-                        href={`tel:${stop.customerPhone}`}
+                        href={`tel:${stop.customerPhone || stop.phone}`}
                         className="text-sm text-primary hover:underline"
                       >
-                        {stop.customerPhone}
+                        {stop.customerPhone || stop.phone}
                       </a>
                     </div>
                   </div>
