@@ -28,7 +28,7 @@ function toDate(timestamp: Date | Timestamp): Date {
   if ('toDate' in timestamp && typeof timestamp.toDate === 'function') {
     return timestamp.toDate();
   }
-  return new Date(timestamp);
+  return new Date(timestamp as any);
 }
 
 /**
@@ -50,34 +50,67 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
  * Determina a zona de precificação de uma parada baseado na cidade e distância da origem
  * @param stop - Parada da rota
  * @param origin - Origem da rota
+ * @param rules - Regras de ganhos (para usar as zonas configuradas)
  * @returns Valor da parada em reais
  */
-function calculateStopPrice(stop: PlaceValue, origin?: PlaceValue): number {
+function calculateStopPrice(stop: PlaceValue, origin?: PlaceValue, rules?: EarningsRules): number {
   const city = (stop.cidade || stop.city || '').toLowerCase().trim();
   const neighborhood = (stop.bairro || stop.neighborhood || '').toLowerCase().trim();
 
-  // Cidades de R$ 20
-  const citiesR20 = ['senador canedo', 'canedo', 'trindade', 'goianira'];
-  if (citiesR20.some(c => city.includes(c) || neighborhood.includes(c))) {
-    return 20;
+  // Se não tiver regras ou zonas configuradas, usa valores hardcoded (legado)
+  if (!rules || !rules.pricingZones || rules.pricingZones.length === 0) {
+    // Fallback para valores hardcoded antigos
+    const citiesR20 = ['senador canedo', 'canedo', 'trindade', 'goianira'];
+    if (citiesR20.some(c => city.includes(c) || neighborhood.includes(c))) {
+      return 20;
+    }
+
+    const citiesGoianiaArea = ['goiânia', 'goiania', 'aparecida', 'aparecida de goiania', 'aparecida de goiânia'];
+    const isGoianiaArea = citiesGoianiaArea.some(c => city.includes(c) || neighborhood.includes(c));
+
+    if (isGoianiaArea && origin && origin.lat && origin.lng && stop.lat && stop.lng) {
+      const distance = calculateDistance(origin.lat, origin.lng, stop.lat, stop.lng);
+      return distance <= 7 ? 5 : 10;
+    }
+
+    if (isGoianiaArea) {
+      return 5;
+    }
+
+    return 10;
   }
 
-  // Goiânia e Aparecida de Goiânia - depende da distância da origem
-  const citiesGoianiaArea = ['goiânia', 'goiania', 'aparecida', 'aparecida de goiania', 'aparecida de goiânia'];
-  const isGoianiaArea = citiesGoianiaArea.some(c => city.includes(c) || neighborhood.includes(c));
+  // Usa as zonas configuradas nas regras
+  for (const zone of rules.pricingZones) {
+    // Verifica se a parada está nas cidades desta zona
+    if (zone.cities && zone.cities.length > 0) {
+      const cityMatch = zone.cities.some(zoneCity => {
+        // zoneCity pode ser string ou objeto CityInfo
+        const zoneCityStr = typeof zoneCity === 'string' ? zoneCity : (zoneCity as any).name || '';
+        const zoneCityLower = zoneCityStr.toLowerCase().trim();
+        return city.includes(zoneCityLower) || neighborhood.includes(zoneCityLower);
+      });
 
-  if (isGoianiaArea && origin && origin.lat && origin.lng && stop.lat && stop.lng) {
-    const distance = calculateDistance(origin.lat, origin.lng, stop.lat, stop.lng);
-    // Até 7km = R$ 5, acima de 7km = R$ 10
-    return distance <= 7 ? 5 : 10;
+      if (cityMatch) {
+        // Se a zona tem distância máxima configurada, precisa calcular
+        if (zone.maxDistanceKm && origin && origin.lat && origin.lng && stop.lat && stop.lng) {
+          const distance = calculateDistance(origin.lat, origin.lng, stop.lat, stop.lng);
+
+          // Se a distância está dentro do limite desta zona, retorna o preço
+          if (distance <= zone.maxDistanceKm) {
+            return zone.price;
+          }
+          // Se não, continua procurando outra zona que possa se aplicar
+          continue;
+        }
+
+        // Se não tem distância máxima, retorna o preço da zona
+        return zone.price;
+      }
+    }
   }
 
-  // Padrão para Goiânia/Aparecida se não conseguir calcular distância
-  if (isGoianiaArea) {
-    return 5;
-  }
-
-  // Padrão para cidades não mapeadas
+  // Se não encontrou nenhuma zona, retorna um valor padrão
   return 10;
 }
 
@@ -124,7 +157,7 @@ export function calculateRouteEarnings(
 
   // Calcula o valor de cada parada individualmente
   for (const stop of route.stops) {
-    const stopValue = calculateStopPrice(stop, origin);
+    const stopValue = calculateStopPrice(stop, origin, rules);
 
     if (stop.deliveryStatus === 'completed') {
       deliveryBonuses += stopValue;

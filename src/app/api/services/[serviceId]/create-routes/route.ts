@@ -89,8 +89,14 @@ export async function POST(
         continue; // Pular rotas sem stops
       }
 
+      // Gerar códigos sequenciais para os pontos da rota
+      const stopsWithCodes = routeStops.map((stop, index) => ({
+        ...stop,
+        pointCode: `${routeCode}-${String(index + 1).padStart(3, '0')}`
+      }));
+
       // Obter IDs dos pedidos Luna para esta rota
-      const routeLunnaOrderIds = routeStops
+      const routeLunnaOrderIds = stopsWithCodes
         .map(s => s.orderNumber)
         .filter((n): n is string => !!n);
 
@@ -107,7 +113,7 @@ export async function POST(
         code: routeCode,
         name: routeConfig.name || `Rota ${String.fromCharCode(65 + i)}`,
         origin: serviceData.origin,
-        stops: routeStops,
+        stops: stopsWithCodes,
         encodedPolyline: '',
         distanceMeters: 0,
         duration: '0s',

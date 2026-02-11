@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { History, User, Route as RouteIcon, ArrowRight } from 'lucide-react';
+import { History, User, Route as RouteIcon, ArrowRight, Activity } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -18,11 +18,11 @@ export default function HistoryPage() {
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Histórico</h2>
         <p className="text-muted-foreground">
-          Consulte o histórico de rotas e motoristas
+          Consulte o histórico de rotas, motoristas e atividades do sistema
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Link href="/history/motorista">
           <Card className="cursor-pointer transition-all hover:shadow-lg hover:border-primary">
             <CardHeader>
@@ -66,6 +66,30 @@ export default function HistoryPage() {
             <CardContent>
               <p className="text-sm text-muted-foreground">
                 Visualize todas as rotas concluídas do sistema, com filtros por data, status e outros critérios.
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/history/atividades">
+          <Card className="cursor-pointer transition-all hover:shadow-lg hover:border-primary">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-primary/10 p-3">
+                  <Activity className="h-6 w-6 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <CardTitle>Histórico de Atividades</CardTitle>
+                  <CardDescription>
+                    Todas as movimentações do sistema
+                  </CardDescription>
+                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Visualize criações, edições, movimentações de pontos, despachos e status de entregas com filtros avançados.
               </p>
             </CardContent>
           </Card>

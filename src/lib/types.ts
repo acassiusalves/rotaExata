@@ -72,6 +72,8 @@ export type PlaceValue = {
   modifiedAt?: Timestamp | Date;
   modificationType?: 'address' | 'sequence' | 'data' | 'removed' | 'added';
   originalSequence?: number;
+  // Sistema de numeração sequencial (INTERNO - não visível na UI)
+  pointCode?: string; // Formato: {ROUTE_CODE}-{SEQUENCE} (ex: "RT-0001-001", "LN-0011-A-002")
   // Campos específicos para pedidos Lunna
   expectedValue?: number; // Valor total esperado do pedido (billing.finalValue)
   items?: LunnaOrderItem[]; // Lista de produtos do pedido

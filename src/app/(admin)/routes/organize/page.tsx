@@ -111,6 +111,8 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
+import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered } from '@/lib/firebase/activity-log';
+import { useAuth } from '@/hooks/use-auth';
 
 
 interface RouteData {
@@ -434,6 +436,7 @@ const EditableRouteName: React.FC<{
 export default function OrganizeRoutePage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
 
   // Check if Google Maps is loaded (RouteMap component loads it)
@@ -2212,6 +2215,12 @@ export default function OrganizeRoutePage() {
         const routeCode = await generateRouteCode();
         const isDraft = routeData.isDraft && routeData.draftRouteId;
 
+        // Gerar códigos sequenciais para os pontos
+        const stopsWithCodes = routeToSave.stops.map((stop, index) => ({
+            ...stop,
+            pointCode: `${routeCode}-${String(index + 1).padStart(3, '0')}`
+        }));
+
         // Criar um novo documento para a rota despachada
         const routeDoc = {
             code: routeCode,
@@ -2220,7 +2229,7 @@ export default function OrganizeRoutePage() {
             createdAt: serverTimestamp(),
             plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
             origin: routeData.origin,
-            stops: routeToSave.stops,
+            stops: stopsWithCodes,
             distanceMeters: routeToSave.distanceMeters,
             duration: routeToSave.duration,
             encodedPolyline: routeToSave.encodedPolyline,
@@ -2229,7 +2238,37 @@ export default function OrganizeRoutePage() {
             driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
         };
 
-        await addDoc(collection(db, "routes"), routeDoc);
+        const docRef = await addDoc(collection(db, "routes"), routeDoc);
+
+        // Registrar no activity log
+        if (user) {
+            await logRouteDispatched({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                routeId: docRef.id,
+                routeCode: routeCode,
+                serviceId: routeData.serviceId,
+                serviceCode: routeData.serviceCode,
+                driverName: driver?.name || 'Motorista',
+                driverId: driverId,
+                totalPoints: stopsWithCodes.length,
+            });
+
+            // Registrar criação dos pontos
+            const pointCodes = stopsWithCodes.map(s => s.pointCode).filter((c): c is string => !!c);
+            if (pointCodes.length > 0) {
+                await logPointsCreated({
+                    userId: user.uid,
+                    userName: user.email || 'Usuário',
+                    routeId: docRef.id,
+                    routeCode: routeCode,
+                    serviceId: routeData.serviceId,
+                    serviceCode: routeData.serviceCode,
+                    pointCodes: pointCodes,
+                    totalPoints: pointCodes.length,
+                });
+            }
+        }
 
         toast({
             title: 'Rota Despachada!',
@@ -2339,13 +2378,19 @@ export default function OrganizeRoutePage() {
         // Marcar paradas modificadas
         const stopsWithFlags = markModifiedStops(newStops, changes);
 
+        // Regenerar códigos dos pontos baseado na ordem atual
+        const stopsWithUpdatedCodes = stopsWithFlags.map((stop, index) => ({
+            ...stop,
+            pointCode: `${currentRouteData.code}-${String(index + 1).padStart(3, '0')}`
+        }));
+
         // Verificar se foi atribuído um motorista na aba Atribuir
         const driverId = assignedDrivers[routeKey];
         const driver = driverId ? availableDrivers.find(d => d.id === driverId) : null;
 
         // Preparar dados para atualização
         const updateData: Record<string, any> = {
-            stops: stopsWithFlags,
+            stops: stopsWithUpdatedCodes,
             distanceMeters: routeToUpdate.distanceMeters,
             duration: routeToUpdate.duration,
             encodedPolyline: routeToUpdate.encodedPolyline,
@@ -2358,6 +2403,34 @@ export default function OrganizeRoutePage() {
         }
 
         await updateDoc(routeRef, updateData);
+
+        // Registrar mudanças de sequência no activity log
+        if (user && changes.length > 0) {
+            for (const change of changes) {
+                if (change.changeType === 'sequence') {
+                    const stopIndex = change.stopIndex;
+                    const stop = stopsWithUpdatedCodes[stopIndex];
+                    const oldStop = oldStops.find((s: PlaceValue) => String(s.id ?? s.placeId) === change.stopId);
+
+                    if (stop && oldStop) {
+                        await logPointReordered({
+                            userId: user.uid,
+                            userName: user.email || 'Usuário',
+                            pointId: stop.id || stop.placeId,
+                            routeId: currentRouteId,
+                            routeCode: currentRouteData.code,
+                            serviceId: currentRouteData.serviceId,
+                            serviceCode: currentRouteData.serviceCode,
+                            oldPointCode: oldStop.pointCode,
+                            newPointCode: stop.pointCode!,
+                            oldPosition: change.oldValue,
+                            newPosition: change.newValue,
+                            address: stop.address,
+                        });
+                    }
+                }
+            }
+        }
 
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {

@@ -44,6 +44,8 @@ import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confi
 import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
 import { StopChangeBadge } from '@/components/driver/stop-change-badge';
 import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
+import { logPointCompleted, logPointFailed } from '@/lib/firebase/activity-log';
+import { useAuth } from '@/hooks/use-auth';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -82,6 +84,7 @@ const formatDuration = (durationString: string = '0s') => {
 export default function RouteDetailsPage() {
   const params = useParams();
   const routeId = params?.id as string;
+  const { user } = useAuth();
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedStopIndex, setSelectedStopIndex] = React.useState<number | null>(null);
@@ -494,6 +497,43 @@ export default function RouteDetailsPage() {
         stops: updatedStops,
         currentStopIndex: selectedStopIndex + 1,
       });
+
+      // Registrar no activity log
+      if (user) {
+        const stop = updatedStop;
+        if (data.status === 'completed') {
+          await logPointCompleted({
+            userId: user.uid,
+            userName: user.email || route.driverInfo?.name || 'Motorista',
+            pointId: stop.id || stop.placeId,
+            pointCode: stop.pointCode,
+            routeId: routeId,
+            routeCode: route.code || 'Rota',
+            serviceId: route.serviceId,
+            serviceCode: route.serviceCode,
+            photoUrl: stop.photoUrl,
+            address: stop.address,
+            customerName: stop.customerName,
+            notes: stop.notes,
+          });
+        } else if (data.status === 'failed') {
+          await logPointFailed({
+            userId: user.uid,
+            userName: user.email || route.driverInfo?.name || 'Motorista',
+            pointId: stop.id || stop.placeId,
+            pointCode: stop.pointCode,
+            routeId: routeId,
+            routeCode: route.code || 'Rota',
+            serviceId: route.serviceId,
+            serviceCode: route.serviceCode,
+            failureReason: stop.failureReason,
+            wentToLocation: stop.wentToLocation,
+            attemptPhotoUrl: stop.attemptPhotoUrl,
+            address: stop.address,
+            customerName: stop.customerName,
+          });
+        }
+      }
 
       // Incrementar contador de entregas do motorista se for entrega bem-sucedida
       if (data.status === 'completed' && route.driverId) {

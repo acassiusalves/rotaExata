@@ -538,5 +538,15 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
     }
+
+    // ===== ACTIVITY LOG COLLECTION (Histórico de Atividades) =====
+    match /activity_log/{logId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list, get: if isAuthed();
+      // Qualquer usuário autenticado pode criar (logging automático)
+      allow create: if isAuthed();
+      // Ninguém pode atualizar ou deletar (logs são imutáveis)
+      allow update, delete: if false;
+    }
   }
 }

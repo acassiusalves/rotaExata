@@ -20,6 +20,7 @@ import {
   List,
   Shield,
   DollarSign,
+  Activity,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -91,6 +92,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const historyItems = [
     { href: '/history/motorista', icon: Users, label: 'Histórico Motorista' },
     { href: '/history/rotas', icon: Route, label: 'Histórico Rotas' },
+    { href: '/history/atividades', icon: Activity, label: 'Histórico de Atividades' },
   ];
 
   const financialItems = [
