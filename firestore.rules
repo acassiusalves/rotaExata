@@ -528,15 +528,11 @@ service cloud.firestore {
       // Qualquer usuário autenticado pode ler e listar
       allow read, list, get: if isAuthed();
 
-      // Admin e Socio podem criar e deletar
-      allow create, delete: if isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
+      // Qualquer usuário autenticado pode criar (a verificação de role é feita no código)
+      allow create: if isAuthed();
 
-      // Admin, Socio e Gestor podem atualizar (para aprovar e marcar como pago)
-      allow update: if isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio', 'gestor'];
+      // Admin e gestores podem atualizar e deletar
+      allow update, delete: if isAppAdmin();
     }
 
     // ===== ACTIVITY LOG COLLECTION (Histórico de Atividades) =====

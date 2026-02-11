@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { PlaceValue, RouteInfo, LunnaService } from '@/lib/types';
+import { logRouteCreated, logPointsCreated, logRouteDispatched } from '@/lib/firebase/activity-log';
 
 // Função para gerar código de rota dentro de um serviço (LN-XXXX-A, LN-XXXX-B, etc.)
 function generateRouteCodeForService(serviceCode: string, routeIndex: number): string {
@@ -149,6 +150,56 @@ export async function POST(
         code: routeCode,
         stopsCount: routeStops.length,
       });
+
+      // Registrar atividade: criação da rota
+      try {
+        if (routeConfig.driverId) {
+          // Se tem motorista, registrar como dispatch
+          const driverDoc = await adminDb.collection('drivers').doc(routeConfig.driverId).get();
+          const driverData = driverDoc.exists ? driverDoc.data() : null;
+
+          await logRouteDispatched({
+            userId: userId,
+            userName: 'Sistema Lunna',
+            routeId: routeRef.id,
+            routeCode: routeCode,
+            serviceId: serviceId,
+            serviceCode: serviceData.code,
+            driverName: driverData?.name || 'Motorista',
+            driverId: routeConfig.driverId,
+            totalPoints: stopsWithCodes.length,
+          });
+        } else {
+          // Se não tem motorista, registrar apenas criação
+          await logRouteCreated({
+            userId: userId,
+            userName: 'Sistema Lunna',
+            routeId: routeRef.id,
+            routeCode: routeCode,
+            serviceId: serviceId,
+            serviceCode: serviceData.code,
+            totalPoints: stopsWithCodes.length,
+          });
+        }
+
+        // Registrar criação dos pontos
+        const pointCodes = stopsWithCodes.map(s => s.pointCode).filter((c): c is string => !!c);
+        if (pointCodes.length > 0) {
+          await logPointsCreated({
+            userId: userId,
+            userName: 'Sistema Lunna',
+            routeId: routeRef.id,
+            routeCode: routeCode,
+            serviceId: serviceId,
+            serviceCode: serviceData.code,
+            pointCodes: pointCodes,
+            totalPoints: pointCodes.length,
+          });
+        }
+      } catch (logError) {
+        console.error('Erro ao registrar atividade:', logError);
+        // Não falha a criação da rota se houver erro no log
+      }
 
       // Atualizar pedidos do Luna com referência à rota específica
       for (const stop of routeStops) {
