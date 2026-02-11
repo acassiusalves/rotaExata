@@ -1,5 +1,5 @@
 import { addDoc, collection, Timestamp } from 'firebase/firestore';
-import { db } from './config';
+import { db } from './client';
 
 // ============================================================================
 // TYPES
