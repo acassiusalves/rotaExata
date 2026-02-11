@@ -58,8 +58,15 @@ export default function ActivityPage() {
       })) as (ActivityLogEntry & { id: string })[];
 
       setActivities(data);
+      console.log(`Carregadas ${data.length} atividades com sucesso`);
     } catch (error) {
       console.error('Erro ao carregar atividades:', error);
+      console.error('Detalhes do erro:', {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any)?.code,
+        eventTypeFilter,
+        entityTypeFilter,
+      });
     } finally {
       setLoading(false);
     }
