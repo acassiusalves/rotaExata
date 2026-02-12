@@ -1150,8 +1150,8 @@ export default function ServiceAcompanharPage() {
       setIsLoading(true);
       try {
         console.log('🚨 ANTES DE getDoc');
-        // Buscar dados do serviço
-        const serviceDoc = await getDoc(doc(db, 'services', serviceId));
+        // Buscar dados do serviço (SEM CACHE - força leitura do servidor)
+        const serviceDoc = await getDoc(doc(db, 'services', serviceId), { source: 'server' });
         console.log('🚨 DEPOIS DE getDoc - exists:', serviceDoc.exists());
 
         if (!serviceDoc.exists()) {
@@ -1574,7 +1574,7 @@ export default function ServiceAcompanharPage() {
                 }
               }
 
-              const serviceDoc = await getDoc(doc(db, 'services', parsedData.serviceId!));
+              const serviceDoc = await getDoc(doc(db, 'services', parsedData.serviceId!), { source: 'server' });
               if (serviceDoc.exists()) {
                 const svcData = serviceDoc.data();
                 let allStops = (svcData.allStops || []) as PlaceValue[];

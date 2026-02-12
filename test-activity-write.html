@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teste Activity Log</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    #output {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      min-height: 100px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .success {
+      color: #4CAF50;
+      font-weight: bold;
+    }
+    .error {
+      color: #f44336;
+      font-weight: bold;
+    }
+    .info {
+      color: #2196F3;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 Teste do Activity Log</h1>
+    <p class="subtitle">Teste se as atividades estão sendo gravadas no Firestore</p>
+
+    <div>
+      <button onclick="testWrite()">📝 Testar Gravação</button>
+      <button onclick="testRead()" class="secondary">📖 Ler Atividades</button>
+      <button onclick="clearOutput()" class="secondary">🗑️ Limpar</button>
+    </div>
+
+    <div id="output">Clique em "Testar Gravação" para começar...</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js';
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js';
+
+    // Configuração do Firebase - PREENCHA COM SUAS CREDENCIAIS
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // Função auxiliar para log
+    function log(message, type = 'info') {
+      const output = document.getElementById('output');
+      const timestamp = new Date().toLocaleTimeString('pt-BR');
+      const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+      output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    // Autenticar anonimamente (necessário para escrever no Firestore)
+    async function authenticate() {
+      try {
+        await signInAnonymously(auth);
+        log('✅ Autenticado com sucesso', 'success');
+        return true;
+      } catch (error) {
+        log(`❌ Erro na autenticação: ${error.message}`, 'error');
+        return false;
+      }
+    }
+
+    // Testar gravação de atividade
+    window.testWrite = async function() {
+      log('🔄 Iniciando teste de gravação...');
+
+      if (!await authenticate()) {
+        return;
+      }
+
+      try {
+        const testActivity = {
+          timestamp: Timestamp.now(),
+          eventType: 'route_created',
+          userId: 'test-user',
+          userName: 'Usuário de Teste',
+          entityType: 'route',
+          entityId: 'test-route-001',
+          entityCode: 'LN-TEST-A',
+          serviceId: 'test-service-001',
+          serviceCode: 'LN-TEST',
+          routeId: 'test-route-001',
+          routeCode: 'LN-TEST-A',
+          action: 'Rota de teste criada para verificação do sistema',
+          metadata: {
+            totalPoints: 5,
+            testMode: true,
+            createdAt: new Date().toISOString()
+          }
+        };
+
+        log('📝 Tentando gravar atividade...');
+        const docRef = await addDoc(collection(db, 'activity_log'), testActivity);
+        log(`✅ Atividade gravada com sucesso! ID: ${docRef.id}`, 'success');
+        log(`   Event Type: ${testActivity.eventType}`);
+        log(`   Action: ${testActivity.action}`);
+
+      } catch (error) {
+        log(`❌ Erro ao gravar atividade: ${error.message}`, 'error');
+        log(`   Code: ${error.code}`, 'error');
+
+        if (error.code === 'permission-denied') {
+          log('⚠️  Permissão negada! Verifique as regras do Firestore', 'error');
+        }
+      }
+    }
+
+    // Ler atividades
+    window.testRead = async function() {
+      log('🔄 Lendo atividades...');
+
+      if (!await authenticate()) {
+        return;
+      }
+
+      try {
+        const q = query(
+          collection(db, 'activity_log'),
+          orderBy('timestamp', 'desc'),
+          limit(5)
+        );
+
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+          log('⚠️  Nenhuma atividade encontrada', 'info');
+          return;
+        }
+
+        log(`✅ Encontradas ${snapshot.size} atividades:`, 'success');
+        snapshot.forEach((doc, index) => {
+          const data = doc.data();
+          log(`\n${index + 1}. [${data.eventType}] ${data.action}`);
+          log(`   Usuário: ${data.userName || 'N/A'}`);
+          log(`   Código: ${data.entityCode || 'N/A'}`);
+        });
+
+      } catch (error) {
+        log(`❌ Erro ao ler atividades: ${error.message}`, 'error');
+
+        if (error.code === 'failed-precondition') {
+          log('⚠️  Índice faltando! Execute: firebase deploy --only firestore:indexes', 'error');
+        }
+      }
+    }
+
+    window.clearOutput = function() {
+      document.getElementById('output').innerHTML = 'Clique em "Testar Gravação" para começar...\n';
+    }
+
+    // Log inicial
+    log('🚀 Sistema pronto. Autentique-se e teste!');
+  </script>
+</body>
+</html>

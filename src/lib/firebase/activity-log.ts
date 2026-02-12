@@ -65,12 +65,25 @@ export type ActivityLogEntry = {
  */
 export async function logActivity(entry: Omit<ActivityLogEntry, 'timestamp'>): Promise<void> {
   try {
-    await addDoc(collection(db, 'activity_log'), {
+    console.log('[ActivityLog] 📝 Tentando registrar:', {
+      eventType: entry.eventType,
+      action: entry.action,
+      entityType: entry.entityType,
+      entityCode: entry.entityCode,
+    });
+    console.log('[ActivityLog] DB disponível:', !!db);
+
+    const docRef = await addDoc(collection(db, 'activity_log'), {
       ...entry,
       timestamp: Timestamp.now(),
     });
+
+    console.log('[ActivityLog] ✅ Atividade registrada com sucesso! ID:', docRef.id);
   } catch (error) {
-    console.error('Erro ao registrar atividade:', error);
+    console.error('[ActivityLog] ❌ Erro ao registrar atividade:', error);
+    console.error('[ActivityLog] Error code:', (error as any)?.code);
+    console.error('[ActivityLog] Error message:', (error as any)?.message);
+    console.error('[ActivityLog] Entry que falhou:', entry);
     // Não propagar erro - logging não deve quebrar a operação principal
   }
 }
