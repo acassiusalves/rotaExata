@@ -1701,10 +1701,17 @@ export default function ServiceAcompanharPage() {
           }
 
           // Stops não atribuídos → unassignedStops
-          // APENAS buscar do Firestore os stops explicitamente marcados como não alocados
-          // NÃO incluir stops do allStops do serviço que não estão em rotas (eles ficam "soltos" propositalmente)
+          // Incluir:
+          // 1. Stops do allStops que NÃO estão em nenhuma rota (parsedData.stops já filtrados)
+          // 2. Stops explicitamente marcados em routes.unassignedStops
+          // 3. Stops sem coordenadas (precisam de geocoding manual)
 
+          // Stops sem coordenadas (precisam de geocoding)
           const stopsWithoutCoords = parsedData.stops.filter((s) => s.id && (!s.lat || !s.lng || s.lat === 0 || s.lng === 0));
+
+          // Stops COM coordenadas que não estão em rotas (vêm do Lunna)
+          const stopsWithCoords = parsedData.stops.filter((s) => s.id && s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
+          console.log('📦 [useEffect:loadRouteData] Stops não alocados do allStops (com coords):', stopsWithCoords.length);
 
           // Buscar unassignedStops salvos no Firestore (de qualquer rota do serviço)
           let firestoreUnassigned: PlaceValue[] = [];
@@ -1724,15 +1731,17 @@ export default function ServiceAcompanharPage() {
             }
           }
 
-          // Combinar APENAS stops sem coordenadas + unassigned do Firestore
-          // NÃO incluir stops com coordenadas que não estão em rotas (parsedData.stops)
-          // Deduplicar por ID
-          const allUnassigned = [...stopsWithoutCoords, ...firestoreUnassigned];
+          // Combinar: stops sem coords + stops com coords não alocados + unassigned do Firestore
+          // Deduplicar por ID e orderNumber
+          const allUnassigned = [...stopsWithoutCoords, ...stopsWithCoords, ...firestoreUnassigned];
           const seenIds = new Set<string>();
+          const seenOrders = new Set<string>();
           const dedupedUnassigned = allUnassigned.filter(s => {
             const sid = String(s.id ?? s.placeId);
             if (seenIds.has(sid)) return false;
+            if (s.orderNumber && seenOrders.has(s.orderNumber)) return false;
             seenIds.add(sid);
+            if (s.orderNumber) seenOrders.add(s.orderNumber);
             return true;
           });
 
