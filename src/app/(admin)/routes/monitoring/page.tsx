@@ -33,8 +33,6 @@ import {
   orderBy,
   where,
   Timestamp,
-  doc,
-  updateDoc,
 } from 'firebase/firestore';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
@@ -197,47 +195,6 @@ export default function MonitoringPage() {
 
     return () => unsubscribe();
   }, []);
-
-  // Verifica e auto-completa rotas após 48h
-  React.useEffect(() => {
-    const checkAndAutoCompleteRoutes = async () => {
-      const now = new Date();
-      const routesToAutoComplete = routes.filter((route) => {
-        // Verifica se a rota não está concluída
-        if (route.status === 'completed' || route.status === 'completed_auto') {
-          return false;
-        }
-
-        // Calcula a diferença em horas entre agora e a data planejada
-        const plannedDate = route.plannedDate.toDate();
-        const hoursDiff = (now.getTime() - plannedDate.getTime()) / (1000 * 60 * 60);
-
-        // Se passou mais de 48h, marca para auto-conclusão
-        return hoursDiff > 48;
-      });
-
-      // Atualiza as rotas que passaram de 48h
-      for (const route of routesToAutoComplete) {
-        try {
-          const routeRef = doc(db, 'routes', route.id);
-          await updateDoc(routeRef, {
-            status: 'completed_auto',
-            autoCompletedAt: Timestamp.now(),
-          });
-        } catch (error) {
-          console.error(`Erro ao auto-concluir rota ${route.name}:`, error);
-        }
-      }
-    };
-
-    // Verifica a cada 5 minutos
-    const interval = setInterval(checkAndAutoCompleteRoutes, 5 * 60 * 1000);
-
-    // Verifica imediatamente ao carregar
-    checkAndAutoCompleteRoutes();
-
-    return () => clearInterval(interval);
-  }, [routes]);
 
   const getInitials = (name: string) => {
     if (!name) return 'N/A';

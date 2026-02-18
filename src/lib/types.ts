@@ -241,6 +241,12 @@ export type ActivityEvent = {
   details: string;
 };
 
+// Campos adicionais de rota para reenvio
+export type RouteResendInfo = {
+  resentAt?: import('firebase/firestore').Timestamp | Date;
+  resentBy?: string;
+};
+
 // ============================================
 // TIPOS PARA INTEGRAÇÃO COM SISTEMA LUNNA
 // ============================================

@@ -27,7 +27,10 @@ export type ActivityEventType =
   // Atribuições
   | 'route_dispatched'
   | 'driver_assigned'
-  | 'driver_unassigned';
+  | 'driver_unassigned'
+  // Finalização automática e reenvio
+  | 'route_auto_completed'
+  | 'route_resent';
 
 export type ActivityChange = {
   field: string;
@@ -725,6 +728,88 @@ export async function logDriverUnassigned(params: {
     routeId: params.routeId,
     routeCode: params.routeCode,
     action: `Motorista ${params.driverName} removido da rota ${params.routeCode}`,
+    metadata: {
+      driverName: params.driverName,
+      driverId: params.driverId,
+    },
+  });
+}
+
+// ============================================================================
+// HELPER FUNCTIONS - FINALIZAÇÃO AUTOMÁTICA E REENVIO
+// ============================================================================
+
+/**
+ * Registra finalização automática de rota pelo sistema após 48h
+ */
+export async function logRouteAutoCompleted(params: {
+  routeId: string;
+  routeCode: string;
+  serviceId?: string;
+  serviceCode?: string;
+  driverName?: string;
+  driverId?: string;
+}) {
+  await logActivity({
+    eventType: 'route_auto_completed',
+    userId: 'system',
+    userName: 'Sistema',
+    entityType: 'route',
+    entityId: params.routeId,
+    entityCode: params.routeCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.routeId,
+    routeCode: params.routeCode,
+    action: `Rota ${params.routeCode} finalizada automaticamente após 48h sem conclusão pelo motorista`,
+    changes: [
+      {
+        field: 'status',
+        oldValue: 'in_progress',
+        newValue: 'completed_auto',
+        fieldLabel: 'Status',
+      },
+    ],
+    metadata: {
+      driverName: params.driverName,
+      driverId: params.driverId,
+    },
+  });
+}
+
+/**
+ * Registra reenvio de rota ao motorista pelo administrador
+ */
+export async function logRouteResent(params: {
+  userId: string;
+  userName: string;
+  routeId: string;
+  routeCode: string;
+  serviceId?: string;
+  serviceCode?: string;
+  driverName: string;
+  driverId: string;
+}) {
+  await logActivity({
+    eventType: 'route_resent',
+    userId: params.userId,
+    userName: params.userName,
+    entityType: 'route',
+    entityId: params.routeId,
+    entityCode: params.routeCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.routeId,
+    routeCode: params.routeCode,
+    action: `Rota ${params.routeCode} reenviada ao motorista ${params.driverName} pelo administrador`,
+    changes: [
+      {
+        field: 'status',
+        oldValue: 'completed_auto',
+        newValue: 'dispatched',
+        fieldLabel: 'Status',
+      },
+    ],
     metadata: {
       driverName: params.driverName,
       driverId: params.driverId,

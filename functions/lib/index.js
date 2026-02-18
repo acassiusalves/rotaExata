@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -818,6 +818,257 @@ exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southa
         const msg = error.message || "Falha ao gerar token de impersonação";
         console.error("❌ Erro ao gerar token de impersonação:", error);
         throw new https_1.HttpsError("internal", msg);
+    }
+});
+/* ========== autoCompleteRoutes (scheduled) ========== */
+// Função scheduled que roda a cada 30 minutos para finalizar automaticamente
+// rotas que passaram de 48h desde a plannedDate sem serem concluídas pelo motorista
+exports.autoCompleteRoutes = functionsV1
+    .region("southamerica-east1")
+    .pubsub.schedule("every 30 minutes")
+    .onRun(async () => {
+    const db = (0, firestore_1.getFirestore)();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    try {
+        // Buscar rotas com status dispatched ou in_progress cuja plannedDate passou de 48h
+        const staleRoutes = await db
+            .collection("routes")
+            .where("status", "in", ["dispatched", "in_progress"])
+            .where("plannedDate", "<", cutoff)
+            .get();
+        if (staleRoutes.empty) {
+            console.log("✅ Nenhuma rota para auto-finalizar");
+            return null;
+        }
+        // Atualizar status em batch
+        const batch = db.batch();
+        staleRoutes.docs.forEach((routeDoc) => {
+            batch.update(routeDoc.ref, {
+                status: "completed_auto",
+                autoCompletedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            console.log(`⏰ Auto-finalizando rota ${routeDoc.id}`);
+        });
+        await batch.commit();
+        console.log(`✅ ${staleRoutes.size} rota(s) auto-finalizada(s)`);
+        // Após o batch: enviar FCM ao motorista e gravar activity log para cada rota
+        const messaging = (0, messaging_1.getMessaging)();
+        for (const routeDoc of staleRoutes.docs) {
+            const routeData = routeDoc.data();
+            const routeId = routeDoc.id;
+            const routeCode = routeData.code || routeId;
+            const driverId = routeData.driverId;
+            // 1. Gravar activity log
+            try {
+                await db.collection("activity_log").add({
+                    timestamp: firestore_1.FieldValue.serverTimestamp(),
+                    eventType: "route_auto_completed",
+                    userId: "system",
+                    userName: "Sistema",
+                    entityType: "route",
+                    entityId: routeId,
+                    entityCode: routeCode,
+                    serviceId: routeData.serviceId || null,
+                    serviceCode: routeData.serviceCode || null,
+                    routeId: routeId,
+                    routeCode: routeCode,
+                    action: `Rota ${routeCode} finalizada automaticamente após 48h sem conclusão pelo motorista`,
+                    changes: [
+                        {
+                            field: "status",
+                            oldValue: routeData.status,
+                            newValue: "completed_auto",
+                            fieldLabel: "Status",
+                        },
+                    ],
+                    metadata: {
+                        driverId: driverId || null,
+                        driverName: routeData.driverInfo?.name || null,
+                    },
+                });
+            }
+            catch (logError) {
+                console.error(`❌ Erro ao gravar log para rota ${routeId}:`, logError);
+            }
+            // 2. Enviar FCM ao motorista (se tiver driverId e token)
+            if (!driverId)
+                continue;
+            try {
+                const driverDoc = await db.collection("users").doc(driverId).get();
+                const fcmToken = driverDoc.data()?.fcmToken;
+                if (!fcmToken)
+                    continue;
+                const notificationTitle = "Rota finalizada automaticamente";
+                const notificationBody = "Sua rota foi encerrada pelo sistema pois o prazo expirou.";
+                const message = {
+                    data: {
+                        routeId,
+                        type: "route_auto_completed",
+                        title: notificationTitle,
+                        body: notificationBody,
+                        notificationTitle,
+                        notificationBody,
+                    },
+                    token: fcmToken,
+                    android: {
+                        priority: "high",
+                    },
+                    webpush: {
+                        notification: {
+                            title: notificationTitle,
+                            body: notificationBody,
+                            icon: "/icons/pwa-192.png",
+                            badge: "/icons/pwa-192.png",
+                            requireInteraction: false,
+                            tag: `auto_completed_${routeId}`,
+                        },
+                        fcmOptions: {
+                            link: "/my-routes",
+                        },
+                    },
+                };
+                await messaging.send(message);
+                console.log(`✅ Notificação de auto-finalização enviada ao motorista ${driverId}`);
+            }
+            catch (notifError) {
+                console.error(`❌ Erro ao notificar motorista ${driverId}:`, notifError);
+            }
+        }
+        return null;
+    }
+    catch (error) {
+        console.error("❌ Erro na auto-finalização de rotas:", error);
+        return null;
+    }
+});
+/* ========== resendRouteToDriver (callable) ========== */
+// Reenvia uma rota auto-finalizada ao motorista original, voltando o status para 'dispatched'
+exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    // Verificar autenticação
+    const auth = req.auth;
+    if (!auth) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    if (!routeId) {
+        throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    try {
+        const db = (0, firestore_1.getFirestore)();
+        // Verificar role do usuário (admin ou socio)
+        const userDoc = await db.collection("users").doc(auth.uid).get();
+        const userData = userDoc.data();
+        const userRole = userData?.role || "";
+        if (userRole !== "admin" && userRole !== "socio") {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores e sócios podem reenviar rotas");
+        }
+        // Buscar a rota
+        const routeDoc = await db.collection("routes").doc(routeId).get();
+        if (!routeDoc.exists) {
+            throw new https_1.HttpsError("not-found", "Rota não encontrada");
+        }
+        const routeData = routeDoc.data();
+        // Verificar que a rota está com status completed_auto
+        if (routeData?.status !== "completed_auto") {
+            throw new https_1.HttpsError("failed-precondition", "Apenas rotas finalizadas automaticamente podem ser reenviadas");
+        }
+        // Verificar que a rota tem motorista atribuído
+        const driverId = routeData.driverId;
+        if (!driverId) {
+            throw new https_1.HttpsError("failed-precondition", "A rota não possui motorista atribuído");
+        }
+        const driverName = routeData.driverInfo?.name || driverId;
+        const routeCode = routeData.code || routeId;
+        const adminName = userData?.displayName || userData?.email || auth.uid;
+        // Atualizar status da rota para dispatched
+        await db.collection("routes").doc(routeId).update({
+            status: "dispatched",
+            resentAt: firestore_1.FieldValue.serverTimestamp(),
+            resentBy: auth.uid,
+        });
+        // Gravar activity log
+        try {
+            await db.collection("activity_log").add({
+                timestamp: firestore_1.FieldValue.serverTimestamp(),
+                eventType: "route_resent",
+                userId: auth.uid,
+                userName: adminName,
+                entityType: "route",
+                entityId: routeId,
+                entityCode: routeCode,
+                serviceId: routeData.serviceId || null,
+                serviceCode: routeData.serviceCode || null,
+                routeId: routeId,
+                routeCode: routeCode,
+                action: `Rota ${routeCode} reenviada ao motorista ${driverName} pelo administrador`,
+                changes: [
+                    {
+                        field: "status",
+                        oldValue: "completed_auto",
+                        newValue: "dispatched",
+                        fieldLabel: "Status",
+                    },
+                ],
+                metadata: {
+                    driverId,
+                    driverName,
+                },
+            });
+        }
+        catch (logError) {
+            console.error("❌ Erro ao gravar log de reenvio:", logError);
+        }
+        // Enviar FCM ao motorista
+        try {
+            const driverDoc = await db.collection("users").doc(driverId).get();
+            const fcmToken = driverDoc.data()?.fcmToken;
+            if (fcmToken) {
+                const messaging = (0, messaging_1.getMessaging)();
+                const notificationTitle = "Rota reenviada";
+                const notificationBody = "Uma rota foi reenviada para você. Acesse o app para visualizá-la.";
+                const message = {
+                    data: {
+                        routeId,
+                        type: "route_resent",
+                        title: notificationTitle,
+                        body: notificationBody,
+                        notificationTitle,
+                        notificationBody,
+                    },
+                    token: fcmToken,
+                    android: {
+                        priority: "high",
+                    },
+                    webpush: {
+                        notification: {
+                            title: notificationTitle,
+                            body: notificationBody,
+                            icon: "/icons/pwa-192.png",
+                            badge: "/icons/pwa-192.png",
+                            requireInteraction: true,
+                            tag: `resent_${routeId}`,
+                        },
+                        fcmOptions: {
+                            link: `/my-routes/${routeId}`,
+                        },
+                    },
+                };
+                await messaging.send(message);
+                console.log(`✅ Notificação de reenvio enviada ao motorista ${driverId}`);
+            }
+        }
+        catch (notifError) {
+            console.error(`❌ Erro ao notificar motorista no reenvio:`, notifError);
+        }
+        return { ok: true, message: "Rota reenviada ao motorista com sucesso." };
+    }
+    catch (error) {
+        if (error instanceof https_1.HttpsError)
+            throw error;
+        const msg = error.message || "Falha ao reenviar rota.";
+        throw new https_1.HttpsError("internal", `Erro: ${msg}`);
     }
 });
 //# sourceMappingURL=index.js.map

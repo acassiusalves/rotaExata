@@ -12,7 +12,18 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { History, Loader2, MapPin, Milestone, FileText, LayoutGrid, List, Search, Sunrise, Sunset, Calendar } from 'lucide-react';
+import { History, Loader2, MapPin, Milestone, FileText, LayoutGrid, List, Search, Sunrise, Sunset, Calendar, RefreshCw } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { functions } from '@/lib/firebase/client';
+import { httpsCallable } from 'firebase/functions';
+import { useToast } from '@/hooks/use-toast';
 import {
   Table,
   TableBody,
@@ -46,6 +57,7 @@ type RouteDocument = RouteInfo & {
   name: string;
   plannedDate: Timestamp;
   completedAt?: Timestamp;
+  autoCompletedAt?: Timestamp;
   origin: PlaceValue;
   driverInfo: {
     name: string;
@@ -120,12 +132,18 @@ const getInitials = (name: string) => {
 };
 
 export default function HistoryRoutesPage() {
+  const { toast } = useToast();
   const [completedRoutes, setCompletedRoutes] = React.useState<RouteDocument[]>([]);
   const [filteredRoutes, setFilteredRoutes] = React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
+
+  // Estados para reenvio de rota
+  const [routeToResend, setRouteToResend] = React.useState<RouteDocument | null>(null);
+  const [isResendDialogOpen, setIsResendDialogOpen] = React.useState(false);
+  const [isResending, setIsResending] = React.useState(false);
 
   // Estados dos filtros
   const [searchTerm, setSearchTerm] = React.useState('');
@@ -134,6 +152,7 @@ export default function HistoryRoutesPage() {
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 30));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
   const [dateFilterType, setDateFilterType] = React.useState<'completed' | 'planned'>('completed');
+  const [selectedCompletionType, setSelectedCompletionType] = React.useState<'all' | 'completed' | 'completed_auto'>('all');
 
   // Buscar todas as rotas concluídas
   React.useEffect(() => {
@@ -151,9 +170,10 @@ export default function HistoryRoutesPage() {
         });
 
         // Ordenar por data de conclusão (mais recente primeiro) no cliente
+        // Usa autoCompletedAt como fallback para rotas completed_auto
         routesData.sort((a, b) => {
-          const dateA = a.completedAt?.toMillis() || 0;
-          const dateB = b.completedAt?.toMillis() || 0;
+          const dateA = (a.completedAt ?? a.autoCompletedAt)?.toMillis() || 0;
+          const dateB = (b.completedAt ?? b.autoCompletedAt)?.toMillis() || 0;
           return dateB - dateA;
         });
 
@@ -195,6 +215,11 @@ export default function HistoryRoutesPage() {
       );
     }
 
+    // Filtro por tipo de conclusão
+    if (selectedCompletionType !== 'all') {
+      filtered = filtered.filter(route => route.status === selectedCompletionType);
+    }
+
     // Filtro por motorista
     if (selectedDriver !== 'all') {
       filtered = filtered.filter(route => route.driverInfo?.name === selectedDriver);
@@ -214,8 +239,10 @@ export default function HistoryRoutesPage() {
     const end = endOfDay(endDate);
     filtered = filtered.filter(route => {
       if (dateFilterType === 'completed') {
-        if (!route.completedAt) return false;
-        const completedDate = route.completedAt.toDate();
+        // Rotas completed_auto usam autoCompletedAt; rotas completed usam completedAt
+        const dateField = route.completedAt ?? route.autoCompletedAt;
+        if (!dateField) return false;
+        const completedDate = dateField.toDate();
         return completedDate >= start && completedDate <= end;
       } else {
         if (!route.plannedDate) return false;
@@ -225,11 +252,33 @@ export default function HistoryRoutesPage() {
     });
 
     setFilteredRoutes(filtered);
-  }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate, dateFilterType]);
+  }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate, dateFilterType, selectedCompletionType]);
 
   const handleOpenDetails = (route: RouteDocument) => {
     setSelectedRoute(route);
     setIsDetailsOpen(true);
+  };
+
+  const handleOpenResendDialog = (route: RouteDocument) => {
+    setRouteToResend(route);
+    setIsResendDialogOpen(true);
+  };
+
+  const handleConfirmResend = async () => {
+    if (!routeToResend) return;
+    setIsResending(true);
+    try {
+      const resendRouteToDriver = httpsCallable(functions, 'resendRouteToDriver');
+      await resendRouteToDriver({ routeId: routeToResend.id });
+      toast({ title: 'Rota reenviada!', description: 'O motorista foi notificado e a rota voltará ao app dele.' });
+      setIsResendDialogOpen(false);
+      setRouteToResend(null);
+    } catch (error) {
+      console.error('Erro ao reenviar rota:', error);
+      toast({ variant: 'destructive', title: 'Erro ao reenviar rota', description: 'Tente novamente.' });
+    } finally {
+      setIsResending(false);
+    }
   };
 
   return (
@@ -261,7 +310,7 @@ export default function HistoryRoutesPage() {
             <CardDescription>Refine sua busca de rotas concluídas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
               {/* Campo de busca */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Buscar</label>
@@ -334,6 +383,21 @@ export default function HistoryRoutesPage() {
                     <SelectItem value="matutino">Matutino (8h-11h)</SelectItem>
                     <SelectItem value="vespertino">Vespertino (12h-18h)</SelectItem>
                     <SelectItem value="noturno">Noturno (19h+)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Filtro de tipo de conclusão */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Tipo de Conclusão</label>
+                <Select value={selectedCompletionType} onValueChange={(value: 'all' | 'completed' | 'completed_auto') => setSelectedCompletionType(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    <SelectItem value="completed">Manual</SelectItem>
+                    <SelectItem value="completed_auto">Automática</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -419,11 +483,17 @@ export default function HistoryRoutesPage() {
                     </div>
                   </div>
                 </CardContent>
-                <CardFooter>
+                <CardFooter className="flex flex-col gap-2">
                   <Button className="w-full" variant="secondary" onClick={() => handleOpenDetails(route)}>
                     <FileText className="mr-2 h-4 w-4" />
                     Ver Detalhes
                   </Button>
+                  {route.status === 'completed_auto' && (
+                    <Button className="w-full" variant="outline" onClick={() => handleOpenResendDialog(route)}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Reenviar ao Motorista
+                    </Button>
+                  )}
                 </CardFooter>
               </Card>
             ))}
@@ -490,14 +560,26 @@ export default function HistoryRoutesPage() {
                     <TableCell className="text-center">{route.stops.length}</TableCell>
                     <TableCell className="text-center">{formatDistance(route.distanceMeters)} km</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenDetails(route)}
-                      >
-                        <FileText className="mr-2 h-4 w-4" />
-                        Ver Detalhes
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        {route.status === 'completed_auto' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenResendDialog(route)}
+                          >
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Reenviar
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenDetails(route)}
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          Ver Detalhes
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -514,6 +596,41 @@ export default function HistoryRoutesPage() {
           route={selectedRoute}
         />
       )}
+
+      <Dialog open={isResendDialogOpen} onOpenChange={(open) => { if (!isResending) setIsResendDialogOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reenviar rota ao motorista?</DialogTitle>
+            <DialogDescription>
+              A rota <strong>{routeToResend?.name}</strong> será reenviada para{' '}
+              <strong>{routeToResend?.driverInfo?.name || 'o motorista'}</strong>. Ela voltará a aparecer
+              no app do motorista com status &quot;Aguardando início&quot;. As entregas já realizadas serão mantidas.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsResendDialogOpen(false)}
+              disabled={isResending}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleConfirmResend} disabled={isResending}>
+              {isResending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Reenviando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Confirmar reenvio
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
