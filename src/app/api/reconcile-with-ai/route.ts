@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { analyzePaymentReceipt } from "@/ai/flows/analyze-payment-receipt";
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
+import { logBankReconciliation } from '@/lib/firebase/activity-log';
 
 // Tolerância de valor para conciliação automática (em reais)
 const VALUE_TOLERANCE = 0.50;
@@ -317,6 +318,25 @@ export async function POST(req: Request) {
                 stops[item.stopIndex].reconciledMethod = 'ai';
                 stops[item.stopIndex].aiExtractedValue = aiResult.extractedValue;
                 routeUpdated = true;
+
+                // Registra a conciliação automática no log de atividades
+                await logBankReconciliation({
+                  userId: 'ai-system',
+                  userName: 'Sistema IA',
+                  routeId: item.routeId,
+                  routeCode: routeData.code || 'N/A',
+                  pointId: stops[item.stopIndex].id,
+                  pointCode: stops[item.stopIndex].pointCode,
+                  customerName: item.customerName,
+                  expectedValue: item.expectedValue,
+                  extractedValue: aiResult.extractedValue,
+                  reconciledMethod: 'ai',
+                  photoUrl: item.photoUrl,
+                  difference: result.difference,
+                }).catch(logError => {
+                  // Não propaga erro de logging para não quebrar conciliação
+                  console.error('[Reconciliation] Erro ao registrar log:', logError);
+                });
               }
             } else {
               result.error = `Diferença de R$ ${result.difference.toFixed(2)} excede tolerância de R$ ${VALUE_TOLERANCE.toFixed(2)}`;

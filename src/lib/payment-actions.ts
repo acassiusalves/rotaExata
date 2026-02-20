@@ -2,6 +2,12 @@ import { db } from './firebase/client';
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { calculateRouteEarnings, type RouteForCalculation } from './earnings-calculator';
 import type { EarningsRules, DriverPayment, PaymentMethod } from './types';
+import {
+  logPaymentApproved,
+  logPaymentMarkedAsPaid,
+  logPaymentCancelled,
+  logPaymentBatchApproved,
+} from './firebase/activity-log';
 
 // Remove campos undefined de um objeto recursivamente
 function removeUndefined(obj: any): any {
@@ -23,10 +29,12 @@ function removeUndefined(obj: any): any {
  * Aprova um pagamento pendente
  * @param paymentId - ID do pagamento
  * @param userId - ID do usuário que está aprovando
+ * @param userName - Nome do usuário que está aprovando (opcional)
  */
 export async function approvePayment(
   paymentId: string,
-  userId: string
+  userId: string,
+  userName?: string
 ): Promise<void> {
   try {
     const paymentRef = doc(db, 'driverPayments', paymentId);
@@ -54,6 +62,17 @@ export async function approvePayment(
       },
       { merge: true }
     );
+
+    // Registra a atividade no log
+    await logPaymentApproved({
+      userId,
+      userName: userName || 'Usuário',
+      paymentId,
+      driverName: payment.driverName || 'Motorista',
+      routeCode: payment.routeCode || 'N/A',
+      totalValue: payment.totalEarnings || 0,
+      routeId: payment.routeId,
+    });
   } catch (error) {
     throw new Error(
       `Erro ao aprovar pagamento: ${
@@ -67,25 +86,55 @@ export async function approvePayment(
  * Aprova múltiplos pagamentos em lote
  * @param paymentIds - Array de IDs de pagamentos
  * @param userId - ID do usuário que está aprovando
+ * @param userName - Nome do usuário que está aprovando (opcional)
  * @returns Resultado com sucessos e erros
  */
 export async function approvePaymentsBatch(
   paymentIds: string[],
-  userId: string
+  userId: string,
+  userName?: string
 ): Promise<{ success: number; errors: Array<{ id: string; error: string }> }> {
   const errors: Array<{ id: string; error: string }> = [];
   let success = 0;
+  const successfulPaymentIds: string[] = [];
+  const driverNames: string[] = [];
+  let totalValue = 0;
 
   for (const paymentId of paymentIds) {
     try {
-      await approvePayment(paymentId, userId);
+      // Busca dados do pagamento antes de aprovar
+      const paymentRef = doc(db, 'driverPayments', paymentId);
+      const paymentDoc = await getDoc(paymentRef);
+
+      if (paymentDoc.exists()) {
+        const payment = paymentDoc.data() as DriverPayment;
+        if (payment.driverName && !driverNames.includes(payment.driverName)) {
+          driverNames.push(payment.driverName);
+        }
+        totalValue += payment.totalEarnings || 0;
+      }
+
+      await approvePayment(paymentId, userId, userName);
       success++;
+      successfulPaymentIds.push(paymentId);
     } catch (error) {
       errors.push({
         id: paymentId,
         error: error instanceof Error ? error.message : 'Erro desconhecido',
       });
     }
+  }
+
+  // Registra a atividade em lote se houve pelo menos 1 sucesso
+  if (success > 0) {
+    await logPaymentBatchApproved({
+      userId,
+      userName: userName || 'Usuário',
+      paymentIds: successfulPaymentIds,
+      totalCount: success,
+      totalValue,
+      driverNames,
+    });
   }
 
   return { success, errors };
@@ -98,13 +147,15 @@ export async function approvePaymentsBatch(
  * @param paymentMethod - Método de pagamento usado
  * @param paymentReference - Referência do pagamento (ID transação, etc.)
  * @param paidDate - Data do pagamento (opcional, usa data atual se não fornecida)
+ * @param userName - Nome do usuário que está marcando como pago (opcional)
  */
 export async function markAsPaid(
   paymentId: string,
   userId: string,
   paymentMethod: PaymentMethod,
   paymentReference?: string,
-  paidDate?: Date
+  paidDate?: Date,
+  userName?: string
 ): Promise<void> {
   try {
     const paymentRef = doc(db, 'driverPayments', paymentId);
@@ -136,6 +187,20 @@ export async function markAsPaid(
       },
       { merge: true }
     );
+
+    // Registra a atividade no log
+    await logPaymentMarkedAsPaid({
+      userId,
+      userName: userName || 'Usuário',
+      paymentId,
+      driverName: payment.driverName || 'Motorista',
+      routeCode: payment.routeCode || 'N/A',
+      totalValue: payment.totalEarnings || 0,
+      paymentMethod,
+      paymentReference,
+      paidDate,
+      routeId: payment.routeId,
+    });
   } catch (error) {
     throw new Error(
       `Erro ao marcar pagamento como pago: ${
@@ -150,11 +215,13 @@ export async function markAsPaid(
  * @param paymentId - ID do pagamento
  * @param userId - ID do usuário que está cancelando
  * @param reason - Motivo do cancelamento
+ * @param userName - Nome do usuário que está cancelando (opcional)
  */
 export async function cancelPayment(
   paymentId: string,
   userId: string,
-  reason: string
+  reason: string,
+  userName?: string
 ): Promise<void> {
   try {
     const paymentRef = doc(db, 'driverPayments', paymentId);
@@ -165,6 +232,7 @@ export async function cancelPayment(
     }
 
     const payment = paymentDoc.data() as DriverPayment;
+    const previousStatus = payment.status as 'pending' | 'approved';
 
     if (payment.status === 'paid') {
       throw new Error(
@@ -191,6 +259,19 @@ export async function cancelPayment(
       },
       { merge: true }
     );
+
+    // Registra a atividade no log
+    await logPaymentCancelled({
+      userId,
+      userName: userName || 'Usuário',
+      paymentId,
+      driverName: payment.driverName || 'Motorista',
+      routeCode: payment.routeCode || 'N/A',
+      totalValue: payment.totalEarnings || 0,
+      cancellationReason: reason.trim(),
+      previousStatus,
+      routeId: payment.routeId,
+    });
   } catch (error) {
     throw new Error(
       `Erro ao cancelar pagamento: ${

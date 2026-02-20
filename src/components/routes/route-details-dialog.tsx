@@ -31,9 +31,12 @@ import {
   Wallet,
   Truck,
   CreditCard,
+  ArrowRight,
+  Info,
 } from 'lucide-react';
-import type { PlaceValue, RouteInfo, Payment } from '@/lib/types';
-import { Timestamp } from 'firebase/firestore';
+import type { PlaceValue, RouteInfo, Payment, ActivityLogEntry } from '@/lib/types';
+import { Timestamp, collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import Image from 'next/image';
@@ -94,7 +97,31 @@ export function RouteDetailsDialog({
   route,
 }: RouteDetailsDialogProps) {
   const [isMapOpen, setIsMapOpen] = React.useState(false);
-  
+  const [removedStops, setRemovedStops] = React.useState<ActivityLogEntry[]>([]);
+
+  // Buscar paradas que foram removidas desta rota
+  React.useEffect(() => {
+    if (!route?.id) return;
+
+    const q = query(
+      collection(db, 'activity_log'),
+      where('routeId', '==', route.id),
+      where('eventType', '==', 'point_removed_from_route'),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const entries: ActivityLogEntry[] = [];
+      snapshot.forEach((doc) => {
+        entries.push({ id: doc.id, ...doc.data() } as ActivityLogEntry & { id: string });
+      });
+      setRemovedStops(entries);
+    });
+
+    return () => unsubscribe();
+  }, [route?.id]);
+
   if (!route) return null;
 
   return (
@@ -156,19 +183,60 @@ export function RouteDetailsDialog({
                 {route.stops.map((stop, index) => (
                   <AccordionItem value={`item-${index}`} key={stop.id || index}>
                     <AccordionTrigger>
-                      <div className="flex items-center gap-3 text-left">
+                      <div className="flex items-center gap-3 text-left w-full">
                         {stop.deliveryStatus === 'completed' ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-600" />
+                          <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
                         ) : (
-                          <AlertCircle className="h-5 w-5 text-destructive" />
+                          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
                         )}
-                        <span className="font-semibold">
+                        <span className="font-semibold flex-1">
                           Parada {index + 1}: {stop.customerName || 'Endereço'}
                         </span>
+                        {stop.previousRouteCode && (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 shrink-0">
+                            <ArrowRight className="h-3 w-3 mr-1" />
+                            De {stop.previousRouteCode}
+                          </Badge>
+                        )}
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="space-y-4 pl-4">
                       <p className="text-xs text-muted-foreground">{stop.address}</p>
+
+                      {stop.previousRouteCode && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2 text-amber-900">
+                            <Info className="h-4 w-4" />
+                            <span className="font-semibold text-sm">Parada Transferida</span>
+                          </div>
+                          <div className="text-sm text-amber-800 space-y-1">
+                            <p>
+                              <strong>Rota de Origem:</strong> {stop.previousRouteCode}
+                              {stop.movedFromPointCode && ` (${stop.movedFromPointCode})`}
+                            </p>
+                            {stop.movedAt && (
+                              <p>
+                                <strong>Transferida em:</strong>{' '}
+                                {format(
+                                  stop.movedAt instanceof Timestamp ? stop.movedAt.toDate() : stop.movedAt,
+                                  "dd/MM/yyyy 'às' HH:mm",
+                                  { locale: ptBR }
+                                )}
+                              </p>
+                            )}
+                            {stop.movedByName && (
+                              <p>
+                                <strong>Transferida por:</strong> {stop.movedByName}
+                              </p>
+                            )}
+                            {stop.moveReason && (
+                              <p>
+                                <strong>Motivo:</strong> {stop.moveReason}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {stop.deliveryStatus === 'completed' ? (
                         <>
@@ -228,6 +296,34 @@ export function RouteDetailsDialog({
                   </AccordionItem>
                 ))}
               </Accordion>
+
+              {removedStops.length > 0 && (
+                <div className="mt-6 pt-6 border-t">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                    Paradas Removidas desta Rota ({removedStops.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {removedStops.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="bg-muted/50 rounded-lg p-3 text-sm space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{entry.metadata?.address || 'Endereço'}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {entry.pointCode}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Removida em {format((entry.timestamp as Timestamp).toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                          {entry.userName && ` por ${entry.userName}`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </DialogContent>

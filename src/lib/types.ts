@@ -81,6 +81,14 @@ export type PlaceValue = {
   hasExchangeItems?: boolean; // Se tem itens de troca
   operationType?: 'venda' | 'troca' | 'misto'; // Tipo da operação
   lunnaClientCode?: string; // Código do cliente no Lunna
+  // Rastreamento de movimentação entre rotas
+  previousRouteId?: string;        // ID da rota anterior
+  previousRouteCode?: string;      // Código da rota anterior (ex: "LN-0011-A")
+  movedFromPointCode?: string;     // Código do ponto na rota anterior
+  movedAt?: Timestamp | Date;      // Quando foi movida
+  movedBy?: string;                // UID do usuário que moveu
+  movedByName?: string;            // Nome do usuário
+  moveReason?: string;             // Motivo (opcional)
 };
 
 export type DriverLocation = {
@@ -503,4 +511,135 @@ export type DriverPayment = {
 
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
+};
+
+// ============================================
+// TIPOS PARA SISTEMA DE ATIVIDADES (EXPANDIDO)
+// ============================================
+
+// Categorias de eventos
+export type ActivityCategory =
+  | 'LIFECYCLE'      // Criação, exclusão
+  | 'MODIFICATION'   // Edições de dados
+  | 'WORKFLOW'       // Transições de estado
+  | 'LOGISTICS'      // Entregas, rotas, despachos
+  | 'FINANCIAL'      // Pagamentos, conciliações
+  | 'INVENTORY'      // Estoque (futuro)
+  | 'INTEGRATION'    // Sincronizações externas (Lunna)
+  | 'SYSTEM';        // Eventos automáticos do sistema
+
+// Origem do evento
+export type EventOrigin =
+  | 'web_admin'        // Interface web administrativa
+  | 'mobile_driver'    // App do motorista
+  | 'system_auto'      // Sistema automático
+  | 'ai_process'       // Processo de IA
+  | 'api_integration'  // Integração externa (Lunna)
+  | 'manual_import';   // Importação manual
+
+// Tipos de entidade expandidos
+export type EntityType =
+  | 'service'
+  | 'route'
+  | 'point'
+  | 'driver'
+  | 'payment'
+  | 'stock'
+  | 'customer'
+  | 'order'
+  | 'integration';
+
+// Todos os tipos de evento (existentes + novos)
+export type ActivityEventType =
+  // === EXISTENTES (18 eventos) ===
+  | 'service_created'
+  | 'route_created'
+  | 'point_created'
+  | 'point_moved_to_route'
+  | 'point_reordered'
+  | 'point_removed_from_route'
+  | 'point_added_to_route'
+  | 'service_updated'
+  | 'route_updated'
+  | 'point_data_updated'
+  | 'point_delivery_started'
+  | 'point_arrived'
+  | 'point_completed'
+  | 'point_failed'
+  | 'route_dispatched'
+  | 'driver_assigned'
+  | 'driver_unassigned'
+  | 'route_auto_completed'
+  | 'route_resent'
+  // === NOVOS - FINANCEIRO (5) ===
+  | 'payment_approved'
+  | 'payment_marked_as_paid'
+  | 'payment_cancelled'
+  | 'payment_batch_approved'
+  | 'bank_reconciliation'
+  // === NOVOS - ESTOQUE (5) ===
+  | 'stock_entry'
+  | 'stock_exit'
+  | 'stock_adjustment'
+  | 'stock_reservation'
+  | 'stock_release'
+  // === NOVOS - EDIÇÕES (3) ===
+  | 'customer_data_updated'
+  | 'order_data_updated'
+  | 'price_changed'
+  // === NOVOS - INTEGRAÇÕES (2) ===
+  | 'lunna_order_synced'
+  | 'lunna_status_updated';
+
+// Estrutura de mudança (before/after)
+export type ActivityChange = {
+  field: string;
+  oldValue: any;
+  newValue: any;
+  fieldLabel?: string;
+};
+
+// Documento completo de log de atividade
+export type ActivityLogEntry = {
+  timestamp: Timestamp;
+  eventType: ActivityEventType;
+  category?: ActivityCategory;
+  userId: string;
+  userName?: string;
+  userRole?: string;
+  origin?: EventOrigin;
+  ipAddress?: string;
+  entityType: EntityType;
+  entityId: string;
+  entityCode?: string;
+
+  // Referências existentes
+  serviceId?: string;
+  serviceCode?: string;
+  routeId?: string;
+  routeCode?: string;
+  pointId?: string;
+  pointCode?: string;
+
+  // Novas referências
+  paymentId?: string;
+  stockItemId?: string;
+  customerId?: string;
+  orderId?: string;
+  orderNumber?: string;
+
+  action: string;
+  changes?: ActivityChange[];
+  metadata?: Record<string, any>;
+
+  // Novos flags
+  isSystemGenerated?: boolean;
+  sessionId?: string;
+};
+
+// Tipo de retorno padronizado para logging
+export type LogActivityResult = {
+  success: boolean;
+  id?: string;
+  error?: string;
 };

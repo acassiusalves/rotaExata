@@ -111,7 +111,7 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
-import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered } from '@/lib/firebase/activity-log';
+import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered, logPointMovedToRoute, logPointRemovedFromRoute, logPointAddedToRoute } from '@/lib/firebase/activity-log';
 import { useAuth } from '@/hooks/use-auth';
 
 
@@ -1934,6 +1934,13 @@ export default function OrganizeRoutePage() {
           _wasMoved: true,
           _movedFromRoute: activeRouteKey, // Track which route it came from
           _originalRouteColor: sourceRoute.color, // Preserve original route color
+          // Rastreamento de movimentação entre rotas
+          previousRouteId: sourceRoute.currentRouteId,
+          previousRouteCode: sourceRoute.code,
+          movedFromPointCode: stopToMove.pointCode,
+          movedAt: Timestamp.now(),
+          movedBy: user?.uid,
+          movedByName: user?.email || 'Usuário',
         };
         newTargetStops.splice(overIndex, 0, movedStop);
       }
@@ -2759,6 +2766,9 @@ export default function OrganizeRoutePage() {
 
     if (!currentRoute) return;
 
+    // Detectar paradas que foram movidas para logging
+    const movedStops = pendingStops.filter((stop: any) => stop._wasMoved && stop._movedFromRoute);
+
     // Clean stops - remove metadata properties
     const cleanedStops = pendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop);
 
@@ -2821,6 +2831,33 @@ export default function OrganizeRoutePage() {
           distanceMeters: newRouteInfo.distanceMeters,
           duration: newRouteInfo.duration,
         });
+
+        // Registrar movimentações de paradas no log de atividades
+        if (user && movedStops.length > 0) {
+          for (const movedStop of movedStops) {
+            const fromRouteKey = movedStop._movedFromRoute as 'A' | 'B';
+            const fromRoute = fromRouteKey === 'A' ? routeA : routeB;
+
+            if (fromRoute && movedStop.previousRouteCode) {
+              await logPointMovedToRoute({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                pointId: movedStop.id || movedStop.placeId,
+                oldRouteId: fromRoute.currentRouteId || '',
+                oldRouteCode: movedStop.previousRouteCode,
+                oldPointCode: movedStop.movedFromPointCode || 'N/A',
+                newRouteId: routeData.currentRouteId,
+                newRouteCode: currentRoute.code || 'N/A',
+                newPointCode: movedStop.pointCode || 'N/A',
+                address: movedStop.address,
+                serviceId: routeData.serviceId,
+                serviceCode: routeData.serviceCode,
+              }).catch(logError => {
+                console.error('[Organize] Erro ao registrar movimentação:', logError);
+              });
+            }
+          }
+        }
       } catch (error) {
         console.error('Erro ao salvar edições no Firestore:', error);
         toast({

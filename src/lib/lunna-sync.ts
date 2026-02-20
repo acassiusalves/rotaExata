@@ -1,6 +1,7 @@
 import { db } from '@/lib/firebase/client';
 import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
 import type { RouteInfo, PlaceValue, LunnaService, LunnaServiceStatus } from '@/lib/types';
+import { logLunnaStatusUpdated } from './firebase/activity-log';
 
 /**
  * Sincroniza status de entrega com pedidos do Lunna
@@ -35,11 +36,30 @@ export async function syncLunnaOrderStatus(
     }
 
     const orderDoc = snapshot.docs[0];
+    const orderData = orderDoc.data();
+    const oldStatus = orderData.logisticsStatus || 'pendente';
 
     // Atualizar status do pedido
     await updateDoc(doc(db, 'orders', orderDoc.id), {
       logisticsStatus: newStatus,
       updatedAt: serverTimestamp(),
+    });
+
+    // Registra a sincronização no log de atividades
+    await logLunnaStatusUpdated({
+      userId: 'system-auto',
+      userName: 'Sistema Automático',
+      orderId: orderDoc.id,
+      orderNumber: orderNumber,
+      oldStatus: oldStatus,
+      newStatus: newStatus,
+      routeId: routeInfo.id,
+      routeCode: routeInfo.code,
+      pointId: stop.id,
+      pointCode: stop.pointCode,
+    }).catch(logError => {
+      // Não propaga erro de logging para não quebrar sincronização
+      console.error('[Lunna Sync] Erro ao registrar log:', logError);
     });
   } catch (error) {
     console.error(`❌ Erro ao sincronizar status do pedido ${orderNumber}:`, error);

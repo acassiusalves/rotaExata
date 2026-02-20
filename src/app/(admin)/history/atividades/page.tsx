@@ -1,193 +1,365 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { collection, query, orderBy, limit, getDocs, where, Timestamp } from 'firebase/firestore';
+import { useEffect, useState, useMemo } from 'react';
+import { collection, query, orderBy, limit as firestoreLimit, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
-import { ActivityLogEntry } from '@/lib/firebase/activity-log';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Activity, RefreshCw, FileDown, LayoutGrid, List } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
+import { StatsCards } from '@/components/activity/StatsCards';
+import { ActivityFilters, type FilterState } from '@/components/activity/ActivityFilters';
+import { ActivityTable } from '@/components/activity/ActivityTable';
+import { ActivityPagination } from '@/components/activity/ActivityPagination';
+import { ActivityDetailsSheet } from '@/components/activity/ActivityDetailsSheet';
+import {
+  calcularEstatisticas,
+  extrairUsuarios,
+  getCategoriaFromEventType,
+  formatDateTime,
+  getEventTypeLabel,
+  getEventColor,
+  formatValue,
+} from '@/lib/utils/activity-helpers';
+import type { ActivityLogEntry } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuth } from '@/hooks/use-auth';
+
+const ITEMS_PER_PAGE = 50;
+
+type ViewMode = 'table' | 'cards';
 
 export default function ActivityPage() {
+  // Autenticação
+  const { user, loading: authLoading } = useAuth();
+
+  // Estados principais
   const [activities, setActivities] = useState<(ActivityLogEntry & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filtros
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>('all');
-  const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
+  const [filters, setFilters] = useState<FilterState>({
+    searchTerm: '',
+    categoria: 'all',
+    tipoEvento: 'all',
+    dataInicio: '',
+    dataFim: '',
+    usuario: 'all',
+  });
 
+  // Visualização e paginação
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Modal de detalhes
+  const [selectedActivity, setSelectedActivity] = useState<(ActivityLogEntry & { id: string }) | null>(null);
+
+  // Carregar atividades apenas quando autenticado
   useEffect(() => {
-    loadActivities();
-  }, [eventTypeFilter, entityTypeFilter]);
+    if (!authLoading && user) {
+      loadActivities();
+    } else if (!authLoading && !user) {
+      setLoading(false);
+    }
+  }, [authLoading, user]);
 
   const loadActivities = async () => {
-    setLoading(true);
+    // Verifica se usuário está autenticado antes de fazer query
+    if (!user) {
+      console.warn('[ActivityPage] Tentativa de carregar atividades sem usuário autenticado');
+      setLoading(false);
+      return;
+    }
 
+    setLoading(true);
     try {
-      let q = query(
+      console.log('[ActivityPage] Iniciando carregamento de atividades...');
+      console.log('[ActivityPage] Usuário autenticado:', user.email, '| UID:', user.uid);
+
+      const q = query(
         collection(db, 'activity_log'),
         orderBy('timestamp', 'desc'),
-        limit(100)
+        firestoreLimit(200) // Aumentado de 100 para 200
       );
 
-      // Aplicar filtros
-      if (eventTypeFilter !== 'all') {
-        q = query(
-          collection(db, 'activity_log'),
-          where('eventType', '==', eventTypeFilter),
-          orderBy('timestamp', 'desc'),
-          limit(100)
-        );
-      }
-      if (entityTypeFilter !== 'all' && eventTypeFilter === 'all') {
-        q = query(
-          collection(db, 'activity_log'),
-          where('entityType', '==', entityTypeFilter),
-          orderBy('timestamp', 'desc'),
-          limit(100)
-        );
-      }
-
+      console.log('[ActivityPage] Query criada, executando getDocs...');
       const snapshot = await getDocs(q);
+
+      console.log('[ActivityPage] Snapshot recebido, docs:', snapshot.size);
       const data = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
       })) as (ActivityLogEntry & { id: string })[];
 
       setActivities(data);
-      console.log(`Carregadas ${data.length} atividades com sucesso`);
-    } catch (error) {
-      console.error('Erro ao carregar atividades:', error);
-      console.error('Detalhes do erro:', {
-        message: error instanceof Error ? error.message : String(error),
-        code: (error as any)?.code,
-        eventTypeFilter,
-        entityTypeFilter,
-      });
+      console.log(`[ActivityPage] ✅ ${data.length} atividades carregadas com sucesso`);
+    } catch (error: any) {
+      console.error('[ActivityPage] ❌ Erro ao carregar atividades:', error);
+      console.error('[ActivityPage] Código do erro:', error?.code);
+      console.error('[ActivityPage] Mensagem:', error?.message);
+      console.error('[ActivityPage] Stack:', error?.stack);
+
+      // Mostrar erro amigável para o usuário
+      if (error?.code === 'permission-denied') {
+        alert('Erro de permissão ao carregar atividades. Verifique se você está autenticado e tem permissão para acessar esta página.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const getEventTypeLabel = (eventType: string) => {
-    const labels: Record<string, string> = {
-      service_created: 'Serviço Criado',
-      route_created: 'Rota Criada',
-      route_dispatched: 'Rota Despachada',
-      point_created: 'Pontos Criados',
-      point_moved_to_route: 'Ponto Movido',
-      point_reordered: 'Ponto Reordenado',
-      point_removed_from_route: 'Ponto Removido',
-      point_added_to_route: 'Ponto Adicionado',
-      service_updated: 'Serviço Atualizado',
-      route_updated: 'Rota Atualizada',
-      point_data_updated: 'Dados do Ponto Atualizados',
-      point_delivery_started: 'Entrega Iniciada',
-      point_arrived: 'Chegou no Local',
-      point_completed: 'Entrega Completada',
-      point_failed: 'Entrega Falhada',
-      driver_assigned: 'Motorista Atribuído',
-      driver_unassigned: 'Motorista Removido',
-    };
-    return labels[eventType] || eventType;
+  // Estatísticas computadas
+  const stats = useMemo(() => calcularEstatisticas(activities), [activities]);
+
+  // Lista de usuários computada
+  const usuarios = useMemo(() => extrairUsuarios(activities), [activities]);
+
+  // Filtrar atividades
+  const filteredActivities = useMemo(() => {
+    return activities.filter(activity => {
+      // Filtro de busca por texto
+      if (filters.searchTerm) {
+        const search = filters.searchTerm.toLowerCase();
+        const matches =
+          activity.routeCode?.toLowerCase().includes(search) ||
+          activity.serviceCode?.toLowerCase().includes(search) ||
+          activity.pointCode?.toLowerCase().includes(search) ||
+          activity.entityCode?.toLowerCase().includes(search) ||
+          activity.userName?.toLowerCase().includes(search) ||
+          activity.action.toLowerCase().includes(search);
+
+        if (!matches) return false;
+      }
+
+      // Filtro de categoria
+      if (filters.categoria !== 'all') {
+        const activityCategoria = activity.category || getCategoriaFromEventType(activity.eventType);
+        const categoriaMap: Record<string, string> = {
+          logistica: 'LOGISTICS',
+          financeiro: 'FINANCIAL',
+          estoque: 'INVENTORY',
+          outros: 'SYSTEM',
+        };
+        const expectedCategory = categoriaMap[filters.categoria] || filters.categoria;
+        if (activityCategoria !== expectedCategory) return false;
+      }
+
+      // Filtro de tipo de evento
+      if (filters.tipoEvento !== 'all' && activity.eventType !== filters.tipoEvento) {
+        return false;
+      }
+
+      // Filtro de data início
+      if (filters.dataInicio) {
+        const dataInicioObj = new Date(filters.dataInicio);
+        const timestamp = activity.timestamp as Timestamp;
+        if (timestamp.toDate() < dataInicioObj) return false;
+      }
+
+      // Filtro de data fim
+      if (filters.dataFim) {
+        const dataFimObj = new Date(filters.dataFim);
+        dataFimObj.setHours(23, 59, 59, 999);
+        const timestamp = activity.timestamp as Timestamp;
+        if (timestamp.toDate() > dataFimObj) return false;
+      }
+
+      // Filtro de usuário
+      if (filters.usuario !== 'all' && activity.userId !== filters.usuario) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [activities, filters]);
+
+  // Aplicar paginação
+  const totalPages = Math.ceil(filteredActivities.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredActivities.length);
+  const paginatedActivities = useMemo(() => {
+    return filteredActivities.slice(startIndex, endIndex);
+  }, [filteredActivities, startIndex, endIndex]);
+
+  // Reset de página quando filtros mudam
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+
+  // Handler de mudança de filtro
+  const handleFilterChange = (key: keyof FilterState, value: string) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
   };
 
-  const getEventColor = (eventType: string) => {
-    if (eventType.includes('created')) return 'bg-blue-100 text-blue-700';
-    if (eventType.includes('completed')) return 'bg-green-100 text-green-700';
-    if (eventType.includes('failed')) return 'bg-red-100 text-red-700';
-    if (eventType.includes('moved') || eventType.includes('reordered')) return 'bg-yellow-100 text-yellow-700';
-    if (eventType.includes('dispatched')) return 'bg-purple-100 text-purple-700';
-    return 'bg-gray-100 text-gray-700';
+  // Handler de mudança de página
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Exportar CSV
+  const exportarCSV = () => {
+    const headers = [
+      'Data/Hora',
+      'Categoria',
+      'Evento',
+      'Entidade',
+      'Código',
+      'Usuário',
+      'Ação',
+    ];
+
+    const rows = filteredActivities.map(a => [
+      formatDateTime(a.timestamp),
+      a.category || getCategoriaFromEventType(a.eventType),
+      getEventTypeLabel(a.eventType),
+      a.entityType,
+      a.entityCode || '-',
+      a.userName || '-',
+      a.action,
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `atividades-${new Date().toISOString()}.csv`;
+    link.click();
   };
 
   return (
-    <div className="container mx-auto p-6 max-w-7xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Histórico de Atividades</h1>
-        <p className="text-gray-600 mt-2">
+    <div className="container mx-auto p-6 max-w-7xl space-y-6">
+      {/* Cabeçalho */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <Activity className="w-8 h-8 text-primary" />
+          <h1 className="text-3xl font-bold">Histórico de Atividades</h1>
+        </div>
+        <p className="text-muted-foreground">
           Visualize todas as movimentações e mudanças no sistema
         </p>
       </div>
 
+      {/* Cards de Estatísticas */}
+      <StatsCards stats={stats} loading={loading} />
+
       {/* Filtros */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="flex gap-4 flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-2 block">Tipo de Evento</label>
-              <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todos os Eventos" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Eventos</SelectItem>
-                  <SelectItem value="service_created">Serviços Criados</SelectItem>
-                  <SelectItem value="route_created">Rotas Criadas</SelectItem>
-                  <SelectItem value="route_dispatched">Rotas Despachadas</SelectItem>
-                  <SelectItem value="point_moved_to_route">Pontos Movidos</SelectItem>
-                  <SelectItem value="point_reordered">Pontos Reordenados</SelectItem>
-                  <SelectItem value="point_completed">Entregas Completadas</SelectItem>
-                  <SelectItem value="point_failed">Entregas Falhadas</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      <ActivityFilters
+        filters={filters}
+        onFilterChange={handleFilterChange}
+        usuarios={usuarios}
+      />
 
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-2 block">Tipo de Entidade</label>
-              <Select value={entityTypeFilter} onValueChange={setEntityTypeFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todas as Entidades" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as Entidades</SelectItem>
-                  <SelectItem value="service">Serviços</SelectItem>
-                  <SelectItem value="route">Rotas</SelectItem>
-                  <SelectItem value="point">Pontos</SelectItem>
-                  <SelectItem value="driver">Motoristas</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Lista de Atividades */}
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      {/* Barra de ações */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">
+          {filteredActivities.length} evento(s) encontrado(s)
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadActivities}
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportarCSV}
+            disabled={filteredActivities.length === 0}
+          >
+            <FileDown className="w-4 h-4 mr-2" />
+            Exportar CSV
+          </Button>
+          <ToggleGroup type="single" value={viewMode} onValueChange={(value) => value && setViewMode(value as ViewMode)}>
+            <ToggleGroupItem value="table" aria-label="Visualização em tabela">
+              <List className="h-4 w-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="cards" aria-label="Visualização em cards">
+              <LayoutGrid className="h-4 w-4" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      </div>
+
+      {/* Conteúdo */}
+      {(authLoading || loading) ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex flex-col items-center gap-2">
+            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              {authLoading ? 'Autenticando...' : 'Carregando atividades...'}
+            </p>
+          </div>
+        </div>
+      ) : viewMode === 'table' ? (
+        <ActivityTable
+          activities={paginatedActivities}
+          onViewDetails={setSelectedActivity}
+        />
       ) : (
         <div className="space-y-4">
-          {activities.length === 0 ? (
+          {paginatedActivities.length === 0 ? (
             <Card>
-              <CardContent className="pt-6 text-center text-gray-500">
-                Nenhuma atividade encontrada
+              <CardContent className="py-12 text-center">
+                <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">
+                  Nenhuma atividade encontrada
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Tente ajustar os filtros ou verifique novamente mais tarde
+                </p>
               </CardContent>
             </Card>
           ) : (
-            activities.map((activity) => (
-              <ActivityCard key={activity.id} activity={activity} getEventTypeLabel={getEventTypeLabel} getEventColor={getEventColor} />
+            paginatedActivities.map((activity) => (
+              <ActivityCard
+                key={activity.id}
+                activity={activity}
+                onViewDetails={() => setSelectedActivity(activity)}
+              />
             ))
           )}
         </div>
       )}
+
+      {/* Paginação */}
+      {filteredActivities.length > 0 && (
+        <ActivityPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          total={filteredActivities.length}
+          onPageChange={handlePageChange}
+        />
+      )}
+
+      {/* Modal de Detalhes */}
+      <ActivityDetailsSheet
+        activity={selectedActivity}
+        isOpen={!!selectedActivity}
+        onClose={() => setSelectedActivity(null)}
+      />
     </div>
   );
 }
 
-// Componente para exibir cada atividade
+// Componente para exibir cada atividade no modo cards
 function ActivityCard({
   activity,
-  getEventTypeLabel,
-  getEventColor
+  onViewDetails,
 }: {
   activity: ActivityLogEntry & { id: string };
-  getEventTypeLabel: (eventType: string) => string;
-  getEventColor: (eventType: string) => string;
+  onViewDetails: () => void;
 }) {
   const formatTimestamp = (timestamp: Timestamp) => {
     try {
@@ -205,12 +377,12 @@ function ActivityCard({
             {/* Header com usuário e data */}
             <div className="flex items-center gap-3 mb-3">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium">
+                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-medium">
                   {activity.userName?.charAt(0).toUpperCase() || 'U'}
                 </div>
                 <div>
                   <span className="font-semibold text-sm">{activity.userName || 'Usuário'}</span>
-                  <span className="text-xs text-gray-500 block">
+                  <span className="text-xs text-muted-foreground block">
                     {formatTimestamp(activity.timestamp)}
                   </span>
                 </div>
@@ -218,24 +390,24 @@ function ActivityCard({
             </div>
 
             {/* Ação principal */}
-            <p className="text-gray-900 mb-3 font-medium">{activity.action}</p>
+            <p className="mb-3 font-medium">{activity.action}</p>
 
             {/* Mudanças detalhadas */}
             {activity.changes && activity.changes.length > 0 && (
-              <div className="mt-3 border-t pt-3 bg-gray-50 rounded-md p-3">
-                <p className="text-sm font-semibold mb-2 text-gray-700">Mudanças:</p>
+              <div className="mt-3 border-t pt-3 bg-muted rounded-md p-3">
+                <p className="text-sm font-semibold mb-2">Mudanças:</p>
                 <div className="space-y-2">
                   {activity.changes.map((change, idx) => (
                     <div key={idx} className="text-sm flex items-start gap-2">
-                      <span className="font-medium text-gray-600 min-w-[100px]">
+                      <span className="font-medium text-muted-foreground min-w-[100px]">
                         {change.fieldLabel || change.field}:
                       </span>
                       <div className="flex-1 flex items-center gap-2 flex-wrap">
-                        <span className="line-through text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+                        <span className="line-through text-muted-foreground bg-background px-2 py-0.5 rounded">
                           {formatValue(change.oldValue)}
                         </span>
-                        <span className="text-gray-400">→</span>
-                        <span className="text-green-600 bg-green-50 px-2 py-0.5 rounded font-medium">
+                        <span className="text-muted-foreground">→</span>
+                        <span className="text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded font-medium">
                           {formatValue(change.newValue)}
                         </span>
                       </div>
@@ -245,30 +417,21 @@ function ActivityCard({
               </div>
             )}
 
-            {/* Metadados (colapsável) */}
-            {activity.metadata && Object.keys(activity.metadata).length > 0 && (
-              <details className="mt-3">
-                <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-700">
-                  Ver informações adicionais
-                </summary>
-                <div className="mt-2 bg-gray-50 p-3 rounded text-xs">
-                  <dl className="space-y-1">
-                    {Object.entries(activity.metadata).map(([key, value]) => (
-                      <div key={key} className="flex gap-2">
-                        <dt className="font-semibold text-gray-600 min-w-[120px]">{key}:</dt>
-                        <dd className="text-gray-800">{formatValue(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              </details>
-            )}
+            {/* Botão para ver mais */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onViewDetails}
+              className="mt-3"
+            >
+              Ver Detalhes Completos
+            </Button>
           </div>
 
           {/* Badges laterais */}
           <div className="flex flex-col items-end gap-2 min-w-[140px]">
             {activity.entityCode && (
-              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
                 {activity.entityCode}
               </Badge>
             )}
@@ -283,13 +446,4 @@ function ActivityCard({
       </CardContent>
     </Card>
   );
-}
-
-function formatValue(value: any): string {
-  if (value === null || value === undefined) return '-';
-  if (typeof value === 'object' && value.toDate) {
-    return format(value.toDate(), 'dd/MM/yyyy HH:mm', { locale: ptBR });
-  }
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
 }

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
+import { logLunnaOrderSynced } from '@/lib/firebase/activity-log';
 
 // CORS headers para permitir chamadas do Luna
 const corsHeaders = {
@@ -543,6 +544,24 @@ export async function POST(request: NextRequest) {
         rotaExataServiceId: serviceRef.id,
         rotaExataServiceCode: serviceCode,
         updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Registra a sincronização no log de atividades
+      const client = clientsMap.get(order.client.id);
+      await logLunnaOrderSynced({
+        userId: userId,
+        userName: 'Usuário', // Idealmente buscar userName do Firebase Auth
+        orderId: order.id,
+        orderNumber: order.number,
+        customerId: order.client.id,
+        customerName: client?.nome || order.client.name,
+        totalValue: order.billing.finalValue,
+        itemCount: order.items.length,
+        serviceId: serviceRef.id,
+        serviceCode: serviceCode,
+      }).catch(logError => {
+        // Não propaga erro de logging para não quebrar importação
+        console.error('[Lunna Import] Erro ao registrar log:', logError);
       });
     }
 
