@@ -1817,6 +1817,19 @@ export default function OrganizeRoutePage() {
               duration: newRouteInfo.duration,
             });
             console.log('✅ [handleDragEnd] Firestore atualizado com sucesso!');
+
+            // Registrar no activity log
+            if (user && targetRoute) {
+              logPointAddedToRoute({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                pointId: stopToMove.id || stopToMove.placeId,
+                pointCode: stopToMove.pointCode || '',
+                routeId: routeData.currentRouteId!,
+                routeCode: targetRoute.code || '',
+                address: stopToMove.address,
+              }).catch(err => console.error('[ActivityLog] Erro ao registrar adição:', err));
+            }
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
             toast({
@@ -2508,8 +2521,26 @@ export default function OrganizeRoutePage() {
 
     if (!targetRoute || !setter || !routeKey) return;
 
+    // Capturar dados da parada antes de removê-la
+    const removedStop = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
+
     // Remove the stop from the route
     const newStops = targetRoute.stops.filter(s => String(s.id ?? s.placeId) !== stopId);
+
+    // Helper para registrar remoção no activity log
+    const logRemoval = () => {
+      if (user && removedStop && routeData.isExistingRoute && routeData.currentRouteId) {
+        logPointRemovedFromRoute({
+          userId: user.uid,
+          userName: user.email || 'Usuário',
+          pointId: removedStop.id || removedStop.placeId,
+          pointCode: removedStop.pointCode || '',
+          routeId: routeData.currentRouteId!,
+          routeCode: targetRoute!.code || '',
+          address: removedStop.address,
+        }).catch(err => console.error('[ActivityLog] Erro ao registrar remoção:', err));
+      }
+    };
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
@@ -2531,6 +2562,7 @@ export default function OrganizeRoutePage() {
             distanceMeters: 0,
             duration: '0s',
           });
+          logRemoval();
         } catch (error) {
           console.error('❌ Erro ao atualizar Firestore:', error);
           toast({
@@ -2559,6 +2591,7 @@ export default function OrganizeRoutePage() {
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
             });
+            logRemoval();
           } catch (error) {
             console.error('❌ Erro ao atualizar Firestore:', error);
             toast({
