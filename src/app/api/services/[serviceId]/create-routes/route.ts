@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { PlaceValue, RouteInfo, LunnaService } from '@/lib/types';
-import { logRouteCreated, logPointsCreated, logRouteDispatched } from '@/lib/firebase/activity-log';
+import { logRouteCreatedAdmin, logPointsCreatedAdmin, logRouteDispatchedAdmin } from '@/lib/firebase/activity-log-admin';
 
 // Função para gerar código de rota dentro de um serviço (LN-XXXX-A, LN-XXXX-B, etc.)
 function generateRouteCodeForService(serviceCode: string, routeIndex: number): string {
@@ -158,7 +158,7 @@ export async function POST(
           const driverDoc = await adminDb.collection('drivers').doc(routeConfig.driverId).get();
           const driverData = driverDoc.exists ? driverDoc.data() : null;
 
-          await logRouteDispatched({
+          await logRouteDispatchedAdmin({
             userId: userId,
             userName: 'Sistema Lunna',
             routeId: routeRef.id,
@@ -171,7 +171,7 @@ export async function POST(
           });
         } else {
           // Se não tem motorista, registrar apenas criação
-          await logRouteCreated({
+          await logRouteCreatedAdmin({
             userId: userId,
             userName: 'Sistema Lunna',
             routeId: routeRef.id,
@@ -185,7 +185,7 @@ export async function POST(
         // Registrar criação dos pontos
         const pointCodes = stopsWithCodes.map(s => s.pointCode).filter((c): c is string => !!c);
         if (pointCodes.length > 0) {
-          await logPointsCreated({
+          await logPointsCreatedAdmin({
             userId: userId,
             userName: 'Sistema Lunna',
             routeId: routeRef.id,

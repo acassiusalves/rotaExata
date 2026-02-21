@@ -3,7 +3,7 @@ import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
-import { logLunnaOrderSynced } from '@/lib/firebase/activity-log';
+import { logLunnaOrderSyncedAdmin } from '@/lib/firebase/activity-log-admin';
 
 // CORS headers para permitir chamadas do Luna
 const corsHeaders = {
@@ -548,7 +548,7 @@ export async function POST(request: NextRequest) {
 
       // Registra a sincronização no log de atividades
       const client = clientsMap.get(order.client.id);
-      await logLunnaOrderSynced({
+      await logLunnaOrderSyncedAdmin({
         userId: userId,
         userName: 'Usuário', // Idealmente buscar userName do Firebase Auth
         orderId: order.id,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { analyzePaymentReceipt } from "@/ai/flows/analyze-payment-receipt";
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
-import { logBankReconciliation } from '@/lib/firebase/activity-log';
+import { logBankReconciliationAdmin } from '@/lib/firebase/activity-log-admin';
 
 // Tolerância de valor para conciliação automática (em reais)
 const VALUE_TOLERANCE = 0.50;
@@ -320,7 +320,7 @@ export async function POST(req: Request) {
                 routeUpdated = true;
 
                 // Registra a conciliação automática no log de atividades
-                await logBankReconciliation({
+                await logBankReconciliationAdmin({
                   userId: 'ai-system',
                   userName: 'Sistema IA',
                   routeId: item.routeId,
