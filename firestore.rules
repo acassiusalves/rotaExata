@@ -45,7 +45,14 @@ service cloud.firestore {
 
     // ===== ROUTES COLLECTION =====
     match /routes/{routeId} {
-      allow create, delete, read, list, update: if isAppAdmin();
+      // Função para verificar se usuário tem acesso a rotas (inclui financeiro para faturamento)
+      function hasRoutesAccess() {
+        return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+      }
+
+      // Usuários com acesso podem criar, deletar, ler, listar e atualizar
+      allow create, delete, read, list, update: if hasRoutesAccess();
+      // Motoristas podem ler e atualizar suas próprias rotas
       allow read, update: if isAuthed() && resource.data.driverId == request.auth.uid;
     }
 
@@ -106,14 +113,15 @@ service cloud.firestore {
 
     // ===== INTEGRAÇÕES GLOBAIS =====
     match /integrations/{integrationId} {
-      allow read, write: if isAuthed();
-      // Permitir escrita sem autenticação para OAuth callbacks (server-side)
-      allow write: if true;
+      // Permitir leitura e escrita sem autenticação para OAuth callbacks (server-side)
+      allow read, write: if true;
 
       // Subcollection de contas do Google Contacts
       match /accounts/{accountId} {
-        allow read, create: if isAuthed();
-        allow update, delete: if isAppAdmin();
+        // Permitir criar, ler e atualizar contas sem autenticação (OAuth callback server-side)
+        allow create, read, update: if true;
+        // Apenas admins podem deletar
+        allow delete: if isAppAdmin();
       }
     }
 
@@ -511,6 +519,82 @@ service cloud.firestore {
       match /data/{chunkId} {
         allow read, write: if isAuthed();
       }
+    }
+
+    // ===== CAIXA ROTA FECHAMENTOS =====
+    match /caixa_rota_fechamentos/{fechamentoId} {
+      // Qualquer usuário autenticado pode ler e listar
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar e atualizar
+      allow create, update: if isAuthed();
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== FECHAMENTOS DE CAIXA =====
+    match /fechamentos_caixa/{fechamentoId} {
+      // Qualquer usuário autenticado pode ler e listar fechamentos
+      allow read, list: if isAuthed();
+      // Qualquer usuário autenticado pode criar fechamentos
+      allow create: if isAuthed();
+      // Apenas o criador ou admins podem atualizar
+      allow update: if isAuthed() && (
+        resource.data.usuarioAbertura == request.auth.uid ||
+        isAppAdmin()
+      );
+      // Apenas admins podem deletar
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== PLANILHAS FINANCEIRAS =====
+    match /financial_spreadsheets/{spreadsheetId} {
+      // Função para verificar se usuário tem acesso financeiro
+      function hasFinancialAccess() {
+        return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+      }
+
+      // Usuários com acesso financeiro podem ler e listar
+      allow read, list: if hasFinancialAccess();
+      // Usuários com acesso financeiro podem criar
+      allow create: if hasFinancialAccess();
+      // Usuários com acesso financeiro podem atualizar
+      allow update: if hasFinancialAccess();
+      // Apenas admin e socio podem deletar
+      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
+    }
+
+    // ===== DADOS DE PLANILHAS FINANCEIRAS (CHUNKS) =====
+    match /financial_spreadsheet_data/{chunkId} {
+      // Função para verificar se usuário tem acesso financeiro
+      function hasFinancialAccess() {
+        return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+      }
+
+      // Usuários com acesso financeiro podem ler e listar
+      allow read, list: if hasFinancialAccess();
+      // Usuários com acesso financeiro podem criar chunks
+      allow create: if hasFinancialAccess();
+      // Apenas admin pode atualizar chunks
+      allow update: if isAdmin();
+      // Apenas admin e socio podem deletar chunks
+      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
+    }
+
+    // ===== FATURAMENTOS COLLECTION =====
+    match /faturamentos/{faturamentoId} {
+      // Função para verificar se usuário tem acesso financeiro
+      function hasFinancialAccess() {
+        return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+      }
+
+      // Usuários com acesso financeiro podem ler e listar faturamentos
+      allow read, list: if hasFinancialAccess();
+      // Sistema pode criar faturamentos (qualquer usuário autenticado ao faturar pedido)
+      allow create: if isAuthed();
+      // Apenas usuários com permissão financeira podem atualizar (para edições)
+      allow update: if hasFinancialAccess();
+      // Apenas admin e socio podem deletar
+      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
     }
 
     // ===== EARNINGS RULES COLLECTION (Regras de Ganhos) =====
