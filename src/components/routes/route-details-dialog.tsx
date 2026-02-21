@@ -32,10 +32,13 @@ import {
   Truck,
   CreditCard,
   ArrowRight,
+  ArrowRightLeft,
   Info,
+  Trash2,
+  Package,
 } from 'lucide-react';
 import type { PlaceValue, RouteInfo, Payment, ActivityLogEntry } from '@/lib/types';
-import { Timestamp, collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { Timestamp, collection, query, where, orderBy, limit, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -98,6 +101,7 @@ export function RouteDetailsDialog({
 }: RouteDetailsDialogProps) {
   const [isMapOpen, setIsMapOpen] = React.useState(false);
   const [removedStops, setRemovedStops] = React.useState<ActivityLogEntry[]>([]);
+  const [destinationRoutes, setDestinationRoutes] = React.useState<Record<string, { routeCode: string; routeId: string }>>({});
 
   // Buscar paradas que foram removidas desta rota
   React.useEffect(() => {
@@ -111,12 +115,60 @@ export function RouteDetailsDialog({
       limit(50)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       const entries: ActivityLogEntry[] = [];
       snapshot.forEach((doc) => {
         entries.push({ id: doc.id, ...doc.data() } as ActivityLogEntry & { id: string });
       });
       setRemovedStops(entries);
+
+      // Para cada ponto removido, buscar se foi transferido para outra rota
+      const destinations: Record<string, { routeCode: string; routeId: string }> = {};
+      for (const entry of entries) {
+        const pointId = entry.pointId || entry.entityId;
+        if (!pointId) continue;
+
+        // Buscar transferência (point_transferred) com esse pointId como origem
+        const transferQuery = query(
+          collection(db, 'activity_log'),
+          where('pointId', '==', pointId),
+          where('eventType', '==', 'point_transferred'),
+          orderBy('timestamp', 'desc'),
+          limit(1)
+        );
+        const transferSnap = await getDocs(transferQuery);
+        if (!transferSnap.empty) {
+          const transferData = transferSnap.docs[0].data();
+          if (transferData.metadata?.targetRouteName || transferData.metadata?.targetRouteId) {
+            destinations[pointId] = {
+              routeCode: transferData.metadata.targetRouteName || 'Rota desconhecida',
+              routeId: transferData.metadata.targetRouteId || '',
+            };
+          }
+        }
+
+        // Se não achou transferência, buscar point_added_to_route em outra rota
+        if (!destinations[pointId]) {
+          const addedQuery = query(
+            collection(db, 'activity_log'),
+            where('pointId', '==', pointId),
+            where('eventType', '==', 'point_added_to_route'),
+            orderBy('timestamp', 'desc'),
+            limit(1)
+          );
+          const addedSnap = await getDocs(addedQuery);
+          if (!addedSnap.empty) {
+            const addedData = addedSnap.docs[0].data();
+            if (addedData.routeId && addedData.routeId !== route.id) {
+              destinations[pointId] = {
+                routeCode: addedData.routeCode || 'Rota desconhecida',
+                routeId: addedData.routeId,
+              };
+            }
+          }
+        }
+      }
+      setDestinationRoutes(destinations);
     });
 
     return () => unsubscribe();
@@ -218,7 +270,7 @@ export function RouteDetailsDialog({
                               <p>
                                 <strong>Transferida em:</strong>{' '}
                                 {format(
-                                  stop.movedAt instanceof Timestamp ? stop.movedAt.toDate() : stop.movedAt,
+                                  stop.movedAt instanceof Timestamp ? stop.movedAt.toDate() : new Date(stop.movedAt),
                                   "dd/MM/yyyy 'às' HH:mm",
                                   { locale: ptBR }
                                 )}
@@ -300,27 +352,73 @@ export function RouteDetailsDialog({
               {removedStops.length > 0 && (
                 <div className="mt-6 pt-6 border-t">
                   <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
                     Paradas Removidas desta Rota ({removedStops.length})
                   </h4>
-                  <div className="space-y-2">
-                    {removedStops.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="bg-muted/50 rounded-lg p-3 text-sm space-y-1"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{entry.metadata?.address || 'Endereço'}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {entry.pointCode}
-                          </Badge>
+                  <div className="space-y-3">
+                    {removedStops.map((entry) => {
+                      const pointId = entry.pointId || entry.entityId;
+                      const destination = pointId ? destinationRoutes[pointId] : null;
+                      const deliveryStatus = entry.metadata?.deliveryStatus;
+                      const customerName = entry.metadata?.customerName;
+                      const orderNumber = entry.metadata?.orderNumber;
+
+                      return (
+                        <div
+                          key={entry.id}
+                          className="bg-muted/50 rounded-lg p-3 text-sm space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {deliveryStatus === 'failed' ? (
+                                <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+                              ) : (
+                                <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+                              )}
+                              <span className="font-medium truncate">
+                                {customerName || entry.metadata?.address || 'Endereço'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {deliveryStatus === 'failed' && (
+                                <Badge variant="destructive" className="text-xs">
+                                  Falha
+                                </Badge>
+                              )}
+                              {entry.pointCode && (
+                                <Badge variant="outline" className="text-xs">
+                                  {entry.pointCode}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+
+                          {customerName && entry.metadata?.address && (
+                            <p className="text-xs text-muted-foreground pl-6">{entry.metadata.address}</p>
+                          )}
+
+                          {orderNumber && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-6">
+                              <Package className="h-3 w-3" />
+                              <span>Pedido: {orderNumber}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between pl-6">
+                            <p className="text-xs text-muted-foreground">
+                              Removida em {format((entry.timestamp as Timestamp).toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                              {entry.userName && ` por ${entry.userName}`}
+                            </p>
+                            {destination && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 text-xs">
+                                <ArrowRightLeft className="h-3 w-3 mr-1" />
+                                Transferido para {destination.routeCode}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Removida em {format((entry.timestamp as Timestamp).toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                          {entry.userName && ` por ${entry.userName}`}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

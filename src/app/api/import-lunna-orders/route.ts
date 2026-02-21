@@ -3,7 +3,7 @@ import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
-import { logLunnaOrderSyncedAdmin } from '@/lib/firebase/activity-log-admin';
+import { logLunnaOrderSyncedAdmin, logActivityAdmin } from '@/lib/firebase/activity-log-admin';
 
 // CORS headers para permitir chamadas do Luna
 const corsHeaders = {
@@ -396,7 +396,7 @@ export async function POST(request: NextRequest) {
           updatedAt: FieldValue.serverTimestamp(),
         });
 
-        // Atualizar status dos pedidos no Lunna
+        // Atualizar status dos pedidos no Lunna e registrar logs
         for (const order of orders) {
           await adminDb.collection('orders').doc(order.id).update({
             logisticsStatus: 'em_rota',
@@ -404,7 +404,40 @@ export async function POST(request: NextRequest) {
             rotaExataRouteCode: existingData?.code,
             updatedAt: FieldValue.serverTimestamp(),
           });
+
+          const client = clientsMap.get(order.client.id);
+          await logLunnaOrderSyncedAdmin({
+            userId: userId,
+            userName: 'Sistema Lunna',
+            orderId: order.id,
+            orderNumber: order.number,
+            customerId: order.client.id,
+            customerName: client?.nome || order.client.name,
+            totalValue: order.billing.finalValue,
+            itemCount: order.items.length,
+            routeId: existingRouteId,
+            routeCode: existingData?.code,
+          }).catch(err => console.error('[Lunna Import] Erro ao registrar log:', err));
         }
+
+        // Registrar que pontos foram adicionados à rota
+        await logActivityAdmin({
+          eventType: 'point_added_to_route',
+          category: 'LOGISTICS',
+          origin: 'api_integration',
+          userId: userId,
+          userName: 'Sistema Lunna',
+          entityType: 'route',
+          entityId: existingRouteId,
+          entityCode: existingData?.code || '',
+          routeId: existingRouteId,
+          routeCode: existingData?.code || '',
+          action: `${newStops.length} entrega(s) Lunna adicionada(s) à rota ${existingData?.code}`,
+          metadata: {
+            addedStops: newStops.length,
+            orderNumbers: orders.map(o => o.number),
+          },
+        }).catch(err => console.error('[Lunna Import] Erro ao registrar log de rota:', err));
 
         return NextResponse.json({
           success: true,
@@ -462,7 +495,7 @@ export async function POST(request: NextRequest) {
           updatedAt: FieldValue.serverTimestamp(),
         });
 
-        // Atualizar pedidos com referência ao serviço
+        // Atualizar pedidos com referência ao serviço e registrar logs
         for (const order of orders) {
           await adminDb.collection('orders').doc(order.id).update({
             logisticsStatus: 'pendente',
@@ -470,7 +503,40 @@ export async function POST(request: NextRequest) {
             rotaExataServiceCode: existingData?.code,
             updatedAt: FieldValue.serverTimestamp(),
           });
+
+          const client = clientsMap.get(order.client.id);
+          await logLunnaOrderSyncedAdmin({
+            userId: userId,
+            userName: 'Sistema Lunna',
+            orderId: order.id,
+            orderNumber: order.number,
+            customerId: order.client.id,
+            customerName: client?.nome || order.client.name,
+            totalValue: order.billing.finalValue,
+            itemCount: order.items.length,
+            serviceId: existingServiceId,
+            serviceCode: existingData?.code,
+          }).catch(err => console.error('[Lunna Import] Erro ao registrar log:', err));
         }
+
+        // Registrar que entregas foram adicionadas ao serviço
+        await logActivityAdmin({
+          eventType: 'lunna_order_synced',
+          category: 'INTEGRATION',
+          origin: 'api_integration',
+          userId: userId,
+          userName: 'Sistema Lunna',
+          entityType: 'service',
+          entityId: existingServiceId,
+          entityCode: existingData?.code || '',
+          serviceId: existingServiceId,
+          serviceCode: existingData?.code || '',
+          action: `${newStops.length} entrega(s) Lunna adicionada(s) ao serviço ${existingData?.code}`,
+          metadata: {
+            addedStops: newStops.length,
+            orderNumbers: orders.map(o => o.number),
+          },
+        }).catch(err => console.error('[Lunna Import] Erro ao registrar log de serviço:', err));
 
         return NextResponse.json({
           success: true,

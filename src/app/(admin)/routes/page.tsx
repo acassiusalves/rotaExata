@@ -47,6 +47,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { logDriverChanged, logRouteDeleted } from '@/lib/firebase/activity-log';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,7 +114,7 @@ type ServiceWithRoutes = {
 export default function RoutesPage() {
   const router = useRouter();
   const { searchQuery } = useRouteSearch();
-  const { userRole } = useAuth();
+  const { userRole, user } = useAuth();
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [services, setServices] = React.useState<ServiceWithRoutes[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -307,6 +308,22 @@ export default function RoutesPage() {
 
       console.log('✅ [ChangeDriver] Rota atualizada com sucesso');
 
+      // Registrar no activity log
+      if (user && driver) {
+        logDriverChanged({
+          userId: user.uid,
+          userName: user.email || 'Usuário',
+          routeId: routeToModify.id,
+          routeCode: routeToModify.code || routeToModify.name,
+          serviceId: routeToModify.serviceId,
+          serviceCode: routeToModify.serviceCode,
+          oldDriverName: routeToModify.driverInfo?.name,
+          oldDriverId: routeToModify.driverId,
+          newDriverName: driver.name,
+          newDriverId: newDriverId,
+        }).catch(err => console.error('[ActivityLog] Erro ao registrar troca de motorista:', err));
+      }
+
       toast({
         title: 'Motorista Alterado!',
         description: `A rota "${routeToModify.name}" foi atribuída a ${driver?.name}.`,
@@ -334,12 +351,26 @@ export default function RoutesPage() {
     try {
         const deleteRouteFn = httpsCallable(functions, 'deleteRoute');
         await deleteRouteFn({ routeId: routeToModify.id });
-        
+
+        // Registrar no activity log
+        if (user) {
+          logRouteDeleted({
+            userId: user.uid,
+            userName: user.email || 'Usuário',
+            routeId: routeToModify.id,
+            routeCode: routeToModify.code || routeToModify.name,
+            serviceId: routeToModify.serviceId,
+            serviceCode: routeToModify.serviceCode,
+            routeName: routeToModify.name,
+            totalPoints: routeToModify.stops?.length || 0,
+          }).catch(err => console.error('[ActivityLog] Erro ao registrar exclusão:', err));
+        }
+
         toast({
             title: 'Rota Removida!',
             description: `A rota "${routeToModify.name}" foi removida com sucesso.`,
         });
-        
+
         setIsDeleteDialogOpen(false);
         setRouteToModify(null);
     } catch (error: any) {

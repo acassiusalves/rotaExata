@@ -393,6 +393,9 @@ export async function logPointRemovedFromRoute(params: {
   serviceId?: string;
   serviceCode?: string;
   address: string;
+  customerName?: string;
+  orderNumber?: string;
+  deliveryStatus?: string;
 }) {
   await logActivity({
     eventType: 'point_removed_from_route',
@@ -407,9 +410,12 @@ export async function logPointRemovedFromRoute(params: {
     routeCode: params.routeCode,
     pointId: params.pointId,
     pointCode: params.pointCode,
-    action: `Ponto ${params.pointCode || params.pointId} removido da rota ${params.routeCode}`,
+    action: `Ponto ${params.customerName || params.pointCode || params.pointId} removido da rota ${params.routeCode}${params.deliveryStatus === 'failed' ? ' (falha na entrega)' : ''}`,
     metadata: {
       address: params.address,
+      customerName: params.customerName,
+      orderNumber: params.orderNumber,
+      deliveryStatus: params.deliveryStatus,
     },
   });
 }
@@ -444,6 +450,163 @@ export async function logPointAddedToRoute(params: {
     action: `Ponto ${params.pointCode || params.pointId} adicionado à rota ${params.routeCode}`,
     metadata: {
       address: params.address,
+    },
+  });
+}
+
+/**
+ * Registra exclusão de rota
+ */
+export async function logRouteDeleted(params: {
+  userId: string;
+  userName: string;
+  routeId: string;
+  routeCode: string;
+  serviceId?: string;
+  serviceCode?: string;
+  routeName?: string;
+  totalPoints: number;
+}) {
+  await logActivity({
+    eventType: 'route_updated',
+    userId: params.userId,
+    userName: params.userName,
+    entityType: 'route',
+    entityId: params.routeId,
+    entityCode: params.routeCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.routeId,
+    routeCode: params.routeCode,
+    action: `Rota ${params.routeName || params.routeCode} excluída (${params.totalPoints} pontos devolvidos)`,
+    metadata: {
+      routeName: params.routeName,
+      totalPoints: params.totalPoints,
+      deleted: true,
+    },
+  });
+}
+
+/**
+ * Registra troca de motorista em uma rota
+ */
+export async function logDriverChanged(params: {
+  userId: string;
+  userName: string;
+  routeId: string;
+  routeCode: string;
+  serviceId?: string;
+  serviceCode?: string;
+  oldDriverName?: string;
+  oldDriverId?: string;
+  newDriverName: string;
+  newDriverId: string;
+}) {
+  await logActivity({
+    eventType: 'route_updated',
+    userId: params.userId,
+    userName: params.userName,
+    entityType: 'route',
+    entityId: params.routeId,
+    entityCode: params.routeCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.routeId,
+    routeCode: params.routeCode,
+    action: params.oldDriverName
+      ? `Motorista trocado de ${params.oldDriverName} para ${params.newDriverName} na rota ${params.routeCode}`
+      : `Motorista ${params.newDriverName} atribuído à rota ${params.routeCode}`,
+    changes: [
+      {
+        field: 'driverId',
+        oldValue: params.oldDriverId || null,
+        newValue: params.newDriverId,
+        fieldLabel: 'Motorista',
+      },
+    ],
+    metadata: {
+      oldDriverName: params.oldDriverName,
+      oldDriverId: params.oldDriverId,
+      newDriverName: params.newDriverName,
+      newDriverId: params.newDriverId,
+    },
+  });
+}
+
+/**
+ * Registra renomeação de rota
+ */
+export async function logRouteRenamed(params: {
+  userId: string;
+  userName: string;
+  routeId: string;
+  routeCode: string;
+  serviceId?: string;
+  serviceCode?: string;
+  oldName: string;
+  newName: string;
+}) {
+  await logActivity({
+    eventType: 'route_updated',
+    userId: params.userId,
+    userName: params.userName,
+    entityType: 'route',
+    entityId: params.routeId,
+    entityCode: params.routeCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.routeId,
+    routeCode: params.routeCode,
+    action: `Rota renomeada de "${params.oldName}" para "${params.newName}"`,
+    changes: [
+      {
+        field: 'name',
+        oldValue: params.oldName,
+        newValue: params.newName,
+        fieldLabel: 'Nome da Rota',
+      },
+    ],
+  });
+}
+
+/**
+ * Registra transferência de ponto entre rotas
+ */
+export async function logPointTransferred(params: {
+  userId: string;
+  userName: string;
+  pointId: string;
+  pointCode?: string;
+  sourceRouteId: string;
+  sourceRouteName?: string;
+  targetRouteId: string;
+  targetRouteName?: string;
+  serviceId?: string;
+  serviceCode?: string;
+  address: string;
+  customerName?: string;
+}) {
+  await logActivity({
+    eventType: 'point_moved_to_route',
+    userId: params.userId,
+    userName: params.userName,
+    entityType: 'point',
+    entityId: params.pointId,
+    entityCode: params.pointCode,
+    serviceId: params.serviceId,
+    serviceCode: params.serviceCode,
+    routeId: params.targetRouteId,
+    routeCode: params.targetRouteName,
+    pointId: params.pointId,
+    pointCode: params.pointCode,
+    action: `Ponto ${params.customerName || params.address} transferido de ${params.sourceRouteName || params.sourceRouteId} para ${params.targetRouteName || params.targetRouteId}`,
+    metadata: {
+      sourceRouteId: params.sourceRouteId,
+      sourceRouteName: params.sourceRouteName,
+      targetRouteId: params.targetRouteId,
+      targetRouteName: params.targetRouteName,
+      address: params.address,
+      customerName: params.customerName,
     },
   });
 }

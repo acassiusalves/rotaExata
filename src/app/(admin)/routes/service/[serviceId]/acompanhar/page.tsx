@@ -107,6 +107,8 @@ import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs,
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useAuth } from '@/hooks/use-auth';
+import { logRouteDispatched, logPointsCreated, logPointAddedToRoute, logPointRemovedFromRoute, logPointMovedToRoute, logPointDataUpdated, logRouteDeleted, logDriverChanged, logRouteRenamed, logRouteUpdated, logPointTransferred } from '@/lib/firebase/activity-log';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
 
 
@@ -499,6 +501,7 @@ export default function ServiceAcompanharPage() {
   const params = useParams();
   const serviceId = params.serviceId as string;
   const { toast } = useToast();
+  const { user } = useAuth();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
 
   // Check if Google Maps is loaded (RouteMap component loads it)
@@ -2698,6 +2701,30 @@ export default function ServiceAcompanharPage() {
                 distanceMeters: newRouteInfo.distanceMeters,
                 duration: newRouteInfo.duration,
               });
+
+              // Registrar edição no activity log
+              if (user) {
+                const changes: { field: string; oldValue: any; newValue: any; fieldLabel: string }[] = [];
+                const oldStop = stopToEdit.stop;
+                if (oldStop.customerName !== editService.customerName) changes.push({ field: 'customerName', oldValue: oldStop.customerName, newValue: editService.customerName, fieldLabel: 'Nome do Cliente' });
+                if (oldStop.phone !== editService.phone) changes.push({ field: 'phone', oldValue: oldStop.phone, newValue: editService.phone, fieldLabel: 'Telefone' });
+                if (oldStop.address !== updatedStop.address) changes.push({ field: 'address', oldValue: oldStop.address, newValue: updatedStop.address, fieldLabel: 'Endereço' });
+                if (oldStop.notes !== editService.notes) changes.push({ field: 'notes', oldValue: oldStop.notes, newValue: editService.notes, fieldLabel: 'Observações' });
+                if (changes.length > 0) {
+                  logPointDataUpdated({
+                    userId: user.uid,
+                    userName: user.email || 'Usuário',
+                    pointId: updatedStop.id || updatedStop.placeId,
+                    pointCode: updatedStop.pointCode,
+                    routeId: routeData.currentRouteId!,
+                    routeCode: targetRoute.code || '',
+                    serviceId: routeData.serviceId,
+                    serviceCode: routeData.serviceCode,
+                    changes,
+                    customerName: editService.customerName,
+                  }).catch(err => console.error('[ActivityLog] Erro ao registrar edição:', err));
+                }
+              }
             } catch (error) {
               console.error('Erro ao atualizar rota no Firestore:', error);
               toast({
@@ -2955,6 +2982,21 @@ export default function ServiceAcompanharPage() {
               });
               await updateDoc(routeRef, updateData);
               console.log('✅ [handleAddService] Firestore ATUALIZADO com sucesso!');
+
+              // Registrar no activity log
+              if (user) {
+                logPointAddedToRoute({
+                  userId: user.uid,
+                  userName: user.email || 'Usuário',
+                  pointId: newStop.id || newStop.placeId,
+                  pointCode: newStop.pointCode || '',
+                  routeId: routeData.currentRouteId!,
+                  routeCode: targetRoute?.code || '',
+                  serviceId: routeData.serviceId,
+                  serviceCode: routeData.serviceCode,
+                  address: newStop.address,
+                }).catch(err => console.error('[ActivityLog] Erro ao registrar adição:', err));
+              }
             } catch (error) {
               console.error('❌ [handleAddService] Erro ao atualizar rota no Firestore:', error);
               toast({
@@ -3166,6 +3208,19 @@ export default function ServiceAcompanharPage() {
               updatedAt: serverTimestamp(),
             });
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
+
+            // Registrar no activity log
+            if (user && targetRoute) {
+              logPointAddedToRoute({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                pointId: stopToMove.id || stopToMove.placeId,
+                pointCode: stopToMove.pointCode || '',
+                routeId: firestoreRouteId,
+                routeCode: targetRoute.code || '',
+                address: stopToMove.address,
+              }).catch(err => console.error('[ActivityLog] Erro ao registrar adição:', err));
+            }
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
             toast({
@@ -3552,6 +3607,20 @@ export default function ServiceAcompanharPage() {
         addDebugLog('DELETE_ROUTE', `Deleted route ${routeKey} from Firestore`, {
           firestoreId: dynamicRoute.firestoreId
         });
+
+        // Registrar no activity log
+        if (user) {
+          logRouteDeleted({
+            userId: user.uid,
+            userName: user.email || 'Usuário',
+            routeId: dynamicRoute.firestoreId,
+            routeCode: dynamicRoute.data.code || routeKey,
+            serviceId: routeData?.serviceId,
+            serviceCode: routeData?.serviceCode,
+            routeName: dynamicRoute.name,
+            totalPoints: routeStops.length,
+          }).catch(err => console.error('[ActivityLog] Erro ao registrar exclusão:', err));
+        }
       } catch (error) {
         console.error('Erro ao deletar rota do Firestore:', error);
         toast({
@@ -3763,6 +3832,36 @@ export default function ServiceAcompanharPage() {
             description: `A ${routeName} foi enviada para ${driver?.name}.`,
         });
 
+        // Registrar no activity log
+        if (user) {
+            const routeCode = routeDocData.code || routeName;
+            logRouteDispatched({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                routeId: routeRefId,
+                routeCode: routeCode,
+                serviceId: routeData.serviceId,
+                serviceCode: routeData.serviceCode,
+                driverName: driver?.name || 'Motorista',
+                driverId: driverId,
+                totalPoints: routeToSave.stops.length,
+            }).catch(err => console.error('[ActivityLog] Erro ao registrar despacho:', err));
+
+            const pointCodes = routeToSave.stops.map(s => s.pointCode).filter((c): c is string => !!c);
+            if (pointCodes.length > 0) {
+                logPointsCreated({
+                    userId: user.uid,
+                    userName: user.email || 'Usuário',
+                    routeId: routeRefId,
+                    routeCode: routeCode,
+                    serviceId: routeData.serviceId,
+                    serviceCode: routeData.serviceCode,
+                    pointCodes: pointCodes,
+                    totalPoints: pointCodes.length,
+                }).catch(err => console.error('[ActivityLog] Erro ao registrar pontos:', err));
+            }
+        }
+
         // Remove the dispatched route from state
         if (routeKey === 'A') {
             setRouteA(null);
@@ -3799,8 +3898,23 @@ export default function ServiceAcompanharPage() {
     }
 
     try {
+      const oldName = routeNames[routeKey];
       const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
       await updateRouteNameFn({ routeId, name: newName });
+
+      // Registrar no activity log
+      if (user) {
+        logRouteRenamed({
+          userId: user.uid,
+          userName: user.email || 'Usuário',
+          routeId,
+          routeCode: routeKey,
+          serviceId: routeData?.serviceId,
+          serviceCode: routeData?.serviceCode,
+          oldName,
+          newName,
+        }).catch(err => console.error('[ActivityLog] Erro ao registrar renomeação:', err));
+      }
 
       toast({
         title: 'Nome Atualizado!',
@@ -3881,6 +3995,47 @@ export default function ServiceAcompanharPage() {
         }
 
         await updateDoc(routeRef, updateData);
+
+        // Registrar no activity log
+        if (user) {
+          // Log de atualização de rota (reordenação, mudanças de stops)
+          if (changes.length > 0) {
+            logRouteUpdated({
+              userId: user.uid,
+              userName: user.email || 'Usuário',
+              routeId: currentRouteId,
+              routeCode: routeToUpdate.code || routeName,
+              serviceId: routeData.serviceId,
+              serviceCode: routeData.serviceCode,
+              changes: changes.map(c => ({
+                field: c.changeType,
+                oldValue: c.oldValue,
+                newValue: c.newValue,
+                fieldLabel: c.changeType === 'removed' ? 'Parada removida' : c.changeType === 'added' ? 'Parada adicionada' : c.changeType === 'sequence' ? 'Sequência alterada' : 'Dados alterados',
+              })),
+            }).catch(err => console.error('[ActivityLog] Erro ao registrar atualização:', err));
+          }
+
+          // Log de troca de motorista
+          if (driverId && driver) {
+            const oldDriverName = currentRouteData.driverInfo?.name;
+            const oldDriverId = currentRouteData.driverId;
+            if (oldDriverId !== driverId) {
+              logDriverChanged({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                routeId: currentRouteId,
+                routeCode: routeToUpdate.code || routeName,
+                serviceId: routeData.serviceId,
+                serviceCode: routeData.serviceCode,
+                oldDriverName,
+                oldDriverId,
+                newDriverName: driver.name,
+                newDriverId: driverId,
+              }).catch(err => console.error('[ActivityLog] Erro ao registrar troca de motorista:', err));
+            }
+          }
+        }
 
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
@@ -4005,6 +4160,24 @@ export default function ServiceAcompanharPage() {
     const stopToMove = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
     if (!stopToMove) return;
 
+    // Helper para registrar remoção no activity log
+    const logRemoval = (firestoreRouteId: string) => {
+      if (user && stopToMove) {
+        logPointRemovedFromRoute({
+          userId: user.uid,
+          userName: user.email || 'Usuário',
+          pointId: stopToMove.id || stopToMove.placeId,
+          pointCode: stopToMove.pointCode || '',
+          routeId: firestoreRouteId,
+          routeCode: targetRoute!.code || '',
+          address: stopToMove.address,
+          customerName: stopToMove.customerName,
+          orderNumber: stopToMove.orderNumber,
+          deliveryStatus: stopToMove.deliveryStatus,
+        }).catch(err => console.error('[ActivityLog] Erro ao registrar remoção:', err));
+      }
+    };
+
     // Add to unassigned stops
     setUnassignedStops(prev => [...prev, stopToMove]);
 
@@ -4034,6 +4207,7 @@ export default function ServiceAcompanharPage() {
             unassignedStops: updatedUnassigned,
             updatedAt: serverTimestamp(),
           });
+          logRemoval(routeData.currentRouteId);
         } catch (error) {
           console.error('❌ Erro ao atualizar Firestore:', error);
           toast({
@@ -4063,6 +4237,14 @@ export default function ServiceAcompanharPage() {
               });
             });
             await Promise.all(updatePromises);
+            // Determinar o ID da rota de onde foi removido
+            let removedFromRouteId = '';
+            if (routeKey === 'A' || routeKey === 'B') removedFromRouteId = serviceRouteIds[routeKey as 'A' | 'B'] || '';
+            else {
+              const dynRoute = dynamicRoutes.find(r => r.key === routeKey);
+              removedFromRouteId = dynRoute?.firestoreId || '';
+            }
+            if (removedFromRouteId) logRemoval(removedFromRouteId);
           }
         } catch (error) {
           console.error('❌ Erro ao salvar unassignedStops:', error);
@@ -4091,6 +4273,7 @@ export default function ServiceAcompanharPage() {
               unassignedStops: updatedUnassigned,
               updatedAt: serverTimestamp(),
             });
+            logRemoval(routeData.currentRouteId);
           } catch (error) {
             console.error('❌ Erro ao atualizar Firestore:', error);
             toast({
@@ -4120,6 +4303,13 @@ export default function ServiceAcompanharPage() {
                 });
               });
               await Promise.all(updatePromises);
+              let removedFromRouteId = '';
+              if (routeKey === 'A' || routeKey === 'B') removedFromRouteId = serviceRouteIds[routeKey as 'A' | 'B'] || '';
+              else {
+                const dynRoute = dynamicRoutes.find(r => r.key === routeKey);
+                removedFromRouteId = dynRoute?.firestoreId || '';
+              }
+              if (removedFromRouteId) logRemoval(removedFromRouteId);
             }
           } catch (error) {
             console.error('❌ Erro ao salvar unassignedStops:', error);
@@ -4540,8 +4730,18 @@ export default function ServiceAcompanharPage() {
       // Remove from source
       const newSourceStops = sourceRoute.data.stops.filter((_, i) => i !== stopIndex);
 
-      // Add to target
-      const newTargetStops = [...targetRoute.data.stops, stop];
+      // Add to target with transfer tracking fields
+      const transferredStop: PlaceValue = {
+        ...stop,
+        previousRouteId: sourceRouteId,
+        previousRouteCode: sourceRoute.code || sourceRoute.name,
+        movedFromPointCode: stop.pointCode,
+        movedAt: new Date().toISOString(),
+        movedBy: user?.uid,
+        movedByName: user?.email || 'Usuário',
+        moveReason: stop.deliveryStatus === 'failed' ? 'Falha na entrega - retentativa' : 'Transferência manual',
+      };
+      const newTargetStops = [...targetRoute.data.stops, transferredStop];
 
       // Recalculate both routes
       const [newSourceRouteInfo, newTargetRouteInfo] = await Promise.all([
@@ -4624,6 +4824,24 @@ export default function ServiceAcompanharPage() {
       }
 
       await Promise.all(notificationPromises);
+
+      // Registrar no activity log
+      if (user) {
+        logPointTransferred({
+          userId: user.uid,
+          userName: user.email || 'Usuário',
+          pointId: stop.id || stop.placeId,
+          pointCode: stop.pointCode,
+          sourceRouteId,
+          sourceRouteName: sourceRoute.name || sourceRoute.code,
+          targetRouteId,
+          targetRouteName: targetRoute.name || targetRoute.code,
+          serviceId: routeData?.serviceId,
+          serviceCode: routeData?.serviceCode,
+          address: stop.address,
+          customerName: stop.customerName,
+        }).catch(err => console.error('[ActivityLog] Erro ao registrar transferência:', err));
+      }
 
       // Update local state
       setAdditionalRoutes(prev => prev.map(route => {

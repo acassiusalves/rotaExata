@@ -111,7 +111,7 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
-import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered, logPointMovedToRoute, logPointRemovedFromRoute, logPointAddedToRoute } from '@/lib/firebase/activity-log';
+import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered, logPointMovedToRoute, logPointRemovedFromRoute, logPointAddedToRoute, logRouteUpdated, logDriverChanged } from '@/lib/firebase/activity-log';
 import { useAuth } from '@/hooks/use-auth';
 
 
@@ -2452,6 +2452,26 @@ export default function OrganizeRoutePage() {
             }
         }
 
+        // Registrar troca de motorista no activity log
+        if (user && driverId && driver) {
+            const oldDriverId = currentRouteData.driverId;
+            const oldDriverName = currentRouteData.driverInfo?.name;
+            if (oldDriverId !== driverId) {
+                logDriverChanged({
+                    userId: user.uid,
+                    userName: user.email || 'Usuário',
+                    routeId: currentRouteId,
+                    routeCode: currentRouteData.code,
+                    serviceId: currentRouteData.serviceId,
+                    serviceCode: currentRouteData.serviceCode,
+                    oldDriverName,
+                    oldDriverId,
+                    newDriverName: driver.name,
+                    newDriverId: driverId,
+                }).catch(err => console.error('[ActivityLog] Erro ao registrar troca de motorista:', err));
+            }
+        }
+
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
           try {
@@ -2538,6 +2558,9 @@ export default function OrganizeRoutePage() {
           routeId: routeData.currentRouteId!,
           routeCode: targetRoute!.code || '',
           address: removedStop.address,
+          customerName: removedStop.customerName,
+          orderNumber: removedStop.orderNumber,
+          deliveryStatus: removedStop.deliveryStatus,
         }).catch(err => console.error('[ActivityLog] Erro ao registrar remoção:', err));
       }
     };
@@ -2749,6 +2772,22 @@ export default function OrganizeRoutePage() {
             distanceMeters: 0,
             duration: '0s',
           });
+
+          // Registrar no activity log
+          if (user) {
+            logPointRemovedFromRoute({
+              userId: user.uid,
+              userName: user.email || 'Usuário',
+              pointId: stop.id || stop.placeId,
+              pointCode: stop.pointCode,
+              routeId: routeData.currentRouteId,
+              routeCode: targetRoute.code || routeKey,
+              address: stop.address,
+              customerName: stop.customerName,
+              orderNumber: stop.orderNumber,
+              deliveryStatus: stop.deliveryStatus,
+            }).catch(err => console.error('[ActivityLog] Erro ao registrar exclusão:', err));
+          }
         } catch (error) {
           console.error('Erro ao atualizar Firestore:', error);
         }
@@ -2772,6 +2811,22 @@ export default function OrganizeRoutePage() {
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
             });
+
+            // Registrar no activity log
+            if (user) {
+              logPointRemovedFromRoute({
+                userId: user.uid,
+                userName: user.email || 'Usuário',
+                pointId: stop.id || stop.placeId,
+                pointCode: stop.pointCode,
+                routeId: routeData.currentRouteId,
+                routeCode: targetRoute.code || routeKey,
+                address: stop.address,
+                customerName: stop.customerName,
+                orderNumber: stop.orderNumber,
+                deliveryStatus: stop.deliveryStatus,
+              }).catch(err => console.error('[ActivityLog] Erro ao registrar exclusão:', err));
+            }
           } catch (error) {
             console.error('Erro ao atualizar Firestore:', error);
           }
