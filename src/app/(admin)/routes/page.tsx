@@ -67,6 +67,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useRouteSearch } from './layout';
 import { LunnaBadge } from '@/components/routes/lunna-badge';
+import { Pagination } from '@/components/ui/pagination';
 
 
 // Extend RouteInfo to include fields from Firestore doc
@@ -132,6 +133,8 @@ export default function RoutesPage() {
   const [isCompleting, setIsCompleting] = React.useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [itemsPerPage, setItemsPerPage] = React.useState(10);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -183,10 +186,13 @@ export default function RoutesPage() {
         // Buscar rotas deste serviço - filtrar por serviceId independente do routeIds
         const serviceRoutes = routes.filter(r => r.serviceId === docSnap.id);
 
-        servicesData.push({
-          service: serviceData,
-          routes: serviceRoutes,
-        });
+        // Adicionar SOMENTE se houver rotas ativas
+        if (serviceRoutes.length > 0) {
+          servicesData.push({
+            service: serviceData,
+            routes: serviceRoutes,
+          });
+        }
       }
 
       setServices(servicesData);
@@ -221,6 +227,11 @@ export default function RoutesPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Reset to page 1 when search query changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   // Monitor pending notifications
   React.useEffect(() => {
@@ -598,6 +609,12 @@ export default function RoutesPage() {
     }, {} as Record<string, RouteDocument[]>);
   }, [filteredRoutes]);
 
+  const paginatedServices = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredServices.slice(startIndex, endIndex);
+  }, [filteredServices, currentPage, itemsPerPage]);
+
 
   if (isLoading) {
       return (
@@ -683,10 +700,10 @@ export default function RoutesPage() {
           <div className="space-y-4 mb-6">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <LunnaBadge />
-              Serviços Luna
+              Serviços Luna ({paginatedServices.length} de {filteredServices.length})
             </h2>
             <div className="space-y-4">
-              {filteredServices.map((s) => (
+              {paginatedServices.map((s) => (
                 <ServiceCard
                   key={s.service.id}
                   service={s.service}
@@ -722,6 +739,19 @@ export default function RoutesPage() {
                 />
               ))}
             </div>
+
+            {/* Paginação de Serviços */}
+            {filteredServices.length > itemsPerPage && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filteredServices.length / itemsPerPage)}
+                onPageChange={setCurrentPage}
+                itemsPerPage={itemsPerPage}
+                onItemsPerPageChange={setItemsPerPage}
+                totalItems={filteredServices.length}
+                showItemsPerPage={true}
+              />
+            )}
           </div>
         )}
         <Accordion type="single" collapsible className="w-full space-y-4">
