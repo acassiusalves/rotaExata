@@ -186,8 +186,10 @@ export default function RoutesPage() {
         // Buscar rotas deste serviço - filtrar por serviceId independente do routeIds
         const serviceRoutes = routes.filter(r => r.serviceId === docSnap.id);
 
-        // Adicionar SOMENTE se houver rotas ativas
-        if (serviceRoutes.length > 0) {
+        // Adicionar se:
+        // - Houver rotas ativas OU
+        // - Status for 'organizing' (serviços aguardando organização devem aparecer)
+        if (serviceRoutes.length > 0 || serviceData.status === 'organizing') {
           servicesData.push({
             service: serviceData,
             routes: serviceRoutes,
