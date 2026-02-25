@@ -23,6 +23,7 @@ import {
   Pencil,
   UserCog,
   Trash2,
+  XCircle,
 } from 'lucide-react';
 import { LunnaBadge } from './lunna-badge';
 import type { LunnaService, LunnaServiceStatus, RouteInfo, Driver } from '@/lib/types';
@@ -47,7 +48,9 @@ interface ServiceCardProps {
   onChangeDriver?: (routeId: string) => void;
   onCompleteRoute?: (routeId: string) => void;
   onDeleteRoute?: (routeId: string) => void;
+  onForceCompleteService?: (serviceId: string) => void;
   isDuplicating?: boolean;
+  isCompletingService?: boolean;
   userRole?: string;
 }
 
@@ -98,7 +101,9 @@ export function ServiceCard({
   onChangeDriver,
   onCompleteRoute,
   onDeleteRoute,
+  onForceCompleteService,
   isDuplicating = false,
+  isCompletingService = false,
   userRole,
 }: ServiceCardProps) {
   const [isExpanded, setIsExpanded] = React.useState(defaultExpanded);
@@ -179,6 +184,32 @@ export function ServiceCard({
               >
                 <Eye className="h-4 w-4 mr-1" />
                 Acompanhar Rotas
+              </Button>
+            )}
+
+            {/* Botão para forçar conclusão do serviço (apenas admin/socio) */}
+            {(userRole === 'admin' || userRole === 'socio') && onForceCompleteService && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onForceCompleteService(service.id);
+                }}
+                disabled={isCompletingService}
+                title="Forçar conclusão de todas as rotas e arquivar este serviço"
+              >
+                {isCompletingService ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    Concluindo...
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="h-4 w-4 mr-1" />
+                    Forçar Conclusão
+                  </>
+                )}
               </Button>
             )}
           </div>

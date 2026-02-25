@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
+exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -1068,6 +1068,111 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
         if (error instanceof https_1.HttpsError)
             throw error;
         const msg = error.message || "Falha ao reenviar rota.";
+        throw new https_1.HttpsError("internal", `Erro: ${msg}`);
+    }
+});
+/* ========== forceCompleteService (callable) ========== */
+// Função para forçar conclusão de um serviço completo (serviço + todas as rotas)
+// Disponível apenas para admins
+exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const authContext = req.auth;
+    const { serviceId } = req.data;
+    if (!authContext) {
+        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    const db = (0, firestore_1.getFirestore)();
+    try {
+        // Verificar se o usuário é admin ou socio
+        const userDoc = await db.collection("users").doc(authContext.uid).get();
+        const userData = userDoc.data();
+        const userRole = userData?.role;
+        if (!["admin", "socio"].includes(userRole)) {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem forçar conclusão de serviços");
+        }
+        if (!serviceId || typeof serviceId !== "string") {
+            throw new https_1.HttpsError("invalid-argument", "serviceId deve ser fornecido");
+        }
+        // Buscar o serviço
+        const serviceDoc = await db.collection("services").doc(serviceId).get();
+        if (!serviceDoc.exists) {
+            throw new https_1.HttpsError("not-found", "Serviço não encontrado");
+        }
+        const serviceData = serviceDoc.data();
+        const serviceCode = serviceData?.code || serviceId;
+        const adminName = userData?.displayName || userData?.email || authContext.uid;
+        // Buscar todas as rotas do serviço
+        const serviceRoutes = await db
+            .collection("routes")
+            .where("serviceId", "==", serviceId)
+            .get();
+        // Atualizar todas as rotas para completed_auto em batch
+        const batch = db.batch();
+        let completedRoutesCount = 0;
+        serviceRoutes.docs.forEach((routeDoc) => {
+            const routeData = routeDoc.data();
+            // Só atualizar se não estiver concluída
+            if (routeData.status !== "completed" && routeData.status !== "completed_auto") {
+                batch.update(routeDoc.ref, {
+                    status: "completed_auto",
+                    autoCompletedAt: firestore_1.FieldValue.serverTimestamp(),
+                    forceCompletedBy: authContext.uid,
+                });
+                completedRoutesCount++;
+            }
+        });
+        // Atualizar o serviço para completed
+        batch.update(serviceDoc.ref, {
+            status: "completed",
+            completedAt: firestore_1.FieldValue.serverTimestamp(),
+            forceCompletedBy: authContext.uid,
+            stats: {
+                ...serviceData?.stats,
+                completedRoutes: serviceRoutes.size,
+                completedDeliveries: serviceData?.stats?.totalDeliveries || 0,
+            },
+        });
+        await batch.commit();
+        // Gravar activity log
+        try {
+            await db.collection("activity_log").add({
+                timestamp: firestore_1.FieldValue.serverTimestamp(),
+                eventType: "service_force_completed",
+                userId: authContext.uid,
+                userName: adminName,
+                entityType: "service",
+                entityId: serviceId,
+                entityCode: serviceCode,
+                serviceId: serviceId,
+                serviceCode: serviceCode,
+                action: `Serviço ${serviceCode} e suas ${completedRoutesCount} rotas foram forçadamente concluídos pelo administrador`,
+                changes: [
+                    {
+                        field: "status",
+                        oldValue: serviceData?.status,
+                        newValue: "completed",
+                        fieldLabel: "Status",
+                    },
+                ],
+                metadata: {
+                    totalRoutes: serviceRoutes.size,
+                    routesCompleted: completedRoutesCount,
+                },
+            });
+        }
+        catch (logError) {
+            console.error("❌ Erro ao gravar log de conclusão forçada:", logError);
+        }
+        console.log(`✅ Serviço ${serviceCode} e ${completedRoutesCount} rotas forçadamente concluídos por ${adminName}`);
+        return {
+            ok: true,
+            message: `Serviço ${serviceCode} e ${completedRoutesCount} rota(s) concluídos com sucesso.`,
+            completedRoutes: completedRoutesCount,
+        };
+    }
+    catch (error) {
+        if (error instanceof https_1.HttpsError)
+            throw error;
+        const msg = error.message || "Falha ao forçar conclusão do serviço.";
         throw new https_1.HttpsError("internal", `Erro: ${msg}`);
     }
 });

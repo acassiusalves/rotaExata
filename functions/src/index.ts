@@ -1266,3 +1266,127 @@ export const resendRouteToDriver = onCall(
     }
   }
 );
+
+/* ========== forceCompleteService (callable) ========== */
+// Função para forçar conclusão de um serviço completo (serviço + todas as rotas)
+// Disponível apenas para admins
+export const forceCompleteService = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const authContext = req.auth;
+    const { serviceId } = req.data;
+
+    if (!authContext) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+
+    const db = getFirestore();
+
+    try {
+      // Verificar se o usuário é admin ou socio
+      const userDoc = await db.collection("users").doc(authContext.uid).get();
+      const userData = userDoc.data();
+      const userRole = userData?.role;
+
+      if (!["admin", "socio"].includes(userRole)) {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas administradores podem forçar conclusão de serviços"
+        );
+      }
+
+      if (!serviceId || typeof serviceId !== "string") {
+        throw new HttpsError("invalid-argument", "serviceId deve ser fornecido");
+      }
+
+      // Buscar o serviço
+      const serviceDoc = await db.collection("services").doc(serviceId).get();
+      if (!serviceDoc.exists) {
+        throw new HttpsError("not-found", "Serviço não encontrado");
+      }
+
+      const serviceData = serviceDoc.data();
+      const serviceCode = serviceData?.code || serviceId;
+      const adminName = userData?.displayName || userData?.email || authContext.uid;
+
+      // Buscar todas as rotas do serviço
+      const serviceRoutes = await db
+        .collection("routes")
+        .where("serviceId", "==", serviceId)
+        .get();
+
+      // Atualizar todas as rotas para completed_auto em batch
+      const batch = db.batch();
+      let completedRoutesCount = 0;
+
+      serviceRoutes.docs.forEach((routeDoc) => {
+        const routeData = routeDoc.data();
+        // Só atualizar se não estiver concluída
+        if (routeData.status !== "completed" && routeData.status !== "completed_auto") {
+          batch.update(routeDoc.ref, {
+            status: "completed_auto",
+            autoCompletedAt: FieldValue.serverTimestamp(),
+            forceCompletedBy: authContext.uid,
+          });
+          completedRoutesCount++;
+        }
+      });
+
+      // Atualizar o serviço para completed
+      batch.update(serviceDoc.ref, {
+        status: "completed",
+        completedAt: FieldValue.serverTimestamp(),
+        forceCompletedBy: authContext.uid,
+        stats: {
+          ...serviceData?.stats,
+          completedRoutes: serviceRoutes.size,
+          completedDeliveries: serviceData?.stats?.totalDeliveries || 0,
+        },
+      });
+
+      await batch.commit();
+
+      // Gravar activity log
+      try {
+        await db.collection("activity_log").add({
+          timestamp: FieldValue.serverTimestamp(),
+          eventType: "service_force_completed",
+          userId: authContext.uid,
+          userName: adminName,
+          entityType: "service",
+          entityId: serviceId,
+          entityCode: serviceCode,
+          serviceId: serviceId,
+          serviceCode: serviceCode,
+          action: `Serviço ${serviceCode} e suas ${completedRoutesCount} rotas foram forçadamente concluídos pelo administrador`,
+          changes: [
+            {
+              field: "status",
+              oldValue: serviceData?.status,
+              newValue: "completed",
+              fieldLabel: "Status",
+            },
+          ],
+          metadata: {
+            totalRoutes: serviceRoutes.size,
+            routesCompleted: completedRoutesCount,
+          },
+        });
+      } catch (logError) {
+        console.error("❌ Erro ao gravar log de conclusão forçada:", logError);
+      }
+
+      console.log(`✅ Serviço ${serviceCode} e ${completedRoutesCount} rotas forçadamente concluídos por ${adminName}`);
+
+      return {
+        ok: true,
+        message: `Serviço ${serviceCode} e ${completedRoutesCount} rota(s) concluídos com sucesso.`,
+        completedRoutes: completedRoutesCount,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      const msg = error.message || "Falha ao forçar conclusão do serviço.";
+      throw new HttpsError("internal", `Erro: ${msg}`);
+    }
+  }
+);

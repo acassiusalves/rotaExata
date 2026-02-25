@@ -135,6 +135,9 @@ export default function RoutesPage() {
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
   const [itemsPerPage, setItemsPerPage] = React.useState(10);
+  const [isForceCompleteServiceDialogOpen, setIsForceCompleteServiceDialogOpen] = React.useState(false);
+  const [serviceToForceComplete, setServiceToForceComplete] = React.useState<ServiceWithRoutes | null>(null);
+  const [isCompletingService, setIsCompletingService] = React.useState(false);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -461,6 +464,63 @@ export default function RoutesPage() {
     }
   };
 
+  const handleOpenForceCompleteServiceDialog = (serviceId: string) => {
+    const service = services.find(s => s.service.id === serviceId);
+    if (service) {
+      setServiceToForceComplete(service);
+      setIsForceCompleteServiceDialogOpen(true);
+    }
+  };
+
+  const handleForceCompleteService = async () => {
+    if (!serviceToForceComplete) return;
+    setIsCompletingService(true);
+
+    try {
+      const forceCompleteServiceFn = httpsCallable(functions, 'forceCompleteService');
+      console.log('🔄 Forçando conclusão do serviço:', serviceToForceComplete.service.id);
+
+      const result = await forceCompleteServiceFn({ serviceId: serviceToForceComplete.service.id });
+      const data = result.data as { message: string; completedRoutes: number };
+
+      console.log('✅ Serviço concluído com sucesso:', data);
+
+      toast({
+        title: 'Serviço Concluído!',
+        description: data.message || `O serviço "${serviceToForceComplete.service.code}" foi arquivado com sucesso.`,
+      });
+
+      setIsForceCompleteServiceDialogOpen(false);
+      setServiceToForceComplete(null);
+    } catch (error: any) {
+      console.error('❌ Erro ao forçar conclusão do serviço:', {
+        error,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        serviceId: serviceToForceComplete.service.id,
+      });
+
+      let errorMessage = 'Não foi possível forçar a conclusão do serviço.';
+
+      if (error.code === 'functions/not-found') {
+        errorMessage = 'A função ainda não foi deployada. Aguarde alguns minutos e tente novamente.';
+      } else if (error.code === 'functions/permission-denied') {
+        errorMessage = 'Você não tem permissão para executar esta ação.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Concluir Serviço',
+        description: errorMessage,
+      });
+    } finally {
+      setIsCompletingService(false);
+    }
+  };
+
   const handleDuplicateRoute = async (route: RouteDocument) => {
     setIsDuplicating(true);
     try {
@@ -736,7 +796,9 @@ export default function RoutesPage() {
                     const route = routes.find(r => r.id === routeId);
                     if (route) handleOpenDeleteDialog(route);
                   }}
+                  onForceCompleteService={handleOpenForceCompleteServiceDialog}
                   isDuplicating={isDuplicating}
+                  isCompletingService={isCompletingService}
                   userRole={userRole}
                 />
               ))}
@@ -1103,6 +1165,54 @@ export default function RoutesPage() {
                   <CheckCircle className="mr-2 h-4 w-4" />
                 )}
                 {isCompleting ? 'Concluindo...' : 'Sim, marcar como concluída'}
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Force Complete Service Confirmation Dialog */}
+      <AlertDialog open={isForceCompleteServiceDialogOpen} onOpenChange={setIsForceCompleteServiceDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Forçar Conclusão do Serviço?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              Você está prestes a <span className="font-semibold text-destructive">forçar a conclusão</span> do serviço{' '}
+              <span className="font-semibold">{serviceToForceComplete?.service.code}</span>.
+            </p>
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-3">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">Esta ação irá:</p>
+              <ul className="text-sm text-amber-800 dark:text-amber-200 list-disc list-inside mt-2 space-y-1">
+                <li>Marcar TODAS as {serviceToForceComplete?.routes.length || 0} rotas como concluídas automaticamente</li>
+                <li>Arquivar o serviço e removê-lo desta página</li>
+                <li>Mover tudo para o histórico</li>
+              </ul>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Esta ação é útil para limpar serviços de teste ou cancelados.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCompletingService}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button
+                variant="destructive"
+                onClick={handleForceCompleteService}
+                disabled={isCompletingService}
+              >
+                {isCompletingService ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Concluindo...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    Sim, forçar conclusão
+                  </>
+                )}
               </Button>
             </AlertDialogAction>
           </AlertDialogFooter>
