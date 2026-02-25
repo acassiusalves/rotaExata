@@ -111,6 +111,22 @@ export function ServiceCard({
 
   const statusInfo = statusConfig[service.status];
 
+  // Verificar se o serviço tem mais de 48 horas desde a criação
+  const canForceComplete = React.useMemo(() => {
+    if (!service.createdAt) return false;
+
+    const createdDate = service.createdAt instanceof Timestamp
+      ? service.createdAt.toDate()
+      : service.createdAt instanceof Date
+        ? service.createdAt
+        : new Date(service.createdAt);
+
+    const now = new Date();
+    const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+
+    return hoursSinceCreation >= 48;
+  }, [service.createdAt]);
+
   // Calcular total de paradas dinamicamente somando todas as rotas
   // Isso garante que a contagem esteja sempre sincronizada com as rotas
   const totalStops = React.useMemo(() => {
@@ -187,8 +203,8 @@ export function ServiceCard({
               </Button>
             )}
 
-            {/* Botão para forçar conclusão do serviço (apenas admin/socio) */}
-            {(userRole === 'admin' || userRole === 'socio') && onForceCompleteService && (
+            {/* Botão para forçar conclusão do serviço (apenas admin/socio e após 48h) */}
+            {(userRole === 'admin' || userRole === 'socio') && onForceCompleteService && canForceComplete && (
               <Button
                 size="sm"
                 variant="destructive"
@@ -197,7 +213,7 @@ export function ServiceCard({
                   onForceCompleteService(service.id);
                 }}
                 disabled={isCompletingService}
-                title="Forçar conclusão de todas as rotas e arquivar este serviço"
+                title="Forçar conclusão de todas as rotas e arquivar este serviço (disponível após 48h de criação)"
               >
                 {isCompletingService ? (
                   <>

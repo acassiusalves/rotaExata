@@ -1100,6 +1100,15 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
         const serviceData = serviceDoc.data();
         const serviceCode = serviceData?.code || serviceId;
         const adminName = userData?.displayName || userData?.email || authContext.uid;
+        // Verificar se o serviço tem mais de 48 horas desde a criação
+        if (serviceData?.createdAt) {
+            const createdDate = serviceData.createdAt.toDate();
+            const now = new Date();
+            const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+            if (hoursSinceCreation < 48) {
+                throw new https_1.HttpsError("failed-precondition", `O serviço deve ter pelo menos 48 horas de criação para ser forçadamente concluído. Horas desde criação: ${hoursSinceCreation.toFixed(1)}h`);
+            }
+        }
         // Buscar todas as rotas do serviço
         const serviceRoutes = await db
             .collection("routes")
