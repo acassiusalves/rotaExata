@@ -29,6 +29,12 @@ type RouteDocument = {
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(0);
 
+// Helper para filtrar apenas stops ativos (não desvinculados)
+const getActiveStops = (stops: any[]) => {
+  if (!stops) return [];
+  return stops.filter((stop: any) => !stop.unlinkedAt);
+};
+
 const getRouteMapUrl = (stops: any[]) => {
   if (!stops || stops.length === 0) return null;
 
@@ -195,7 +201,7 @@ export default function MyRoutesPage() {
   const stats = React.useMemo(() => {
     return {
       totalRoutes: routes.length,
-      totalStops: routes.reduce((acc, route) => acc + route.stops.length, 0),
+      totalStops: routes.reduce((acc, route) => acc + getActiveStops(route.stops).length, 0),
       totalDistance: routes.reduce((acc, route) => acc + (route.distanceMeters || 0), 0),
     };
   }, [routes]);
@@ -243,9 +249,10 @@ export default function MyRoutesPage() {
       {/* Route Cards */}
       <div className="px-4 pb-4 space-y-4">
         {routes.map((route) => {
+          const activeStops = getActiveStops(route.stops);
           const statusInfo = getStatusBadge(route.status);
           const StatusIcon = statusInfo.icon;
-          const mapUrl = getRouteMapUrl(route.stops);
+          const mapUrl = getRouteMapUrl(activeStops);
 
           return (
             <div
@@ -281,7 +288,7 @@ export default function MyRoutesPage() {
                 <div className="flex items-center gap-4 text-muted-foreground text-sm">
                   <div className="flex items-center gap-1.5">
                     <MapPin className="h-4 w-4" />
-                    <span>{route.stops.length} Paradas</span>
+                    <span>{activeStops.length} Paradas</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <RouteIcon className="h-4 w-4" />
@@ -289,7 +296,7 @@ export default function MyRoutesPage() {
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Weight className="h-4 w-4" />
-                    <span>{getTotalWeight(route.stops)} kg</span>
+                    <span>{getTotalWeight(activeStops)} kg</span>
                   </div>
                 </div>
 
