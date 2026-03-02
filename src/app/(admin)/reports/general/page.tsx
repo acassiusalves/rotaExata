@@ -120,6 +120,7 @@ type RouteDocument = RouteInfo & {
 
 type DeliveryReport = {
   routeId: string;
+  routeCode?: string; // Código da rota (ex: LNS-0038-6)
   routeName: string;
   driverName: string;
   stopIndex: number;
@@ -208,6 +209,7 @@ export default function ReportsPage() {
   const [selectedReconciliation, setSelectedReconciliation] = React.useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = React.useState<string>('all');
   const [selectedPeriod, setSelectedPeriod] = React.useState<string>('all');
+  const [selectedRouteStatus, setSelectedRouteStatus] = React.useState<string>('all');
   const [startDate, setStartDate] = React.useState<Date>(subDays(new Date(), 7));
   const [endDate, setEndDate] = React.useState<Date>(new Date());
   const [dateFilterType, setDateFilterType] = React.useState<'completed' | 'planned'>('planned');
@@ -256,6 +258,13 @@ export default function ReportsPage() {
     };
   }, [filteredDeliveries, selectedPaymentMethod]);
 
+  // Contador de paradas conciliáveis
+  const reconcilableStops = React.useMemo(() => {
+    return filteredDeliveries.filter(d =>
+      d.deliveryStatus === 'completed' && !d.reconciled
+    ).length;
+  }, [filteredDeliveries]);
+
   // Lista de motoristas únicos
   const drivers = React.useMemo(() => {
     const uniqueDrivers = new Set(deliveries.map(d => d.driverName));
@@ -268,11 +277,11 @@ export default function ReportsPage() {
   };
 
   React.useEffect(() => {
-    // Buscar todas as rotas concluídas (sem filtro de data na query)
+    // Buscar todas as rotas (incluindo ativas e concluídas)
     // O filtro de data será aplicado no lado do cliente
     const q = query(
       collection(db, 'routes'),
-      where('status', 'in', ['completed', 'completed_auto'])
+      where('status', 'in', ['dispatched', 'in_progress', 'completed', 'completed_auto'])
     );
 
     const unsubscribe = onSnapshot(
@@ -333,6 +342,7 @@ export default function ReportsPage() {
           route.stops.forEach((stop, index) => {
             deliveriesData.push({
               routeId: route.id,
+              routeCode: route.code, // Código da rota (ex: LNS-0038-6)
               routeName: route.name,
               driverName: route.driverInfo?.name || 'Sem motorista',
               stopIndex: index,
@@ -430,11 +440,36 @@ export default function ReportsPage() {
       });
     }
 
+    // Filtro por status da rota (Em Andamento vs Finalizadas)
+    if (selectedRouteStatus === 'active') {
+      filtered = filtered.filter(d => {
+        const route = routes.find(r => r.id === d.routeId);
+        return route && ['dispatched', 'in_progress'].includes(route.status);
+      });
+    } else if (selectedRouteStatus === 'completed') {
+      filtered = filtered.filter(d => {
+        const route = routes.find(r => r.id === d.routeId);
+        return route && ['completed', 'completed_auto'].includes(route.status);
+      });
+    }
+
     setFilteredDeliveries(filtered);
-  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod, selectedPeriod]);
+  }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod, selectedPeriod, selectedRouteStatus, routes]);
 
   // Funções de seleção para conciliação
   const handleToggleSelection = (stopId: string) => {
+    const delivery = deliveries.find(d => d.stopId === stopId);
+
+    // Validar se a parada pode ser conciliada
+    if (delivery && delivery.deliveryStatus !== 'completed') {
+      toast({
+        variant: 'destructive',
+        title: 'Parada não concluída',
+        description: 'Apenas paradas entregues podem ser conciliadas.',
+      });
+      return;
+    }
+
     setSelectedDeliveryIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(stopId)) {
@@ -460,6 +495,19 @@ export default function ReportsPage() {
         variant: 'destructive',
         title: 'Nenhuma entrega selecionada',
         description: 'Selecione pelo menos uma entrega para conciliar.',
+      });
+      return;
+    }
+
+    // Verificar se todas as entregas selecionadas foram concluídas
+    const selectedDeliveries = deliveries.filter(d => selectedDeliveryIds.has(d.stopId));
+    const pendingDeliveries = selectedDeliveries.filter(d => d.deliveryStatus !== 'completed');
+
+    if (pendingDeliveries.length > 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Entregas pendentes selecionadas',
+        description: `${pendingDeliveries.length} ${pendingDeliveries.length === 1 ? 'entrega não foi concluída' : 'entregas não foram concluídas'} e não podem ser conciliadas.`,
       });
       return;
     }
@@ -548,7 +596,8 @@ export default function ReportsPage() {
       const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
       const hasPhoto = !!d.photoUrl;
       const notReconciled = !d.reconciled;
-      return isSelected && hasEligiblePayment && hasPhoto && notReconciled;
+      const isCompleted = d.deliveryStatus === 'completed';
+      return isSelected && hasEligiblePayment && hasPhoto && notReconciled && isCompleted;
     });
 
     if (eligibleDeliveries.length === 0) {
@@ -650,7 +699,8 @@ export default function ReportsPage() {
       const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
       const hasPhoto = !!d.photoUrl;
       const notReconciled = !d.reconciled;
-      return isSelected && hasEligiblePayment && hasPhoto && notReconciled;
+      const isCompleted = d.deliveryStatus === 'completed';
+      return isSelected && hasEligiblePayment && hasPhoto && notReconciled && isCompleted;
     }).length;
   }, [filteredDeliveries, selectedDeliveryIds]);
 
@@ -751,6 +801,8 @@ export default function ReportsPage() {
   const handleExportCSV = () => {
     const headers = [
       'Data',
+      'Nº Rota',
+      'Status Rota',
       'Rota',
       'Motorista',
       'Parada',
@@ -777,8 +829,16 @@ export default function ReportsPage() {
       // Determinar período (Matutino/Vespertino/Noturno) baseado no horário planejado
       const periodo = getPeriodInfo(d.plannedDate).period;
 
+      // Determinar status da rota
+      const route = routes.find(r => r.id === d.routeId);
+      const routeStatus = route?.status === 'in_progress' ? 'Em Andamento'
+                        : route?.status === 'dispatched' ? 'Despachada'
+                        : 'Finalizada';
+
       return [
         format(d.plannedDate, 'dd/MM/yyyy', { locale: ptBR }),
+        d.routeCode || '',
+        routeStatus,
         d.routeName,
         d.driverName,
         d.stopIndex + 1,
@@ -892,6 +952,11 @@ export default function ReportsPage() {
           </h2>
           <p className="text-muted-foreground">
             Análise detalhada de entregas e rotas
+            {reconcilableStops > 0 && (
+              <span className="ml-2 text-sm text-blue-600 font-medium">
+                • {reconcilableStops} paradas disponíveis para conciliação
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -943,7 +1008,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Entregas</CardTitle>
@@ -998,6 +1063,25 @@ export default function ReportsPage() {
             <p className="text-xs text-muted-foreground">entregas concluídas</p>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Rotas Ativas</CardTitle>
+            <TrendingUp className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {routes.filter(r => ['dispatched', 'in_progress'].includes(r.status)).length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {filteredDeliveries.filter(d => {
+                const route = routes.find(r => r.id === d.routeId);
+                return route && ['dispatched', 'in_progress'].includes(route.status) &&
+                       d.deliveryStatus === 'completed' && !d.reconciled;
+              }).length} paradas prontas
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -1009,7 +1093,7 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
             <div className="space-y-2">
               <label className="text-sm font-medium">Buscar</label>
               <div className="relative">
@@ -1123,6 +1207,20 @@ export default function ReportsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status da Rota</label>
+              <Select value={selectedRouteStatus} onValueChange={setSelectedRouteStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="active">Em Andamento</SelectItem>
+                  <SelectItem value="completed">Finalizadas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1150,6 +1248,7 @@ export default function ReportsPage() {
                     />
                   </TableHead>
                   <TableHead>Nº Rota</TableHead>
+                  <TableHead>Status Rota</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Rota</TableHead>
                   <TableHead>Motorista</TableHead>
@@ -1173,27 +1272,75 @@ export default function ReportsPage() {
                   filteredDeliveries.map((delivery, index) => (
                     <TableRow key={index}>
                       <TableCell>
-                        <Checkbox
-                          checked={selectedDeliveryIds.has(delivery.stopId)}
-                          onCheckedChange={() => handleToggleSelection(delivery.stopId)}
-                          aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
-                          disabled={delivery.reconciled}
-                        />
+                        {delivery.deliveryStatus !== 'completed' ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="inline-block cursor-not-allowed">
+                                  <Checkbox
+                                    disabled={true}
+                                    aria-label="Parada não concluída"
+                                  />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Apenas paradas entregues podem ser conciliadas</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <Checkbox
+                            checked={selectedDeliveryIds.has(delivery.stopId)}
+                            onCheckedChange={() => handleToggleSelection(delivery.stopId)}
+                            aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
+                            disabled={delivery.reconciled}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(delivery.routeId);
-                            toast({
-                              title: 'ID copiado!',
-                              description: 'O ID da rota foi copiado para a área de transferência.',
-                            });
-                          }}
-                          className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                          title={`Clique para copiar o ID completo: ${delivery.routeId}`}
-                        >
-                          {delivery.routeId.slice(-6).toUpperCase()}
-                        </button>
+                        {delivery.routeCode ? (
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(delivery.routeCode!);
+                              toast({
+                                title: 'Código copiado!',
+                                description: 'O código da rota foi copiado para a área de transferência.',
+                              });
+                            }}
+                            className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                            title={`Clique para copiar: ${delivery.routeCode}`}
+                          >
+                            {delivery.routeCode}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const route = routes.find(r => r.id === delivery.routeId);
+                          if (!route) return <Badge variant="secondary">-</Badge>;
+
+                          if (route.status === 'in_progress') {
+                            return (
+                              <Badge variant="outline" className="text-blue-600 border-blue-600">
+                                Em Andamento
+                              </Badge>
+                            );
+                          } else if (route.status === 'dispatched') {
+                            return (
+                              <Badge variant="outline" className="text-purple-600 border-purple-600">
+                                Despachada
+                              </Badge>
+                            );
+                          } else {
+                            return (
+                              <Badge variant="secondary">
+                                Finalizada
+                              </Badge>
+                            );
+                          }
+                        })()}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {format(delivery.plannedDate, 'dd/MM/yyyy', { locale: ptBR })}
