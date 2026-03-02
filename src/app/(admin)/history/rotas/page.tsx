@@ -211,7 +211,8 @@ export default function HistoryRoutesPage() {
         route =>
           route.name?.toLowerCase().includes(search) ||
           route.code?.toLowerCase().includes(search) ||
-          route.driverInfo?.name?.toLowerCase().includes(search)
+          route.driverInfo?.name?.toLowerCase().includes(search) ||
+          route.id?.toLowerCase().includes(search)
       );
     }
 

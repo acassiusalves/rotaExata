@@ -2716,6 +2716,19 @@ export default function RouteAcompanharPage() {
       // Add to selected route or unassigned
       if (selectedRouteForNewService === 'unassigned') {
         console.log('📦 [handleAddService] Adicionando aos não alocados');
+
+        // Check if stop already exists (idempotency check)
+        const stopIdentifier = String(newStop.id ?? newStop.placeId);
+        const alreadyExists = unassignedStops.some(s => String(s.id ?? s.placeId) === stopIdentifier);
+
+        if (alreadyExists) {
+          toast({
+            title: 'Serviço já existe',
+            description: 'Este serviço já está na lista de não alocados.',
+          });
+          return;
+        }
+
         setUnassignedStops(prev => [...prev, newStop]);
 
         // Salvar no Firestore se for uma rota existente
@@ -2723,8 +2736,12 @@ export default function RouteAcompanharPage() {
           console.log('💾 [handleAddService] SALVANDO unassignedStops no Firestore - Route ID:', routeData.currentRouteId);
           try {
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
+
+            // Replace entire array instead of using arrayUnion to prevent duplicates
+            const updatedUnassignedStops = [...unassignedStops, newStop];
+
             await updateDoc(routeRef, {
-              unassignedStops: arrayUnion(newStop),
+              unassignedStops: updatedUnassignedStops,
               updatedAt: serverTimestamp(),
             });
             console.log('✅ [handleAddService] UnassignedStops SALVO no Firestore com sucesso!');
@@ -3814,8 +3831,13 @@ export default function RouteAcompanharPage() {
     const stopToMove = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
     if (!stopToMove) return;
 
-    // Add to unassigned stops
-    setUnassignedStops(prev => [...prev, stopToMove]);
+    // Add to unassigned stops (with idempotency check)
+    const stopIdentifier = String(stopToMove.id ?? stopToMove.placeId);
+    const alreadyExists = unassignedStops.some(s => String(s.id ?? s.placeId) === stopIdentifier);
+
+    if (!alreadyExists) {
+      setUnassignedStops(prev => [...prev, stopToMove]);
+    }
 
     // Remove the stop from the route
     const newStops = targetRoute.stops.filter(s => String(s.id ?? s.placeId) !== stopId);
@@ -3834,11 +3856,18 @@ export default function RouteAcompanharPage() {
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
           const routeRef = doc(db, 'routes', routeData.currentRouteId);
+
+          // Calculate updated unassigned stops array
+          const updatedUnassignedStops = alreadyExists
+            ? [...unassignedStops]
+            : [...unassignedStops, stopToMove];
+
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
             distanceMeters: 0,
             duration: '0s',
+            unassignedStops: updatedUnassignedStops,
           });
         } catch (error) {
           console.error('❌ Erro ao atualizar Firestore:', error);
@@ -3863,11 +3892,18 @@ export default function RouteAcompanharPage() {
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
             const routeRef = doc(db, 'routes', routeData.currentRouteId);
+
+            // Calculate updated unassigned stops array
+            const updatedUnassignedStops = alreadyExists
+              ? [...unassignedStops]
+              : [...unassignedStops, stopToMove];
+
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
+              unassignedStops: updatedUnassignedStops,
             });
           } catch (error) {
             console.error('❌ Erro ao atualizar Firestore:', error);

@@ -1149,6 +1149,7 @@ export default function ReportsPage() {
                       aria-label="Selecionar todos"
                     />
                   </TableHead>
+                  <TableHead>Nº Rota</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Rota</TableHead>
                   <TableHead>Motorista</TableHead>
@@ -1164,7 +1165,7 @@ export default function ReportsPage() {
               <TableBody>
                 {filteredDeliveries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                       Nenhuma entrega encontrada com os filtros selecionados
                     </TableCell>
                   </TableRow>
@@ -1178,6 +1179,21 @@ export default function ReportsPage() {
                           aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
                           disabled={delivery.reconciled}
                         />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(delivery.routeId);
+                            toast({
+                              title: 'ID copiado!',
+                              description: 'O ID da rota foi copiado para a área de transferência.',
+                            });
+                          }}
+                          className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                          title={`Clique para copiar o ID completo: ${delivery.routeId}`}
+                        >
+                          {delivery.routeId.slice(-6).toUpperCase()}
+                        </button>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {format(delivery.plannedDate, 'dd/MM/yyyy', { locale: ptBR })}
