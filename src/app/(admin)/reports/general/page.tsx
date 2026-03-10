@@ -22,6 +22,7 @@ import {
   Sunset,
   Sparkles,
   Loader2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -84,6 +85,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
 import { Progress } from '@/components/ui/progress';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 
 // Tipos para conciliação com IA
 type AIReconciliationResult = {
@@ -127,6 +136,8 @@ type DeliveryReport = {
   stopId: string; // ID único da parada para identificação
   customerName: string;
   address: string;
+  street?: string;
+  city?: string;
   orderNumber?: string;
   deliveryStatus?: 'completed' | 'failed';
   completedAt?: Date;
@@ -196,6 +207,46 @@ const getPeriodInfo = (date: Date | Timestamp) => {
   }
 };
 
+// Funções para extrair rua e cidade do campo address quando campos estruturados não existem
+// Formatos comuns:
+// Google: "Rua X, 123 - Bairro, Cidade - UF, 12345-678, Brasil"
+// Lunna:  "Rua X, 123, Bairro, Cidade, CEP 12345-678"
+const extractStreetFromAddress = (address?: string): string => {
+  if (!address) return '';
+  // Pegar tudo antes do primeiro " - " (formato Google) ou até a 2a vírgula (formato Lunna)
+  const dashParts = address.split(' - ');
+  if (dashParts.length >= 2) return dashParts[0].trim();
+  // Fallback: pegar "Rua X, 123" (duas primeiras partes separadas por vírgula)
+  const commaParts = address.split(',');
+  if (commaParts.length >= 2) return `${commaParts[0].trim()}, ${commaParts[1].trim()}`;
+  return address.trim();
+};
+
+const extractCityFromAddress = (address?: string): string => {
+  if (!address) return '';
+  // Formato Google: "Rua X, 123 - Bairro, Cidade - UF, CEP, Brasil"
+  const dashParts = address.split(' - ');
+  if (dashParts.length >= 3) {
+    // Parte do meio contém "Bairro, Cidade" — pegar último item antes do " - UF"
+    const middleParts = dashParts.slice(1, -1).join(' - ');
+    const commaItems = middleParts.split(',');
+    return commaItems[commaItems.length - 1]?.trim() || '';
+  }
+  if (dashParts.length === 2) {
+    // "Rua X, 123 - Cidade, UF" → pegar primeira parte após o dash
+    return dashParts[1].split(',')[0]?.trim() || '';
+  }
+  // Formato Lunna: "Rua X, 123, Bairro, Cidade, CEP 12345-678"
+  const commaParts = address.split(',').map(p => p.trim());
+  if (commaParts.length >= 4) {
+    // Cidade geralmente é a penúltima parte (antes do CEP)
+    const candidate = commaParts[commaParts.length - 2];
+    if (candidate && !candidate.match(/^\d/) && !candidate.startsWith('CEP')) return candidate;
+    return commaParts[commaParts.length - 3] || '';
+  }
+  return '';
+};
+
 export default function ReportsPage() {
   const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
   const [deliveries, setDeliveries] = React.useState<DeliveryReport[]>([]);
@@ -229,6 +280,47 @@ export default function ReportsPage() {
   const [aiResultsDialogOpen, setAiResultsDialogOpen] = React.useState(false);
   const [aiResults, setAiResults] = React.useState<AIReconciliationResult[]>([]);
   const [aiSummary, setAiSummary] = React.useState<AIReconciliationSummary | null>(null);
+
+  // Visibilidade de colunas
+  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
+    select: true,
+    routeCode: true,
+    routeStatus: true,
+    date: true,
+    routeName: true,
+    driverName: true,
+    stopIndex: true,
+    customerName: true,
+    orderNumber: true,
+    status: true,
+    period: true,
+    street: true,
+    city: true,
+    value: true,
+    actions: true,
+  });
+
+  const columnLabels: Record<string, string> = {
+    routeCode: 'Nº Rota',
+    routeStatus: 'Status Rota',
+    date: 'Data',
+    routeName: 'Rota',
+    driverName: 'Motorista',
+    stopIndex: 'Parada',
+    customerName: 'Cliente',
+    orderNumber: 'Pedido',
+    status: 'Status',
+    period: 'Período de Execução',
+    street: 'Rua',
+    city: 'Cidade',
+    value: 'Valor',
+  };
+
+  const toggleColumnVisibility = (key: string) => {
+    setColumnVisibility(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const visibleColumnCount = Object.values(columnVisibility).filter(Boolean).length;
 
   // Estatísticas
   const stats = React.useMemo(() => {
@@ -349,6 +441,8 @@ export default function ReportsPage() {
               stopId: stop.id, // ID único da parada
               customerName: stop.customerName || 'Cliente não informado',
               address: stop.address,
+              street: stop.rua || stop.street || extractStreetFromAddress(stop.address),
+              city: stop.cidade || stop.city || extractCityFromAddress(stop.address),
               orderNumber: stop.orderNumber,
               deliveryStatus: stop.deliveryStatus,
               completedAt: stop.completedAt ? (stop.completedAt instanceof Timestamp ? stop.completedAt.toDate() : stop.completedAt) : undefined,
@@ -394,6 +488,8 @@ export default function ReportsPage() {
         d =>
           d.customerName?.toLowerCase().includes(search) ||
           d.address?.toLowerCase().includes(search) ||
+          d.street?.toLowerCase().includes(search) ||
+          d.city?.toLowerCase().includes(search) ||
           d.orderNumber?.toLowerCase().includes(search) ||
           d.routeName?.toLowerCase().includes(search) ||
           d.driverName?.toLowerCase().includes(search)
@@ -808,6 +904,8 @@ export default function ReportsPage() {
       'Parada',
       'Cliente',
       'Endereço',
+      'Rua',
+      'Cidade',
       'Pedido',
       'Status',
       'Horário Chegada',
@@ -844,6 +942,8 @@ export default function ReportsPage() {
         d.stopIndex + 1,
         d.customerName,
         d.address,
+        d.street || '',
+        d.city || '',
         d.orderNumber || '',
         d.deliveryStatus === 'completed' ? 'Entregue' : d.deliveryStatus === 'failed' ? 'Falhou' : 'Pendente',
         d.arrivedAt ? format(d.arrivedAt, 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
@@ -1227,220 +1327,267 @@ export default function ReportsPage() {
 
       {/* Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>
-            Entregas ({filteredDeliveries.length})
-          </CardTitle>
-          <CardDescription>
-            Lista detalhada de todas as entregas no período selecionado
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>
+              Entregas ({filteredDeliveries.length})
+            </CardTitle>
+            <CardDescription>
+              Lista detalhada de todas as entregas no período selecionado
+            </CardDescription>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <SlidersHorizontal className="h-4 w-4" />
+                Colunas
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Colunas visíveis</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {Object.entries(columnLabels).map(([key, label]) => (
+                <DropdownMenuCheckboxItem
+                  key={key}
+                  checked={columnVisibility[key]}
+                  onCheckedChange={() => toggleColumnVisibility(key)}
+                >
+                  {label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={filteredDeliveries.length > 0 && selectedDeliveryIds.size === filteredDeliveries.length}
-                      onCheckedChange={handleToggleSelectAll}
-                      aria-label="Selecionar todos"
-                    />
-                  </TableHead>
-                  <TableHead>Nº Rota</TableHead>
-                  <TableHead>Status Rota</TableHead>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Rota</TableHead>
-                  <TableHead>Motorista</TableHead>
-                  <TableHead>Parada</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Pedido</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Período de Execução</TableHead>
-                  <TableHead>Valor</TableHead>
-                  <TableHead>Ações</TableHead>
+                  {columnVisibility.select && (
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={filteredDeliveries.length > 0 && selectedDeliveryIds.size === filteredDeliveries.length}
+                        onCheckedChange={handleToggleSelectAll}
+                        aria-label="Selecionar todos"
+                      />
+                    </TableHead>
+                  )}
+                  {columnVisibility.routeCode && <TableHead>Nº Rota</TableHead>}
+                  {columnVisibility.routeStatus && <TableHead>Status Rota</TableHead>}
+                  {columnVisibility.date && <TableHead>Data</TableHead>}
+                  {columnVisibility.routeName && <TableHead>Rota</TableHead>}
+                  {columnVisibility.driverName && <TableHead>Motorista</TableHead>}
+                  {columnVisibility.stopIndex && <TableHead>Parada</TableHead>}
+                  {columnVisibility.customerName && <TableHead>Cliente</TableHead>}
+                  {columnVisibility.orderNumber && <TableHead>Pedido</TableHead>}
+                  {columnVisibility.status && <TableHead>Status</TableHead>}
+                  {columnVisibility.period && <TableHead>Período de Execução</TableHead>}
+                  {columnVisibility.street && <TableHead>Rua</TableHead>}
+                  {columnVisibility.city && <TableHead>Cidade</TableHead>}
+                  {columnVisibility.value && <TableHead>Valor</TableHead>}
+                  {columnVisibility.actions && <TableHead>Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredDeliveries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={visibleColumnCount} className="text-center py-8 text-muted-foreground">
                       Nenhuma entrega encontrada com os filtros selecionados
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredDeliveries.map((delivery, index) => (
                     <TableRow key={index}>
-                      <TableCell>
-                        {delivery.deliveryStatus !== 'completed' ? (
+                      {columnVisibility.select && (
+                        <TableCell>
+                          {delivery.deliveryStatus !== 'completed' ? (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="inline-block cursor-not-allowed">
+                                    <Checkbox
+                                      disabled={true}
+                                      aria-label="Parada não concluída"
+                                    />
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Apenas paradas entregues podem ser conciliadas</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ) : (
+                            <Checkbox
+                              checked={selectedDeliveryIds.has(delivery.stopId)}
+                              onCheckedChange={() => handleToggleSelection(delivery.stopId)}
+                              aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
+                              disabled={delivery.reconciled}
+                            />
+                          )}
+                        </TableCell>
+                      )}
+                      {columnVisibility.routeCode && (
+                        <TableCell className="whitespace-nowrap">
+                          {delivery.routeCode ? (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(delivery.routeCode!);
+                                toast({
+                                  title: 'Código copiado!',
+                                  description: 'O código da rota foi copiado para a área de transferência.',
+                                });
+                              }}
+                              className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                              title={`Clique para copiar: ${delivery.routeCode}`}
+                            >
+                              {delivery.routeCode}
+                            </button>
+                          ) : (
+                            <span className="font-mono text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      )}
+                      {columnVisibility.routeStatus && (
+                        <TableCell>
+                          {(() => {
+                            const route = routes.find(r => r.id === delivery.routeId);
+                            if (!route) return <Badge variant="secondary">-</Badge>;
+
+                            if (route.status === 'in_progress') {
+                              return (
+                                <Badge variant="outline" className="text-blue-600 border-blue-600">
+                                  Em Andamento
+                                </Badge>
+                              );
+                            } else if (route.status === 'dispatched') {
+                              return (
+                                <Badge variant="outline" className="text-purple-600 border-purple-600">
+                                  Despachada
+                                </Badge>
+                              );
+                            } else {
+                              return (
+                                <Badge variant="secondary">
+                                  Finalizada
+                                </Badge>
+                              );
+                            }
+                          })()}
+                        </TableCell>
+                      )}
+                      {columnVisibility.date && (
+                        <TableCell className="whitespace-nowrap">
+                          {format(delivery.plannedDate, 'dd/MM/yyyy', { locale: ptBR })}
+                        </TableCell>
+                      )}
+                      {columnVisibility.routeName && <TableCell>{delivery.routeName}</TableCell>}
+                      {columnVisibility.driverName && <TableCell>{delivery.driverName}</TableCell>}
+                      {columnVisibility.stopIndex && <TableCell>#{delivery.stopIndex + 1}</TableCell>}
+                      {columnVisibility.customerName && <TableCell>{delivery.customerName}</TableCell>}
+                      {columnVisibility.orderNumber && <TableCell>{delivery.orderNumber || '-'}</TableCell>}
+                      {columnVisibility.status && <TableCell>{getStatusBadge(delivery)}</TableCell>}
+                      {columnVisibility.period && (
+                        <TableCell className="whitespace-nowrap">
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <div className="inline-block cursor-not-allowed">
-                                  <Checkbox
-                                    disabled={true}
-                                    aria-label="Parada não concluída"
-                                  />
+                                <div className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors cursor-help ${getPeriodInfo(delivery.plannedDate).bgColor} ${getPeriodInfo(delivery.plannedDate).textColor} ${getPeriodInfo(delivery.plannedDate).borderColor}`}>
+                                  {React.createElement(getPeriodInfo(delivery.plannedDate).icon, { className: 'h-3 w-3 mr-1' })}
+                                  {getPeriodInfo(delivery.plannedDate).period}
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Apenas paradas entregues podem ser conciliadas</p>
+                                <div className="text-sm">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    <span className="font-medium">Período da rota:</span>
+                                  </div>
+                                  <div className="mt-1 text-muted-foreground">
+                                    Planejado para {format(delivery.plannedDate, 'HH:mm', { locale: ptBR })}
+                                  </div>
+                                  {delivery.arrivedAt && delivery.completedAt && (
+                                    <div className="mt-2 pt-2 border-t">
+                                      <div className="font-medium">Execução real:</div>
+                                      <div className="text-muted-foreground">
+                                        {format(delivery.arrivedAt, 'HH:mm', { locale: ptBR })}
+                                        {' → '}
+                                        {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                        ) : (
-                          <Checkbox
-                            checked={selectedDeliveryIds.has(delivery.stopId)}
-                            onCheckedChange={() => handleToggleSelection(delivery.stopId)}
-                            aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
-                            disabled={delivery.reconciled}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {delivery.routeCode ? (
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(delivery.routeCode!);
-                              toast({
-                                title: 'Código copiado!',
-                                description: 'O código da rota foi copiado para a área de transferência.',
-                              });
-                            }}
-                            className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                            title={`Clique para copiar: ${delivery.routeCode}`}
-                          >
-                            {delivery.routeCode}
-                          </button>
-                        ) : (
-                          <span className="font-mono text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          const route = routes.find(r => r.id === delivery.routeId);
-                          if (!route) return <Badge variant="secondary">-</Badge>;
-
-                          if (route.status === 'in_progress') {
-                            return (
-                              <Badge variant="outline" className="text-blue-600 border-blue-600">
-                                Em Andamento
-                              </Badge>
-                            );
-                          } else if (route.status === 'dispatched') {
-                            return (
-                              <Badge variant="outline" className="text-purple-600 border-purple-600">
-                                Despachada
-                              </Badge>
-                            );
-                          } else {
-                            return (
-                              <Badge variant="secondary">
-                                Finalizada
-                              </Badge>
-                            );
-                          }
-                        })()}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {format(delivery.plannedDate, 'dd/MM/yyyy', { locale: ptBR })}
-                      </TableCell>
-                      <TableCell>{delivery.routeName}</TableCell>
-                      <TableCell>{delivery.driverName}</TableCell>
-                      <TableCell>#{delivery.stopIndex + 1}</TableCell>
-                      <TableCell>{delivery.customerName}</TableCell>
-                      <TableCell>{delivery.orderNumber || '-'}</TableCell>
-                      <TableCell>{getStatusBadge(delivery)}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors cursor-help ${getPeriodInfo(delivery.plannedDate).bgColor} ${getPeriodInfo(delivery.plannedDate).textColor} ${getPeriodInfo(delivery.plannedDate).borderColor}`}>
-                                {React.createElement(getPeriodInfo(delivery.plannedDate).icon, { className: 'h-3 w-3 mr-1' })}
-                                {getPeriodInfo(delivery.plannedDate).period}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <div className="text-sm">
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  <span className="font-medium">Período da rota:</span>
-                                </div>
-                                <div className="mt-1 text-muted-foreground">
-                                  Planejado para {format(delivery.plannedDate, 'HH:mm', { locale: ptBR })}
-                                </div>
-                                {delivery.arrivedAt && delivery.completedAt && (
-                                  <div className="mt-2 pt-2 border-t">
-                                    <div className="font-medium">Execução real:</div>
-                                    <div className="text-muted-foreground">
-                                      {format(delivery.arrivedAt, 'HH:mm', { locale: ptBR })}
-                                      {' → '}
-                                      {format(delivery.completedAt, 'HH:mm', { locale: ptBR })}
-                                    </div>
-                                  </div>
+                        </TableCell>
+                      )}
+                      {columnVisibility.street && (
+                        <TableCell className="whitespace-nowrap">{delivery.street || '-'}</TableCell>
+                      )}
+                      {columnVisibility.city && (
+                        <TableCell className="whitespace-nowrap">{delivery.city || '-'}</TableCell>
+                      )}
+                      {columnVisibility.value && (
+                        <TableCell>
+                          {delivery.payments ? (
+                            <div className="flex items-center gap-1">
+                              <span>
+                                {formatCurrency(
+                                  selectedPaymentMethod !== 'all'
+                                    ? delivery.payments
+                                        .filter(p => p.method === selectedPaymentMethod)
+                                        .reduce((s, p) => s + (p.value || 0), 0)
+                                    : delivery.payments.reduce((s, p) => s + (p.value || 0), 0)
                                 )}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-                      <TableCell>
-                        {delivery.payments ? (
-                          <div className="flex items-center gap-1">
-                            <span>
-                              {formatCurrency(
-                                selectedPaymentMethod !== 'all'
-                                  ? delivery.payments
-                                      .filter(p => p.method === selectedPaymentMethod)
-                                      .reduce((s, p) => s + (p.value || 0), 0)
-                                  : delivery.payments.reduce((s, p) => s + (p.value || 0), 0)
-                              )}
-                            </span>
-                            {delivery.expectedValue !== undefined && (() => {
-                              const totalPaid = delivery.payments.reduce((s, p) => s + (p.value || 0), 0);
-                              const diff = Math.abs(delivery.expectedValue - totalPaid);
-                              if (diff <= 0.50) {
-                                return (
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger>
-                                        <CheckCircle className="h-4 w-4 text-green-600" />
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
-                                        <p className="text-green-600">Dentro da tolerância</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                );
-                              } else {
-                                return (
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger>
-                                        <AlertCircle className="h-4 w-4 text-orange-500" />
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
-                                        <p className="text-orange-600">Diferença: {formatCurrency(diff)}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                );
-                              }
-                            })()}
-                          </div>
-                        ) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewDetails(delivery)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+                              </span>
+                              {delivery.expectedValue !== undefined && (() => {
+                                const totalPaid = delivery.payments.reduce((s, p) => s + (p.value || 0), 0);
+                                const diff = Math.abs(delivery.expectedValue - totalPaid);
+                                if (diff <= 0.50) {
+                                  return (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger>
+                                          <CheckCircle className="h-4 w-4 text-green-600" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
+                                          <p className="text-green-600">Dentro da tolerância</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                } else {
+                                  return (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger>
+                                          <AlertCircle className="h-4 w-4 text-orange-500" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>Valor esperado: {formatCurrency(delivery.expectedValue)}</p>
+                                          <p className="text-orange-600">Diferença: {formatCurrency(diff)}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                }
+                              })()}
+                            </div>
+                          ) : '-'}
+                        </TableCell>
+                      )}
+                      {columnVisibility.actions && (
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewDetails(delivery)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
