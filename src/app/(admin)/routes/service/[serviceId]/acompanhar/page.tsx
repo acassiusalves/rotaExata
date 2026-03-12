@@ -1259,6 +1259,12 @@ export default function ServiceAcompanharPage() {
               const routeName = routeData.name || parsedData.routeName || 'Rota 1';
               setRouteNames(prev => ({ ...prev, A: routeName }));
 
+              // Restaurar motorista atribuído do Firestore
+              if (routeData.driverId) {
+                setAssignedDrivers(prev => ({ ...prev, A: routeData.driverId }));
+                console.log('✅ [loadRouteData] Motorista da Rota A (existente) restaurado do Firestore:', routeData.driverId);
+              }
+
               // Usar dados do Firestore ao invés do sessionStorage
               let allStops = routeData.stops.filter((s: PlaceValue) => s.id && s.lat && s.lng);
 
@@ -1660,6 +1666,11 @@ export default function ServiceAcompanharPage() {
               status: r.status as any,
             });
             setServiceRouteIds(prev => ({ ...prev, A: r.id }));
+            // Restaurar motorista atribuído do Firestore
+            if (r.driverId) {
+              setAssignedDrivers(prev => ({ ...prev, A: r.driverId! }));
+              console.log('✅ [loadRouteData] Motorista da Rota A restaurado do Firestore:', r.driverId);
+            }
           }
 
           // Segunda rota existente → Route B
@@ -1676,6 +1687,11 @@ export default function ServiceAcompanharPage() {
               status: r.status as any,
             });
             setServiceRouteIds(prev => ({ ...prev, B: r.id }));
+            // Restaurar motorista atribuído do Firestore
+            if (r.driverId) {
+              setAssignedDrivers(prev => ({ ...prev, B: r.driverId! }));
+              console.log('✅ [loadRouteData] Motorista da Rota B restaurado do Firestore:', r.driverId);
+            }
           } else {
             setRouteB(null);
           }
@@ -1701,6 +1717,18 @@ export default function ServiceAcompanharPage() {
               };
             });
             setDynamicRoutes(extraRoutes);
+            // Restaurar motoristas das rotas dinâmicas do Firestore
+            const dynamicDriverUpdates: Record<string, string> = {};
+            existingRoutes.slice(2).forEach((r, idx) => {
+              const key = String.fromCharCode(67 + idx);
+              if (r.driverId) {
+                dynamicDriverUpdates[key] = r.driverId;
+                console.log(`✅ [loadRouteData] Motorista da Rota ${key} restaurado do Firestore:`, r.driverId);
+              }
+            });
+            if (Object.keys(dynamicDriverUpdates).length > 0) {
+              setAssignedDrivers(prev => ({ ...prev, ...dynamicDriverUpdates }));
+            }
           }
 
           // Stops não atribuídos → unassignedStops
