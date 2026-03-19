@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/acassiusalves/luna/**)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\))",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/admin)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/dashboard)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/settings)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/routes)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/drivers)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/financeiro)",
+      "Bash(ls /Users/acassiusalves/rotaExata-1/src/app/\\\\\\(admin\\\\\\)/admin/)"
+    ]
+  }
+}
