@@ -79,7 +79,9 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   DndContext,
+  pointerWithin,
   closestCenter,
+  type CollisionDetection,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -533,8 +535,8 @@ export default function RouteAcompanharPage() {
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
-  const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
-  const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+  const [routeNames, setRouteNames] = React.useState<Record<string, string>>({ A: 'Rota 1', B: 'Rota 2' });
+  const [assignedDrivers, setAssignedDrivers] = React.useState<Record<string, string | null>>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   // Firestore IDs para rotas A e B (quando salvas como draft no contexto de serviço)
   const [serviceRouteIds, setServiceRouteIds] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
@@ -779,9 +781,19 @@ export default function RouteAcompanharPage() {
     useSensor(KeyboardSensor)
   );
 
+  const collisionDetectionStrategy = React.useCallback<CollisionDetection>((args) => {
+    const pointerIntersections = pointerWithin(args);
+
+    if (pointerIntersections.length > 0) {
+      return pointerIntersections;
+    }
+
+    return closestCenter(args);
+  }, []);
+
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [activeStop, setActiveStop] = React.useState<PlaceValue | null>(null);
-  const [activeRouteKey, setActiveRouteKey] = React.useState<'A' | 'B' | null>(null);
+  const [activeRouteKey, setActiveRouteKey] = React.useState<string | null>(null);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
 
   // Timeline column resize state
@@ -2891,7 +2903,7 @@ export default function RouteAcompanharPage() {
       const route = getRoute(routeKey);
       if (route) {
         // Get from pendingEdits if exists, otherwise from route
-        const stops = pendingEdits[routeKey] || route.stops;
+        const stops = pendingEdits[routeKey] ?? route.stops;
         setActiveStop(stops[index]);
       }
     }
@@ -3087,7 +3099,7 @@ export default function RouteAcompanharPage() {
         }
       }
 
-      const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
+      const routeName = getRouteDisplayName(overRouteKey);
       const hasFirestoreId = !!(routeData.isExistingRoute && overRouteKey === 'A') || !!(routeData.isService && (serviceRouteIds[overRouteKey as 'A' | 'B'] || dynamicRoutes.find(r => r.key === overRouteKey)?.firestoreId));
       toast({
         title: 'Serviço adicionado!',
@@ -3118,10 +3130,12 @@ export default function RouteAcompanharPage() {
 
       // Check if there's already a pending edit, if so use that, otherwise use current route
       const currentPending = pendingEdits[activeRouteKey];
-      const stopsToReorder = currentPending || currentRoute.stops.map((stop, idx) => ({
-        ...stop,
-        _originalIndex: idx // Store original index
-      }));
+      const stopsToReorder = currentPending !== null && currentPending !== undefined
+        ? [...currentPending]
+        : currentRoute.stops.map((stop, idx) => ({
+            ...stop,
+            _originalIndex: idx // Store original index
+          }));
 
       // Validate indices before arrayMove
       if (oldIndex === undefined || newIndex === undefined || oldIndex < 0 || newIndex < 0 || oldIndex >= stopsToReorder.length) {
@@ -3192,7 +3206,7 @@ export default function RouteAcompanharPage() {
       // CRITICAL: Always use pending edits if they exist, otherwise create from CURRENT route state
       // This prevents issues where Firestore listener updates the state while we're editing
       const currentSourcePending = pendingEdits[activeRouteKey];
-      const sourceStopsToEdit = currentSourcePending
+      const sourceStopsToEdit = currentSourcePending !== null && currentSourcePending !== undefined
         ? [...currentSourcePending] // Create a copy to avoid mutation
         : sourceRoute.stops.map((stop, idx) => ({
             ...stop,
@@ -3202,7 +3216,7 @@ export default function RouteAcompanharPage() {
       // Check if there's already a pending edit for target route
       // Target route might be null/empty, so handle that case
       const currentTargetPending = pendingEdits[overRouteKey];
-      const targetStopsToEdit = currentTargetPending
+      const targetStopsToEdit = currentTargetPending !== null && currentTargetPending !== undefined
         ? [...currentTargetPending] // Create a copy to avoid mutation
         : (targetRoute?.stops || []).map((stop, idx) => ({
             ...stop,
@@ -3210,8 +3224,8 @@ export default function RouteAcompanharPage() {
           }));
 
       addDebugLog('DRAG_BETWEEN_ROUTES', 'Pending edits status', {
-        hasSourcePending: !!currentSourcePending,
-        hasTargetPending: !!currentTargetPending,
+        hasSourcePending: currentSourcePending !== null && currentSourcePending !== undefined,
+        hasTargetPending: currentTargetPending !== null && currentTargetPending !== undefined,
         sourceStopsToEditCount: sourceStopsToEdit.length,
         targetStopsToEditCount: targetStopsToEdit.length
       });
@@ -3358,6 +3372,36 @@ export default function RouteAcompanharPage() {
     }
   };
 
+  const hasPendingEdit = (routeKey: string) =>
+    pendingEdits[routeKey] !== null && pendingEdits[routeKey] !== undefined;
+
+  const getDisplayedStops = (routeKey: string, fallbackStops: PlaceValue[]) =>
+    pendingEdits[routeKey] ?? fallbackStops;
+
+  const getRouteDisplayName = (routeKey: string) => {
+    if (routeNames[routeKey]) return routeNames[routeKey];
+
+    const dynamicRoute = dynamicRoutes.find(r => r.key === routeKey);
+    if (dynamicRoute) return dynamicRoute.name;
+
+    const additionalRoute = additionalRoutes.find(r => r.id === routeKey);
+    if (additionalRoute) return additionalRoute.name;
+
+    return `Rota ${routeKey}`;
+  };
+
+  const getExistingRouteId = (routeKey: string) => {
+    if (routeKey === 'A' && routeData?.isExistingRoute && routeData.currentRouteId) {
+      return routeData.currentRouteId;
+    }
+
+    const additionalRoute = additionalRoutes.find(r => r.id === routeKey);
+    return additionalRoute?.id || null;
+  };
+
+  const shouldUpdateExistingRoute = (routeKey: string) =>
+    !!getExistingRouteId(routeKey);
+
   // Function to add a new dynamic route
   const handleAddNewRoute = () => {
     // Cores diferentes das rotas A (vermelho) e B (verde) para evitar confusão
@@ -3409,7 +3453,7 @@ export default function RouteAcompanharPage() {
     }
 
     // Check if route has stops - if so, move them back to unassigned
-    const routeStops = pendingEdits[routeKey] || dynamicRoute.data.stops;
+    const routeStops = pendingEdits[routeKey] ?? dynamicRoute.data.stops;
 
     if (routeStops.length > 0) {
       // Move stops back to unassigned
@@ -3506,7 +3550,7 @@ export default function RouteAcompanharPage() {
     }
   };
   
-  const handleAssignDriver = (routeKey: 'A' | 'B', driverId: string) => {
+  const handleAssignDriver = (routeKey: string, driverId: string) => {
     setAssignedDrivers(prev => ({...prev, [routeKey]: driverId}));
   };
   
@@ -3522,7 +3566,7 @@ export default function RouteAcompanharPage() {
       if (dynRoute) routeToSave = dynRoute.data;
     }
 
-    const routeName = routeNames[routeKey] || `Rota ${routeKey}`;
+    const routeName = getRouteDisplayName(routeKey);
     const driverId = assignedDrivers[routeKey];
 
     if (!routeToSave) {
@@ -3580,8 +3624,8 @@ export default function RouteAcompanharPage() {
 
         let routeRefId: string;
 
-        if (existingDraftId && routeData.isService) {
-            // ATUALIZAR o draft existente em vez de criar novo documento
+        if (existingDraftId) {
+            // Atualiza o draft existente em vez de criar um novo documento duplicado.
             console.log(`📝 [handleDispatchRoute] Atualizando draft existente ${existingDraftId} para dispatched`);
             const routeRef = doc(db, 'routes', existingDraftId);
             await updateDoc(routeRef, routeDocData);
@@ -3680,27 +3724,20 @@ export default function RouteAcompanharPage() {
     }
   };
 
-  const handleUpdateExistingRoute = async (routeKey: 'A' | 'B') => {
+  const handleUpdateExistingRoute = async (routeKey: string) => {
     if (!routeData) return;
 
-    const routeToUpdate = routeKey === 'A' ? routeA : routeB;
-    const routeName = routeNames[routeKey];
+    const routeToUpdate = getRoute(routeKey);
+    const routeName = getRouteDisplayName(routeKey);
 
     if (!routeToUpdate) {
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para atualização.' });
         return;
     }
 
-    // Verificar se é uma rota existente
-    if (!routeData.isExistingRoute || !routeData.existingRouteData) {
-        toast({ variant: 'destructive', title: 'Erro', description: 'Esta rota ainda não foi despachada.' });
-        return;
-    }
-
-    // Obter o ID da rota do Firebase
-    const currentRouteId = routeData.currentRouteId;
+    const currentRouteId = getExistingRouteId(routeKey);
     if (!currentRouteId) {
-        toast({ variant: 'destructive', title: 'Erro', description: 'ID da rota não encontrado.' });
+        toast({ variant: 'destructive', title: 'Erro', description: 'Esta rota precisa ser criada antes de salvar alterações.' });
         return;
     }
 
@@ -4040,7 +4077,7 @@ export default function RouteAcompanharPage() {
     if (!targetRoute) return;
 
     // Usar pendingEdits se existirem (o index vem da timeline que mostra pendingEdits)
-    const currentStops = pendingEdits[routeKey] || targetRoute.stops;
+    const currentStops = pendingEdits[routeKey] ?? targetRoute.stops;
     const newStops = currentStops.filter((_, i) => i !== index);
     // Limpar metadata de pendingEdits antes de salvar
     const cleanedNewStops = newStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...s }: any) => s as PlaceValue);
@@ -4149,7 +4186,7 @@ export default function RouteAcompanharPage() {
     if (!targetRoute) return;
 
     // Usar pendingEdits se existirem (o index vem da timeline que mostra pendingEdits)
-    const currentStops = pendingEdits[routeKey] || targetRoute.stops;
+    const currentStops = pendingEdits[routeKey] ?? targetRoute.stops;
     const newStops = currentStops.filter((_, i) => i !== index);
     const cleanedNewStops = newStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...s }: any) => s as PlaceValue);
 
@@ -5010,7 +5047,7 @@ export default function RouteAcompanharPage() {
         </div>
 
         <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={collisionDetectionStrategy} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <Tabs defaultValue="organize" className="w-full">
           <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4">
             <div className="flex items-center justify-between gap-4">
@@ -5202,6 +5239,8 @@ export default function RouteAcompanharPage() {
                                   return 'Noturno';
                                 })() : null;
                                 const period = isAdditionalRoute ? additionalRoutePeriod : routeData?.period;
+                                const displayedStops = getDisplayedStops(routeItem.key, routeItem.data.stops);
+                                const routeHasPendingEdit = hasPendingEdit(routeItem.key);
 
                                 return (
                                 <TableRow key={routeItem.key} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
@@ -5218,9 +5257,14 @@ export default function RouteAcompanharPage() {
                                           ) : (
                                             <EditableRouteName
                                               name={routeItem.name}
-                                              onChange={(newName) =>
-                                                  setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }))
-                                              }
+                                              onChange={(newName) => {
+                                                  setRouteNames((prev) => ({ ...prev, [routeItem.key]: newName }));
+                                                  setDynamicRoutes(prev => prev.map(route =>
+                                                    route.key === routeItem.key
+                                                      ? { ...route, name: newName }
+                                                      : route
+                                                  ));
+                                              }}
                                               onSave={async (newName) => {
                                                 // Salvar no Firestore se for uma rota existente
                                                 if (routeData.isExistingRoute && routeItem.key === 'A') {
@@ -5244,16 +5288,16 @@ export default function RouteAcompanharPage() {
                                         </Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{(pendingEdits[routeItem.key] || routeItem.data.stops).length}</TableCell>
+                                    <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{displayedStops.length}</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDistance(routeItem.data.distanceMeters)} km</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{formatDuration(routeItem.data.duration)}</TableCell>
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell className="py-4 px-4">
                                         <RouteTimeline
-                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
+                                        key={`timeline-${routeItem.key}-${displayedStops.map(s => s.id ?? s.placeId).join('-')}`}
                                         routeKey={routeItem.key}
-                                        stops={pendingEdits[routeItem.key] || routeItem.data.stops}
-                                        originalStops={pendingEdits[routeItem.key] ? routeItem.data.stops : undefined}
+                                        stops={displayedStops}
+                                        originalStops={routeHasPendingEdit ? routeItem.data.stops : undefined}
                                         color={routeItem.data.color}
                                         dragDelay={DRAG_DELAY}
                                         onStopClick={(stop) => {
@@ -5267,9 +5311,9 @@ export default function RouteAcompanharPage() {
                                     </TableCell>
                                     <TableCell className="py-4 px-4 text-right">
                                         <div className="flex items-center justify-end gap-2">
-                                            {pendingEdits[routeItem.key] ? (
+                                            {routeHasPendingEdit ? (
                                                 <Badge variant="secondary" className="bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
-                                                    {pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length} alteraç{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{pendingEdits[routeItem.key]!.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
+                                                    {displayedStops.filter(s => (s as any)._wasMoved).length} alteraç{displayedStops.filter(s => (s as any)._wasMoved).length === 1 ? 'ão' : 'ões'} pendente{displayedStops.filter(s => (s as any)._wasMoved).length === 1 ? '' : 's'}
                                                 </Badge>
                                             ) : (
                                                 <Button
@@ -5448,6 +5492,7 @@ export default function RouteAcompanharPage() {
                     {routesForTable.length > 0 ? routesForTable.map(routeItem => {
                         const driver = availableDrivers.find(d => d.id === assignedDrivers[routeItem.key]);
                         const isSavingRoute = isSaving[routeItem.key];
+                        const shouldSaveExistingRoute = shouldUpdateExistingRoute(routeItem.key);
 
                         return (
                             <Card key={routeItem.key}>
@@ -5477,7 +5522,7 @@ export default function RouteAcompanharPage() {
                                     </div>
                                 </CardContent>
                                 <CardFooter className="flex gap-2">
-                                     {routeData?.isExistingRoute ? (
+                                     {shouldSaveExistingRoute ? (
                                         <Button
                                             className="w-full"
                                             onClick={() => handleUpdateExistingRoute(routeItem.key)}

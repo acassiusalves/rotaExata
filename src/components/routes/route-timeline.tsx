@@ -201,7 +201,7 @@ function EmptyRouteDropZone({ routeKey, color }: { routeKey: string; color: stri
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-2 w-full min-h-[40px] px-2 py-2 rounded transition-colors ${
+      className={`flex items-center gap-2 w-full min-h-[48px] px-2 py-2 rounded transition-colors ${
         isOver ? 'bg-primary/10' : ''
       }`}
     >
@@ -214,7 +214,7 @@ function EmptyRouteDropZone({ routeKey, color }: { routeKey: string; color: stri
       </div>
       {/* Empty drop zone - expands to fill space */}
       <div
-        className={`flex-1 px-4 py-2 text-xs italic border-2 border-dashed rounded transition-colors ${
+        className={`flex-1 min-w-[220px] px-4 py-3 text-xs italic border-2 border-dashed rounded transition-colors ${
           isOver
             ? 'border-primary bg-primary/5 text-primary'
             : 'border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
