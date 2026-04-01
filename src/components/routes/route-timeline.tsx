@@ -62,7 +62,7 @@ function SortableStop({
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const buttonRef = React.useRef<HTMLButtonElement>(null);
 
-  const isManual = stop.isManuallyAdded;
+  const isManual = (stop as any).isManuallyAdded === true;
 
   // Check if this specific stop was moved by the user
   const wasMoved = (stop as any)._wasMoved === true;

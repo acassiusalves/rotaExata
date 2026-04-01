@@ -526,7 +526,7 @@ export default function RouteAcompanharPage() {
       return () => clearInterval(interval);
     }
   }, []);
-  const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
+  const [isOptimizing, setIsOptimizing] = React.useState<Record<string, boolean>>({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState<{ [key: string]: boolean }>({});
 
@@ -5566,7 +5566,7 @@ export default function RouteAcompanharPage() {
             {activeId && activeStop && activeIndex !== null ? (
               <div
                 className={`flex h-6 w-6 cursor-grabbing items-center justify-center rounded-md border text-xs font-semibold shadow-lg ${
-                  activeStop.isManuallyAdded
+                  (activeStop as any).isManuallyAdded
                     ? 'border-green-300 bg-green-100 text-green-700'
                     : (activeStop as any)._wasMoved
                     ? 'border-amber-400 bg-amber-100 text-amber-900'
