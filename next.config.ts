@@ -1,11 +1,45 @@
-
+import { execSync } from 'node:child_process';
 import type {NextConfig} from 'next';
 import withPWA from 'next-pwa';
+
+function getGitCommitSha() {
+  try {
+    return execSync('git rev-parse --short=12 HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
+function resolveBuildId() {
+  const explicitBuildId =
+    process.env.NEXT_PUBLIC_BUILD_ID ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.COMMIT_SHA ||
+    process.env.SOURCE_COMMIT ||
+    getGitCommitSha();
+
+  if (explicitBuildId) {
+    return explicitBuildId;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return new Date().toISOString();
+  }
+
+  return 'development';
+}
+
+const buildId = resolveBuildId();
 
 const nextConfig: NextConfig = {
   /* config options here */
   env: {
-    NEXT_PUBLIC_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA || 'development',
+    NEXT_PUBLIC_BUILD_ID: buildId,
   },
   typescript: {
     ignoreBuildErrors: true,
