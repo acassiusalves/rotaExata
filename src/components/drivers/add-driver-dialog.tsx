@@ -25,8 +25,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/lib/firebase/client';
+import { auth, functions } from '@/lib/firebase/client';
 import { Loader2 } from 'lucide-react';
+import { sendPasswordResetEmail } from 'firebase/auth';
 
 // Função para formatar telefone brasileiro
 const formatPhone = (value: string): string => {
@@ -76,6 +77,8 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
 
   const onSubmit = async (data: DriverFormValues) => {
     setIsLoading(true);
+    let userCreated = false;
+
     try {
       const inviteUser = httpsCallable<
         { email: string; role: string; displayName: string; phone: string },
@@ -90,9 +93,12 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
       });
 
       if (result.data.ok) {
+        userCreated = true;
+        await sendPasswordResetEmail(auth, data.email);
+
         toast({
-          title: 'Convite Enviado!',
-          description: `Um email foi enviado para ${data.email} para que o motorista defina a senha e acesse o app.`,
+          title: 'Motorista convidado!',
+          description: `O email de redefinição de senha foi enviado para ${data.email}.`,
         });
         form.reset();
         onClose();
@@ -102,9 +108,11 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Não foi possível completar o cadastro.';
       toast({
-        variant: 'destructive',
-        title: 'Erro ao Convidar',
-        description: errorMessage,
+        variant: userCreated ? 'default' : 'destructive',
+        title: userCreated ? 'Cadastro criado com ressalva' : 'Erro ao Convidar',
+        description: userCreated
+          ? `O motorista foi criado, mas o email de redefinição não foi enviado. Detalhe: ${errorMessage}`
+          : errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -117,8 +125,8 @@ export function AddDriverDialog({ isOpen, onClose }: AddDriverDialogProps) {
         <DialogHeader>
           <DialogTitle>Adicionar Novo Motorista</DialogTitle>
           <DialogDescription>
-            Preencha os dados abaixo. O motorista receberá um email para criar
-            sua senha e acessar o aplicativo.
+            Preencha os dados abaixo. O sistema enviará um email para o
+            motorista definir a própria senha antes do primeiro acesso.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

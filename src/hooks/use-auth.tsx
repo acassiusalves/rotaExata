@@ -7,6 +7,7 @@ import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
 import { Toaster } from '@/components/ui/toaster';
 import { createLogger } from '@/lib/logger';
+import { clearImpersonationSession, isImpersonationSessionActive } from '@/lib/impersonation-session';
 
 const log = createLogger('AuthProvider');
 
@@ -125,7 +126,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // --- Firestore Presence System (Heartbeat) ---
         // Só configura presença se o Firestore funcionou E o usuário é driver
         // E não está em modo de impersonação
-        const isImpersonating = typeof window !== 'undefined' && localStorage.getItem('isImpersonating') === 'true';
+        const isImpersonating = isImpersonationSessionActive();
 
         if (firestoreSuccess && role === 'driver' && !isImpersonating) {
             const userFirestoreRef = doc(db, 'users', user.uid);
@@ -248,6 +249,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
     await firebaseSignOut(auth);
+    clearImpersonationSession();
     setUser(null);
     setUserRole(null);
     setMustChangePassword(false);

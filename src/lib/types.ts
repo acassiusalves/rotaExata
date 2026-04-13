@@ -217,6 +217,7 @@ export type Driver = {
   email: string;
   phone: string;
   status: DriverStatus;
+  rawStatus?: DriverStatus;
   vehicle: {
     type: string;
     plate: string;
@@ -226,6 +227,12 @@ export type Driver = {
   rating: number;
   avatarUrl: string;
   deviceInfo?: DeviceInfo;
+  pendingAssignmentsCount?: number;
+  pendingServicesCount?: number;
+  pendingStandaloneRoutesCount?: number;
+  pendingRoutesCount?: number;
+  pendingServiceCodes?: string[];
+  pendingStandaloneRouteCodes?: string[];
 };
 
 export type User = {

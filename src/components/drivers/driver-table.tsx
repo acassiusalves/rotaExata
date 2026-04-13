@@ -96,15 +96,57 @@ const statusMap: Record<
   offline: { label: 'Offline', className: 'bg-gray-500' },
 };
 
-// Prioridade para ordenação: online/available primeiro, offline por último
+// Prioridade para ordenação: ocupados primeiro, depois online/disponível e offline por último
 const statusPriority: Record<DriverStatus, number> = {
-  online: 1,
-  available: 2,
-  busy: 3,
+  busy: 1,
+  online: 2,
+  available: 3,
   offline: 4,
 };
 
+function formatPendingSummary(driver: Driver): string {
+  const details: string[] = [];
+
+  if (driver.pendingServicesCount) {
+    details.push(
+      `${driver.pendingServicesCount} serviço${driver.pendingServicesCount === 1 ? '' : 's'}`
+    );
+  }
+
+  if (driver.pendingStandaloneRoutesCount) {
+    details.push(
+      `${driver.pendingStandaloneRoutesCount} rota${driver.pendingStandaloneRoutesCount === 1 ? '' : 's'} avulsa${driver.pendingStandaloneRoutesCount === 1 ? '' : 's'}`
+    );
+  }
+
+  return details.join(' • ');
+}
+
+function formatPendingHeadline(driver: Driver): string {
+  const parts: string[] = [];
+
+  if (driver.pendingServicesCount) {
+    parts.push(
+      `${driver.pendingServicesCount} serviço${driver.pendingServicesCount === 1 ? '' : 's'}`
+    );
+  }
+
+  if (driver.pendingStandaloneRoutesCount) {
+    parts.push(
+      `${driver.pendingStandaloneRoutesCount} rota${driver.pendingStandaloneRoutesCount === 1 ? '' : 's'} avulsa${driver.pendingStandaloneRoutesCount === 1 ? '' : 's'}`
+    );
+  }
+
+  if (parts.length === 0) {
+    return 'Sem pendências';
+  }
+
+  return parts.join(' + ');
+}
+
 const getDriverColumns = (
+  onViewDetailsClick: (driver: Driver) => void,
+  onEditClick: (driver: Driver) => void,
   onDeleteClick: (driver: Driver) => void,
   onForceLogoutClick: (driver: Driver) => void,
   onImpersonateClick: (driver: Driver) => void
@@ -156,16 +198,72 @@ const getDriverColumns = (
     },
   },
   {
-    accessorKey: 'vehicle',
-    header: 'Veículo',
-    cell: ({ row }) => (
-      <div>
-        <div>{row.original.vehicle.type}</div>
-        <div className="text-xs text-muted-foreground">{row.original.vehicle.plate}</div>
-      </div>
+    accessorKey: 'pendingAssignmentsCount',
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+      >
+        Pendências
+        <ChevronsUpDown className="ml-2 h-4 w-4" />
+      </Button>
     ),
+    cell: ({ row }) => {
+      const driver = row.original;
+      const pendingAssignmentsCount = driver.pendingAssignmentsCount || 0;
+      const pendingHeadline = formatPendingHeadline(driver);
+      const pendingSummary = formatPendingSummary(driver);
+
+      if (pendingAssignmentsCount === 0) {
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-muted-foreground">{pendingHeadline}</span>
+          </div>
+        );
+      }
+
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex cursor-help flex-col gap-1">
+                <Badge className="w-fit border-orange-200 bg-orange-100 text-orange-800 hover:bg-orange-100">
+                  {pendingAssignmentsCount} pendente{pendingAssignmentsCount === 1 ? '' : 's'}
+                </Badge>
+                <span className="text-sm font-medium">
+                  {pendingHeadline}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {driver.pendingRoutesCount} rota{driver.pendingRoutesCount === 1 ? '' : 's'} aberta{driver.pendingRoutesCount === 1 ? '' : 's'}
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <div className="space-y-1">
+                <p className="font-medium">Pendências ativas do motorista</p>
+                <p>{pendingSummary}</p>
+                {driver.pendingServiceCodes && driver.pendingServiceCodes.length > 0 && (
+                  <p>Serviços: {driver.pendingServiceCodes.join(', ')}</p>
+                )}
+                {driver.pendingStandaloneRouteCodes && driver.pendingStandaloneRouteCodes.length > 0 && (
+                  <p>Rotas avulsas: {driver.pendingStandaloneRouteCodes.join(', ')}</p>
+                )}
+                {driver.pendingRoutesCount ? (
+                  <p>Total de rotas abertas: {driver.pendingRoutesCount}</p>
+                ) : null}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    },
+    sortingFn: (rowA, rowB) => {
+      const countA = rowA.original.pendingAssignmentsCount || 0;
+      const countB = rowB.original.pendingAssignmentsCount || 0;
+      return countA - countB;
+    },
   },
-    {
+  {
     accessorKey: 'rating',
     header: ({ column }) => (
       <Button
@@ -307,8 +405,12 @@ const getDriverColumns = (
                 </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                    <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
-                    <DropdownMenuItem>Editar</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onViewDetailsClick(driver)}>
+                       Ver Detalhes
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onEditClick(driver)}>
+                       Editar
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onImpersonateClick(driver)}>
                        <Smartphone className="mr-2 h-4 w-4" />
@@ -333,21 +435,34 @@ const getDriverColumns = (
 
 export function DriverTable({
   drivers,
+  onViewDetailsClick,
+  onEditClick,
   onDeleteClick,
   onForceLogoutClick,
   onImpersonateClick
 }: {
   drivers: Driver[],
+  onViewDetailsClick: (driver: Driver) => void,
+  onEditClick: (driver: Driver) => void,
   onDeleteClick: (driver: Driver) => void,
   onForceLogoutClick: (driver: Driver) => void,
   onImpersonateClick: (driver: Driver) => void
 }) {
-  // Ordenação padrão: status ascendente (online/available primeiro, offline por último)
+  // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns = React.useMemo(() => getDriverColumns(onDeleteClick, onForceLogoutClick, onImpersonateClick), [onDeleteClick, onForceLogoutClick, onImpersonateClick]);
+  const columns = React.useMemo(
+    () => getDriverColumns(
+      onViewDetailsClick,
+      onEditClick,
+      onDeleteClick,
+      onForceLogoutClick,
+      onImpersonateClick
+    ),
+    [onViewDetailsClick, onEditClick, onDeleteClick, onForceLogoutClick, onImpersonateClick]
+  );
 
   const table = useReactTable({
     data: drivers,

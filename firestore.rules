@@ -348,6 +348,50 @@ service cloud.firestore {
       allow list: if isAuthed();
     }
 
+    // ===== NOTIFICATIONS COLLECTION (alias em inglês usado pelo app de motoristas) =====
+    match /notifications/{notificationId} {
+      function canAccessNotification() {
+        return isAuthed() && (
+          isAppAdmin() ||
+          resource.data.driverId == request.auth.uid
+        );
+      }
+
+      function canCreateNotification() {
+        return isAuthed() && (
+          isAppAdmin() ||
+          request.resource.data.driverId == request.auth.uid
+        );
+      }
+
+      allow create: if canCreateNotification();
+      allow read, get, list: if canAccessNotification();
+      allow update: if canAccessNotification();
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== ROUTE CHANGE NOTIFICATIONS =====
+    match /routeChangeNotifications/{routeId} {
+      function canAccessRouteChangeNotification() {
+        return isAuthed() && (
+          isAppAdmin() ||
+          resource.data.driverId == request.auth.uid
+        );
+      }
+
+      function canWriteRouteChangeNotification() {
+        return isAuthed() && (
+          isAppAdmin() ||
+          request.resource.data.driverId == request.auth.uid
+        );
+      }
+
+      allow create: if canWriteRouteChangeNotification();
+      allow read, get, list: if canAccessRouteChangeNotification();
+      allow update: if canWriteRouteChangeNotification();
+      allow delete: if isAppAdmin();
+    }
+
     // ===== CRM - LEADS =====
     match /crm_leads/{leadId} {
       // Qualquer usuário autenticado pode ler e listar

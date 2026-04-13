@@ -145,6 +145,28 @@ interface RouteData {
   }>;
 }
 
+const getRoutePeriodFromHour = (hour: number): 'Matutino' | 'Vespertino' | 'Noturno' => {
+  if (hour >= 8 && hour < 12) return 'Matutino';
+  if (hour >= 12 && hour < 19) return 'Vespertino';
+  return 'Noturno';
+};
+
+const getRouteScheduleFromDate = (
+  dateLike?: Timestamp | Date | null
+): Pick<RouteData, 'routeDate' | 'routeTime' | 'period'> => {
+  const baseDate = dateLike instanceof Timestamp
+    ? dateLike.toDate()
+    : dateLike instanceof Date
+      ? dateLike
+      : new Date();
+
+  return {
+    routeDate: baseDate.toISOString(),
+    routeTime: format(baseDate, 'HH:mm'),
+    period: getRoutePeriodFromHour(baseDate.getHours()),
+  };
+};
+
 const computeRoute = async (
   origin: PlaceValue,
   stops: PlaceValue[]
@@ -1250,12 +1272,15 @@ export default function RouteAcompanharPage() {
           stops: routeData.stops?.length || 0,
         });
 
+        const routeSchedule = getRouteScheduleFromDate(routeData.plannedDate);
+
         // Criar parsedData no formato esperado pelo código existente
         const parsedData: RouteData = {
           origin: routeData.origin,
           stops: routeData.stops || [],
-          routeDate: new Date().toISOString(),
-          routeTime: 'morning',
+          routeDate: routeSchedule.routeDate,
+          routeTime: routeSchedule.routeTime,
+          period: routeSchedule.period,
           isExistingRoute: true,
           currentRouteId: routeId,
           routeName: routeData.name || routeData.code,
@@ -5887,7 +5912,7 @@ export default function RouteAcompanharPage() {
           <DialogHeader>
             <DialogTitle>Transferir Parada para Outra Rota</DialogTitle>
             <DialogDescription>
-              Escolha para qual rota você deseja transferir a parada "{transferData?.stop.customerName || transferData?.stop.address}".
+              Escolha para qual rota você deseja transferir a parada &quot;{transferData?.stop.customerName || transferData?.stop.address}&quot;.
               Os motoristas de ambas as rotas serão notificados.
             </DialogDescription>
           </DialogHeader>

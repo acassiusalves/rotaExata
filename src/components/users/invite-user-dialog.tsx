@@ -33,8 +33,9 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/lib/firebase/client';
+import { auth, functions } from '@/lib/firebase/client';
 import { Loader2 } from 'lucide-react';
+import { sendPasswordResetEmail } from 'firebase/auth';
 
 const userSchema = z.object({
   displayName: z.string().min(3, 'O nome é obrigatório.'),
@@ -65,6 +66,8 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
 
   const onSubmit = async (data: UserFormValues) => {
     setIsLoading(true);
+    let userCreated = false;
+
     try {
       const inviteUser = httpsCallable(functions, 'inviteUser');
       const result: any = await inviteUser({
@@ -74,9 +77,12 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
       });
 
       if (result.data.ok) {
+        userCreated = true;
+        await sendPasswordResetEmail(auth, data.email);
+
         toast({
-          title: 'Convite Enviado!',
-          description: `Um email foi enviado para ${data.email} para que o usuário defina a senha e acesse o painel.`,
+          title: 'Convite enviado!',
+          description: `O email de redefinição de senha foi enviado para ${data.email}.`,
         });
         form.reset();
         onClose();
@@ -86,9 +92,11 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
     } catch (error: any) {
       console.error('Error inviting user:', error);
       toast({
-        variant: 'destructive',
-        title: 'Erro ao Convidar',
-        description: error.message || 'Não foi possível completar o cadastro.',
+        variant: userCreated ? 'default' : 'destructive',
+        title: userCreated ? 'Cadastro criado com ressalva' : 'Erro ao Convidar',
+        description: userCreated
+          ? `O usuário foi criado, mas o email de redefinição não foi enviado. Detalhe: ${error.message || 'Erro desconhecido.'}`
+          : error.message || 'Não foi possível completar o cadastro.',
       });
     } finally {
       setIsLoading(false);
@@ -101,8 +109,8 @@ export function InviteUserDialog({ isOpen, onClose }: InviteUserDialogProps) {
         <DialogHeader>
           <DialogTitle>Convidar Novo Usuário</DialogTitle>
           <DialogDescription>
-            Preencha os dados abaixo. O usuário receberá um email para criar
-            sua senha e acessar o painel.
+            Preencha os dados abaixo. O sistema enviará um email para o
+            usuário definir a própria senha antes do primeiro acesso.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

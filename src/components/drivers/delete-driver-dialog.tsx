@@ -36,7 +36,8 @@ export function DeleteDriverDialog({
           <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
           <AlertDialogDescription>
             Esta ação não pode ser desfeita. Isso irá remover permanentemente o motorista{' '}
-            <span className="font-semibold">{driverName}</span> do sistema, apagando seu login e todos os dados associados.
+            <span className="font-semibold">{driverName}</span> do sistema, apagando seu login e o cadastro principal.
+            Rotas já concluídas e históricos operacionais não são apagados.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

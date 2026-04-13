@@ -26,6 +26,14 @@
       ]
     },
     {
+      "collectionGroup": "routes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "plannedDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "activity_log",
       "queryScope": "COLLECTION",
       "fields": [

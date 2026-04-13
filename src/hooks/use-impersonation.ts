@@ -1,51 +1,52 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { signOut } from 'firebase/auth';
+import { auth } from '@/lib/firebase/client';
+import {
+  clearImpersonationSession,
+  enableImpersonationSession,
+  getImpersonatedDriverNameFromSession,
+  isImpersonationSessionActive,
+} from '@/lib/impersonation-session';
 
 /**
  * Hook para detectar se o usuário está em modo de impersonação (teste como motorista)
- * Verifica a flag 'isImpersonating' no localStorage
+ * Verifica a sessão de impersonação apenas na aba atual
  */
 export function useIsImpersonating(): boolean {
   const [isImpersonating, setIsImpersonating] = useState(false);
 
   useEffect(() => {
-    // Ler do localStorage
-    const checkImpersonation = () => {
-      if (typeof window !== 'undefined') {
-        const flag = localStorage.getItem('isImpersonating');
-        setIsImpersonating(flag === 'true');
-      }
-    };
-
-    checkImpersonation();
-
-    // Adicionar listener para mudanças no localStorage (caso outra aba modifique)
-    window.addEventListener('storage', checkImpersonation);
-
-    return () => {
-      window.removeEventListener('storage', checkImpersonation);
-    };
+    setIsImpersonating(isImpersonationSessionActive());
   }, []);
 
   return isImpersonating;
 }
 
 /**
- * Sai do modo de impersonação
- * Remove a flag do localStorage e fecha a aba/janela
+ * Ativa a sessão local de impersonação
  */
-export function exitImpersonationMode(): void {
-  if (typeof window !== 'undefined') {
-    // Remover flag do localStorage
-    localStorage.removeItem('isImpersonating');
-    localStorage.removeItem('impersonatedDriverName');
+export function startImpersonationMode(driverName?: string | null): void {
+  enableImpersonationSession(driverName);
+}
 
-    // Fechar a aba/janela
+/**
+ * Sai do modo de impersonação.
+ * Remove a sessão local, encerra a autenticação isolada e fecha a aba/janela.
+ */
+export async function exitImpersonationMode(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    clearImpersonationSession();
+
+    try {
+      await signOut(auth);
+    } catch {
+      // Ignora falha de logout local durante o encerramento do modo teste
+    }
+
     window.close();
 
-    // Se window.close() não funcionar (algumas situações não permitem),
-    // redirecionar para página de login
     setTimeout(() => {
       if (!window.closed) {
         window.location.href = '/login';
@@ -58,8 +59,5 @@ export function exitImpersonationMode(): void {
  * Retorna o nome do motorista sendo impersonado (se houver)
  */
 export function getImpersonatedDriverName(): string | null {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('impersonatedDriverName');
-  }
-  return null;
+  return getImpersonatedDriverNameFromSession();
 }

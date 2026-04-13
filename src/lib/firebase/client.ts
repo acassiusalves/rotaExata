@@ -1,9 +1,10 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
-import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
+import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { getFunctions, Functions } from "firebase/functions";
 import { getStorage, FirebaseStorage } from "firebase/storage";
+import { shouldUseImpersonationFirebaseApp } from "@/lib/impersonation-session";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -22,16 +23,22 @@ let db: Firestore;
 let functions: Functions;
 let storage: FirebaseStorage;
 
+const impersonationMode = shouldUseImpersonationFirebaseApp();
+const appName = impersonationMode ? 'impersonation-app' : '[DEFAULT]';
 const existingApps = getApps();
-if (existingApps.length > 0) {
-  app = getApp();
+const targetApp = existingApps.find((candidate) => candidate.name === appName);
+
+if (targetApp) {
+  app = impersonationMode ? getApp(appName) : getApp();
   if (typeof window !== 'undefined') {
-    console.log('[Firebase Client] Using existing app instance, total apps:', existingApps.length);
+    console.log('[Firebase Client] Using existing app instance:', appName);
   }
 } else {
-  app = initializeApp(firebaseConfig);
+  app = impersonationMode
+    ? initializeApp(firebaseConfig, appName)
+    : initializeApp(firebaseConfig);
   if (typeof window !== 'undefined') {
-    console.log('[Firebase Client] Created new app instance');
+    console.log('[Firebase Client] Created new app instance:', appName);
   }
 }
 

@@ -7,25 +7,73 @@ import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
 import { db } from '@/lib/firebase/client';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Driver } from '@/lib/types';
+import { Driver, DriverStatus } from '@/lib/types';
 import { DriverTable } from '@/components/drivers/driver-table';
 import { AddDriverDialog } from '@/components/drivers/add-driver-dialog';
 import { DeleteDriverDialog } from '@/components/drivers/delete-driver-dialog';
 import { ForceLogoutDialog } from '@/components/drivers/force-logout-dialog';
 import { ImpersonateDriverDialog } from '@/components/drivers/impersonate-driver-dialog';
+import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
+import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
 
+const ACTIVE_DRIVER_ROUTE_STATUSES = [
+  'draft',
+  'pending',
+  'organizing',
+  'dispatched',
+  'in_progress',
+  'partial',
+] as const;
+
+type DriverPendingSummary = {
+  pendingAssignmentsCount: number;
+  pendingServicesCount: number;
+  pendingStandaloneRoutesCount: number;
+  pendingRoutesCount: number;
+  pendingServiceCodes: string[];
+  pendingStandaloneRouteCodes: string[];
+};
+
+const EMPTY_PENDING_SUMMARY: DriverPendingSummary = {
+  pendingAssignmentsCount: 0,
+  pendingServicesCount: 0,
+  pendingStandaloneRoutesCount: 0,
+  pendingRoutesCount: 0,
+  pendingServiceCodes: [],
+  pendingStandaloneRouteCodes: [],
+};
+
+function getEffectiveDriverStatus(
+  rawStatus: DriverStatus,
+  lastSeenAt: Date,
+  pendingAssignmentsCount: number
+): DriverStatus {
+  const isMissingHeartbeat = !lastSeenAt || lastSeenAt.getTime() === 0;
+  const heartbeatAgeMs = Date.now() - lastSeenAt.getTime();
+  const isStale = heartbeatAgeMs > 2 * 60 * 1000;
+
+  if (rawStatus === 'offline' || isMissingHeartbeat || isStale) {
+    return 'offline';
+  }
+
+  if (pendingAssignmentsCount > 0) {
+    return 'busy';
+  }
+
+  return rawStatus === 'available' ? 'available' : 'online';
+}
 
 export default function DriversPage() {
-  const [drivers, setDrivers] = React.useState<Driver[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [rawDrivers, setRawDrivers] = React.useState<Driver[]>([]);
+  const [pendingByDriver, setPendingByDriver] = React.useState<Record<string, DriverPendingSummary>>({});
+  const [isDriversLoading, setIsDriversLoading] = React.useState(true);
+  const [isPendingLoading, setIsPendingLoading] = React.useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
@@ -34,7 +82,34 @@ export default function DriversPage() {
   const [isImpersonating, setIsImpersonating] = React.useState(false);
   const [driverToImpersonate, setDriverToImpersonate] = React.useState<Driver | null>(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
+  const [driverDetailsId, setDriverDetailsId] = React.useState<string | null>(null);
+  const [driverToEditId, setDriverToEditId] = React.useState<string | null>(null);
   const { toast } = useToast();
+  const isLoading = isDriversLoading || isPendingLoading;
+
+  const drivers = React.useMemo(() => {
+    return rawDrivers.map((driver) => {
+      const pendingSummary = pendingByDriver[driver.id] || EMPTY_PENDING_SUMMARY;
+      const rawStatus = driver.rawStatus || driver.status || 'offline';
+
+      return {
+        ...driver,
+        rawStatus,
+        status: getEffectiveDriverStatus(rawStatus, driver.lastSeenAt, pendingSummary.pendingAssignmentsCount),
+        ...pendingSummary,
+      };
+    });
+  }, [pendingByDriver, rawDrivers]);
+
+  const driverToView = React.useMemo(
+    () => drivers.find((driver) => driver.id === driverDetailsId) || null,
+    [driverDetailsId, drivers]
+  );
+
+  const driverToEdit = React.useMemo(
+    () => drivers.find((driver) => driver.id === driverToEditId) || null,
+    [driverToEditId, drivers]
+  );
 
   React.useEffect(() => {
     const q = query(collection(db, 'users'), where('role', '==', 'driver'));
@@ -52,6 +127,7 @@ export default function DriversPage() {
             phone: data.phone || 'N/A',
             email: data.email,
             status: data.status || 'offline',
+            rawStatus: data.status || 'offline',
             vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
             lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
             totalDeliveries: data.totalDeliveries || 0,
@@ -61,17 +137,104 @@ export default function DriversPage() {
           });
         });
 
-        setDrivers(driversData);
-        setIsLoading(false);
+        setRawDrivers(driversData);
+        setIsDriversLoading(false);
       },
       (error) => {
         console.error('Error fetching drivers: ', error);
-        setIsLoading(false);
+        setIsDriversLoading(false);
       }
     );
 
     return () => unsubscribe();
   }, []);
+
+  React.useEffect(() => {
+    const q = query(
+      collection(db, 'routes'),
+      where('status', 'in', [...ACTIVE_DRIVER_ROUTE_STATUSES])
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const nextPendingByDriver: Record<string, {
+          serviceIds: Set<string>;
+          serviceCodes: Set<string>;
+          standaloneRouteIds: Set<string>;
+          standaloneRouteCodes: Set<string>;
+          pendingRoutesCount: number;
+        }> = {};
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          const driverId = data.driverId;
+
+          if (!driverId) {
+            return;
+          }
+
+          if (!nextPendingByDriver[driverId]) {
+            nextPendingByDriver[driverId] = {
+              serviceIds: new Set(),
+              serviceCodes: new Set(),
+              standaloneRouteIds: new Set(),
+              standaloneRouteCodes: new Set(),
+              pendingRoutesCount: 0,
+            };
+          }
+
+          const driverPending = nextPendingByDriver[driverId];
+          driverPending.pendingRoutesCount += 1;
+
+          if (data.serviceId) {
+            driverPending.serviceIds.add(data.serviceId);
+            if (data.serviceCode) {
+              driverPending.serviceCodes.add(data.serviceCode);
+            }
+          } else {
+            driverPending.standaloneRouteIds.add(doc.id);
+            if (data.code) {
+              driverPending.standaloneRouteCodes.add(data.code);
+            }
+          }
+        });
+
+        const normalizedPendingByDriver = Object.fromEntries(
+          Object.entries(nextPendingByDriver).map(([driverId, summary]) => {
+            const pendingServicesCount = summary.serviceIds.size;
+            const pendingStandaloneRoutesCount = summary.standaloneRouteIds.size;
+
+            return [
+              driverId,
+              {
+                pendingAssignmentsCount: pendingServicesCount + pendingStandaloneRoutesCount,
+                pendingServicesCount,
+                pendingStandaloneRoutesCount,
+                pendingRoutesCount: summary.pendingRoutesCount,
+                pendingServiceCodes: Array.from(summary.serviceCodes).sort(),
+                pendingStandaloneRouteCodes: Array.from(summary.standaloneRouteCodes).sort(),
+              } satisfies DriverPendingSummary,
+            ];
+          })
+        );
+
+        setPendingByDriver(normalizedPendingByDriver);
+        setIsPendingLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching pending routes for drivers:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao carregar pendências',
+          description: 'Não foi possível consolidar as pendências dos motoristas.',
+        });
+        setIsPendingLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [toast]);
   
   const handleDeleteDriver = async () => {
     if (!driverToDelete) return;
@@ -153,6 +316,26 @@ export default function DriversPage() {
 
   const handleImpersonate = async () => {
     if (!driverToImpersonate) return;
+
+    const newWindow = window.open('', '_blank');
+
+    if (!newWindow) {
+      toast({
+        variant: 'destructive',
+        title: 'Popup Bloqueado',
+        description: 'Por favor, permita popups para este site e tente novamente.',
+      });
+      return;
+    }
+
+    newWindow.document.write(`
+      <title>Abrindo modo teste...</title>
+      <body style="font-family: sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; color:#111827;">
+        <div>Preparando o modo teste do motorista...</div>
+      </body>
+    `);
+    newWindow.document.close();
+
     setIsImpersonating(true);
 
     try {
@@ -165,25 +348,17 @@ export default function DriversPage() {
 
       // Abrir nova aba com a página de impersonação
       const impersonateUrl = `/impersonate-driver?token=${encodeURIComponent(result.data.token)}&driverId=${encodeURIComponent(driverToImpersonate.id)}&driverName=${encodeURIComponent(result.data.driverName)}`;
+      newWindow.location.href = impersonateUrl;
 
-      const newWindow = window.open(impersonateUrl, '_blank');
-
-      if (!newWindow) {
-        toast({
-          variant: 'destructive',
-          title: 'Popup Bloqueado',
-          description: 'Por favor, permita popups para este site e tente novamente.',
-        });
-      } else {
-        toast({
-          title: 'Modo Teste Ativado!',
-          description: `Abrindo interface do motorista ${result.data.driverName} em nova aba.`,
-        });
-      }
+      toast({
+        title: 'Modo Teste Ativado!',
+        description: `Abrindo interface do motorista ${result.data.driverName} em nova aba.`,
+      });
 
       setDriverToImpersonate(null);
     } catch (error: any) {
       console.error('Error generating impersonation token:', error);
+      newWindow.close();
       toast({
         variant: 'destructive',
         title: 'Erro ao Gerar Token',
@@ -226,6 +401,8 @@ export default function DriversPage() {
             ) : (
               <DriverTable
                 drivers={drivers}
+                onViewDetailsClick={(driver) => setDriverDetailsId(driver.id)}
+                onEditClick={(driver) => setDriverToEditId(driver.id)}
                 onDeleteClick={(driver) => setDriverToDelete(driver)}
                 onForceLogoutClick={(driver) => setDriverToLogout(driver)}
                 onImpersonateClick={(driver) => setDriverToImpersonate(driver)}
@@ -255,6 +432,16 @@ export default function DriversPage() {
         onConfirm={handleImpersonate}
         driverName={driverToImpersonate?.name || ''}
         isLoading={isImpersonating}
+      />
+      <DriverDetailsDialog
+        isOpen={!!driverToView}
+        onClose={() => setDriverDetailsId(null)}
+        driver={driverToView}
+      />
+      <EditDriverDialog
+        isOpen={!!driverToEdit}
+        onClose={() => setDriverToEditId(null)}
+        driver={driverToEdit}
       />
     </>
   );

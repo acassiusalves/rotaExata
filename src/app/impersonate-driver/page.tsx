@@ -3,8 +3,10 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInWithCustomToken } from 'firebase/auth';
-import { auth } from '@/lib/firebase/impersonation';
+import { auth } from '@/lib/firebase/client';
 import { Loader2 } from 'lucide-react';
+import { clearImpersonationSession } from '@/lib/impersonation-session';
+import { startImpersonationMode } from '@/hooks/use-impersonation';
 
 function ImpersonateDriverContent() {
   const router = useRouter();
@@ -35,16 +37,13 @@ function ImpersonateDriverContent() {
         // Fazer login com o custom token
         await signInWithCustomToken(auth, token);
 
-        // Definir flag de impersonação no localStorage
-        localStorage.setItem('isImpersonating', 'true');
-        if (driverName) {
-          localStorage.setItem('impersonatedDriverName', driverName);
-        }
+        startImpersonationMode(driverName);
 
         // Redirecionar para a interface do motorista
         router.push('/my-routes');
       } catch (err: any) {
         console.error('Erro ao fazer login como motorista:', err);
+        clearImpersonationSession();
 
         let errorMessage = 'Erro ao fazer login como motorista';
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase/client';
+import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 
 export interface DeviceInfo {
   // Informacoes do dispositivo
@@ -172,7 +173,7 @@ export function useDeviceInfo(enabled: boolean = true) {
 
   const updateDeviceInfo = useCallback(async () => {
     // Não coletar informações durante impersonação
-    const isImpersonating = typeof window !== 'undefined' && localStorage.getItem('isImpersonating') === 'true';
+    const isImpersonating = isImpersonationSessionActive();
     if (!enabled || isImpersonating) return;
 
     const currentUser = auth.currentUser;

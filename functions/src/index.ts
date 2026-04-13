@@ -5,8 +5,107 @@ import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
+import {randomBytes} from "node:crypto";
 
 initializeApp();
+
+const ADMIN_ROLES = ["admin", "socio", "gestor"];
+const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
+  "draft",
+  "pending",
+  "organizing",
+  "dispatched",
+  "in_progress",
+  "partial",
+]);
+
+async function assertAuthorizedRole(
+  uid: string | undefined,
+  errorMessage: string
+): Promise<string> {
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Usuário não autenticado");
+  }
+
+  const db = getFirestore();
+  const userDoc = await db.collection("users").doc(uid).get();
+  const userRole = userDoc.data()?.role || "";
+
+  if (!ADMIN_ROLES.includes(userRole)) {
+    throw new HttpsError("permission-denied", errorMessage);
+  }
+
+  return userRole;
+}
+
+function generateTemporaryPassword(): string {
+  return `${randomBytes(18).toString("base64url")}Aa1!`;
+}
+
+async function reconcileServiceProgress(serviceId: string): Promise<void> {
+  const db = getFirestore();
+  const serviceRef = db.collection("services").doc(serviceId);
+  const serviceDoc = await serviceRef.get();
+
+  if (!serviceDoc.exists) {
+    return;
+  }
+
+  const serviceData = serviceDoc.data();
+  const allServiceRoutes = await db.collection("routes")
+    .where("serviceId", "==", serviceId)
+    .get();
+
+  let completedRoutes = 0;
+  let completedDeliveries = 0;
+  let hasInProgressRoute = false;
+
+  allServiceRoutes.forEach((routeDoc) => {
+    const route = routeDoc.data();
+
+    if (route.status === "completed" || route.status === "completed_auto") {
+      completedRoutes++;
+      if (Array.isArray(route.stops)) {
+        completedDeliveries += route.stops.filter(
+          (stop: any) => stop.deliveryStatus === "completed"
+        ).length;
+      }
+      return;
+    }
+
+    if (route.status === "in_progress") {
+      hasInProgressRoute = true;
+    }
+  });
+
+  const totalRoutes = allServiceRoutes.size;
+
+  let newServiceStatus = serviceData?.status;
+  if (totalRoutes > 0 && completedRoutes === totalRoutes) {
+    newServiceStatus = "completed";
+  } else if (hasInProgressRoute) {
+    newServiceStatus = "in_progress";
+  } else if (completedRoutes > 0) {
+    newServiceStatus = "partial";
+  } else if (totalRoutes > 0) {
+    newServiceStatus = "dispatched";
+  }
+
+  await serviceRef.update({
+    "stats.completedRoutes": completedRoutes,
+    "stats.completedDeliveries": completedDeliveries,
+    status: newServiceStatus,
+    completedAt: newServiceStatus === "completed" ?
+      (serviceData?.completedAt || FieldValue.serverTimestamp()) :
+      FieldValue.delete(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  console.log(
+    `📊 Serviço ${serviceId} reconciliado: status=${newServiceStatus}, ` +
+    `rotasConcluidas=${completedRoutes}/${totalRoutes}`
+  );
+}
 
 /**
  * Gera o próximo código sequencial único para uma rota
@@ -78,6 +177,11 @@ export const inviteUser = onCall(
       );
     }
     try{
+      await assertAuthorizedRole(
+        req.auth?.uid,
+        "Apenas administradores, sócios e gestores podem convidar usuários"
+      );
+
       const auth=getAuth();
       const db=getFirestore();
       let user;
@@ -85,7 +189,7 @@ export const inviteUser = onCall(
       catch{
         user=await auth.createUser({
           email,
-          password: '123456', // Set default password
+          password: generateTemporaryPassword(),
           emailVerified:false,
           displayName: displayName || undefined,
         });
@@ -96,22 +200,34 @@ export const inviteUser = onCall(
         await auth.updateUser(user.uid, { displayName });
       }
 
+      const userRef = db.collection("users").doc(user.uid);
+      const existingUserDoc = await userRef.get();
+
       const userData: any = {
         email,
         role,
-        displayName: displayName || '',
-        phone: phone || '',
-        status: 'offline', // Default status on creation
-        createdAt:FieldValue.serverTimestamp(),
+        displayName: displayName || "",
+        name: displayName || "",
+        phone: phone || "",
         updatedAt:FieldValue.serverTimestamp(),
-        lastSeenAt: FieldValue.serverTimestamp(),
       };
 
-      if (role === 'driver') {
-        userData.mustChangePassword = true;
+      if (!existingUserDoc.exists) {
+        userData.createdAt = FieldValue.serverTimestamp();
+        userData.status = "offline";
+        userData.lastSeenAt = null;
       }
 
-      await db.collection("users").doc(user.uid).set(
+      if (role === "driver") {
+        userData.vehicle = existingUserDoc.data()?.vehicle || {
+          type: "N/A",
+          plate: "N/A",
+        };
+      }
+
+      userData.mustChangePassword = false;
+
+      await userRef.set(
         userData,
         {merge:true}
       );
@@ -131,13 +247,39 @@ export const deleteUser = onCall(
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
+    await assertAuthorizedRole(
+      req.auth?.uid,
+      "Apenas administradores, sócios e gestores podem remover usuários"
+    );
+
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
     
     try {
-      const auth = getAuth();
       const db = getFirestore();
+      const auth = getAuth();
+      const assignedRoutesSnapshot = await db
+        .collection("routes")
+        .where("driverId", "==", uid)
+        .get();
+
+      const blockingRoutes = assignedRoutesSnapshot.docs.filter((routeDoc) => {
+        const status = routeDoc.data()?.status;
+        return ACTIVE_DRIVER_ROUTE_STATUSES.has(status);
+      });
+
+      if (blockingRoutes.length > 0) {
+        const routeExamples = blockingRoutes
+          .slice(0, 3)
+          .map((routeDoc) => routeDoc.data()?.code || routeDoc.id)
+          .join(", ");
+
+        throw new HttpsError(
+          "failed-precondition",
+          `Este motorista ainda possui ${blockingRoutes.length} rota(s) ativa(s): ${routeExamples}. Reatribua ou finalize essas rotas antes de remover o cadastro.`
+        );
+      }
 
       // Delete from Firebase Authentication
       await auth.deleteUser(uid);
@@ -165,6 +307,93 @@ export const deleteUser = onCall(
       }
       throw new HttpsError("internal", msg);
     }
+  }
+);
+
+/* ========== updateDriverProfile (callable) ========== */
+export const updateDriverProfile = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+    const displayName = String(d.displayName || "").trim();
+    const phone = String(d.phone || "").trim();
+    const vehicleType = String(d.vehicle?.type || "").trim();
+    const vehiclePlate = String(d.vehicle?.plate || "").trim().toUpperCase();
+
+    await assertAuthorizedRole(
+      req.auth?.uid,
+      "Apenas administradores, sócios e gestores podem editar motoristas"
+    );
+
+    if (!uid || !displayName) {
+      throw new HttpsError("invalid-argument", "uid e displayName são obrigatórios");
+    }
+
+    const db = getFirestore();
+    const auth = getAuth();
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError("not-found", "Motorista não encontrado");
+    }
+
+    const userData = userDoc.data();
+    if (userData?.role !== "driver") {
+      throw new HttpsError("invalid-argument", "O usuário informado não é um motorista");
+    }
+
+    const normalizedVehicle = {
+      type: vehicleType || "N/A",
+      plate: vehiclePlate || "N/A",
+    };
+
+    await auth.updateUser(uid, {
+      displayName,
+    });
+
+    await userRef.set(
+      {
+        displayName,
+        name: displayName,
+        phone,
+        vehicle: normalizedVehicle,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      {merge: true}
+    );
+
+    const driverRoutesSnapshot = await db
+      .collection("routes")
+      .where("driverId", "==", uid)
+      .get();
+
+    const routesToUpdate = driverRoutesSnapshot.docs.filter((routeDoc) => {
+      const status = routeDoc.data()?.status;
+      return ACTIVE_DRIVER_ROUTE_STATUSES.has(status);
+    });
+
+    if (routesToUpdate.length > 0) {
+      const batch = db.batch();
+
+      routesToUpdate.forEach((routeDoc) => {
+        batch.update(routeDoc.ref, {
+          driverInfo: {
+            name: displayName,
+            vehicle: normalizedVehicle,
+          },
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
+      await batch.commit();
+    }
+
+    return {
+      ok: true,
+      updatedRoutes: routesToUpdate.length,
+    };
   }
 );
 
@@ -391,57 +620,7 @@ export const completeRoute = onCall(
 
       // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
       if (routeData?.serviceId) {
-        const serviceId = routeData.serviceId;
-        const serviceRef = db.collection("services").doc(serviceId);
-        const serviceDoc = await serviceRef.get();
-
-        if (serviceDoc.exists) {
-          const serviceData = serviceDoc.data();
-
-          // Buscar todas as rotas do serviço
-          const allServiceRoutes = await db.collection("routes")
-            .where("serviceId", "==", serviceId)
-            .get();
-
-          // Contar rotas concluídas
-          let completedRoutes = 0;
-          let completedDeliveries = 0;
-
-          allServiceRoutes.forEach((doc) => {
-            const route = doc.data();
-            if (route.status === "completed" || route.status === "completed_auto") {
-              completedRoutes++;
-              // Contar entregas concluídas (stops com status completed)
-              if (route.stops) {
-                completedDeliveries += route.stops.filter(
-                  (stop: any) => stop.deliveryStatus === "completed"
-                ).length;
-              }
-            }
-          });
-
-          const totalRoutes = serviceData?.routeIds?.length || 0;
-
-          // Determinar o novo status do serviço
-          let newServiceStatus = serviceData?.status;
-          if (completedRoutes === totalRoutes && totalRoutes > 0) {
-            // Todas as rotas concluídas
-            newServiceStatus = "completed";
-          } else if (completedRoutes > 0 && completedRoutes < totalRoutes) {
-            // Algumas rotas concluídas
-            newServiceStatus = "partial";
-          }
-
-          // Atualizar estatísticas do serviço
-          await serviceRef.update({
-            "stats.completedRoutes": completedRoutes,
-            "stats.completedDeliveries": completedDeliveries,
-            status: newServiceStatus,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          console.log(`📊 Serviço ${serviceId} atualizado: ${completedRoutes}/${totalRoutes} rotas concluídas`);
-        }
+        await reconcileServiceProgress(routeData.serviceId);
       }
 
       return { ok: true, message: `Rota marcada como concluída com sucesso.` };
@@ -854,7 +1033,12 @@ export const cleanupOfflineDrivers = functionsV1
 // Função callable para limpeza manual de motoristas offline
 export const forceCleanupOfflineDrivers = onCall(
   { region: "southamerica-east1" },
-  async () => {
+  async (req) => {
+    await assertAuthorizedRole(
+      req.auth?.uid,
+      "Apenas administradores, sócios e gestores podem atualizar o status dos motoristas"
+    );
+
     const db = getFirestore();
     const now = new Date();
     const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
@@ -992,30 +1176,50 @@ export const autoCompleteRoutes = functionsV1
     const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
 
     try {
-      // Buscar rotas com status dispatched ou in_progress cuja plannedDate passou de 48h
-      const staleRoutes = await db
+      // Buscar rotas anteriores ao corte e filtrar os status em memória para
+      // não depender de índice composto na rotina agendada.
+      const candidateRoutes = await db
         .collection("routes")
-        .where("status", "in", ["dispatched", "in_progress"])
         .where("plannedDate", "<", cutoff)
         .get();
 
-      if (staleRoutes.empty) {
+      const staleRoutes = {
+        docs: candidateRoutes.docs.filter((routeDoc) => {
+          const status = routeDoc.data()?.status;
+          return status === "dispatched" || status === "in_progress";
+        }),
+      };
+
+      if (staleRoutes.docs.length === 0) {
         console.log("✅ Nenhuma rota para auto-finalizar");
         return null;
       }
 
       // Atualizar status em batch
       const batch = db.batch();
+      const affectedServiceIds = new Set<string>();
       staleRoutes.docs.forEach((routeDoc) => {
+        const routeData = routeDoc.data();
         batch.update(routeDoc.ref, {
           status: "completed_auto",
           autoCompletedAt: FieldValue.serverTimestamp(),
         });
+        if (routeData.serviceId) {
+          affectedServiceIds.add(routeData.serviceId);
+        }
         console.log(`⏰ Auto-finalizando rota ${routeDoc.id}`);
       });
       await batch.commit();
 
-      console.log(`✅ ${staleRoutes.size} rota(s) auto-finalizada(s)`);
+      console.log(`✅ ${staleRoutes.docs.length} rota(s) auto-finalizada(s)`);
+
+      for (const serviceId of affectedServiceIds) {
+        try {
+          await reconcileServiceProgress(serviceId);
+        } catch (serviceError) {
+          console.error(`❌ Erro ao reconciliar serviço ${serviceId}:`, serviceError);
+        }
+      }
 
       // Após o batch: enviar FCM ao motorista e gravar activity log para cada rota
       const messaging = getMessaging();
@@ -1180,6 +1384,10 @@ export const resendRouteToDriver = onCall(
         resentAt: FieldValue.serverTimestamp(),
         resentBy: auth.uid,
       });
+
+      if (routeData?.serviceId) {
+        await reconcileServiceProgress(routeData.serviceId);
+      }
 
       // Gravar activity log
       try {

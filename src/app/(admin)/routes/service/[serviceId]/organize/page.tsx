@@ -51,15 +51,13 @@ export default function ServiceOrganizePage() {
           return;
         }
 
-        // Converter Timestamp do Firestore para ISO string
-        let routeDateISO: string;
-        if (serviceData.plannedDate instanceof Timestamp) {
-          routeDateISO = serviceData.plannedDate.toDate().toISOString();
-        } else if (serviceData.plannedDate instanceof Date) {
-          routeDateISO = serviceData.plannedDate.toISOString();
-        } else {
-          routeDateISO = new Date().toISOString();
-        }
+        const plannedDate = serviceData.plannedDate instanceof Timestamp
+          ? serviceData.plannedDate.toDate()
+          : serviceData.plannedDate instanceof Date
+            ? serviceData.plannedDate
+            : new Date();
+        const routeDateISO = plannedDate.toISOString();
+        const routeTime = `${String(plannedDate.getHours()).padStart(2, '0')}:${String(plannedDate.getMinutes()).padStart(2, '0')}`;
 
         // Buscar rotas já existentes para este serviço
         const existingRoutesQuery = query(
@@ -293,7 +291,7 @@ export default function ServiceOrganizePage() {
           origin: serviceData.origin,
           stops: unassignedStops, // Apenas stops não atribuídos
           routeDate: routeDateISO,
-          routeTime: '08:00',
+          routeTime,
           isService: true,
           serviceId: serviceId,
           serviceCode: serviceData.code,

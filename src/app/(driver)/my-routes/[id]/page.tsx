@@ -195,12 +195,18 @@ export default function RouteDetailsPage() {
 
       // Limpar os flags wasModified das paradas
       if (route) {
-        const updatedStops = route.stops.map(stop => ({
-          ...stop,
-          wasModified: false,
-          modificationType: undefined,
-          originalSequence: undefined,
-        }));
+        const updatedStops = route.stops.map((stop) => {
+          const {
+            modificationType: _modificationType,
+            originalSequence: _originalSequence,
+            ...cleanStop
+          } = stop;
+
+          return {
+            ...cleanStop,
+            wasModified: false,
+          };
+        });
 
         const routeRef = doc(db, 'routes', routeId);
         await updateDoc(routeRef, {
@@ -684,7 +690,7 @@ export default function RouteDetailsPage() {
                 <PlayCircle className="h-5 w-5 text-blue-600" />
                 <div>
                   <p className="font-semibold text-blue-900">Rota pronta para iniciar</p>
-                  <p className="text-sm text-blue-700">Clique em "Iniciar" no topo para começar as entregas</p>
+                  <p className="text-sm text-blue-700">Clique em &quot;Iniciar&quot; no topo para começar as entregas</p>
                 </div>
               </div>
             </CardContent>

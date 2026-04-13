@@ -147,6 +147,28 @@ interface RouteData {
   }>;
 }
 
+const getRoutePeriodFromHour = (hour: number): 'Matutino' | 'Vespertino' | 'Noturno' => {
+  if (hour >= 8 && hour < 12) return 'Matutino';
+  if (hour >= 12 && hour < 19) return 'Vespertino';
+  return 'Noturno';
+};
+
+const getRouteScheduleFromDate = (
+  dateLike?: Timestamp | Date | null
+): Pick<RouteData, 'routeDate' | 'routeTime' | 'period'> => {
+  const baseDate = dateLike instanceof Timestamp
+    ? dateLike.toDate()
+    : dateLike instanceof Date
+      ? dateLike
+      : new Date();
+
+  return {
+    routeDate: baseDate.toISOString(),
+    routeTime: format(baseDate, 'HH:mm'),
+    period: getRoutePeriodFromHour(baseDate.getHours()),
+  };
+};
+
 const computeRoute = async (
   origin: PlaceValue,
   stops: PlaceValue[]
@@ -1205,12 +1227,15 @@ export default function ServiceAcompanharPage() {
           lng: serviceOrigin.lng,
         });
 
+        const serviceSchedule = getRouteScheduleFromDate(serviceData.plannedDate);
+
         // Criar parsedData no formato esperado pelo código existente
         const parsedData: RouteData = {
           origin: serviceOrigin,
           stops: serviceData.allStops || [],
-          routeDate: new Date().toISOString(),
-          routeTime: 'morning',
+          routeDate: serviceSchedule.routeDate,
+          routeTime: serviceSchedule.routeTime,
+          period: serviceSchedule.period,
           isService: true,
           serviceId: serviceId,
           serviceCode: serviceData.code,
@@ -1758,7 +1783,8 @@ export default function ServiceAcompanharPage() {
             origin: parsedData.origin,
             stops: [],
             routeDate: parsedData.routeDate,
-            routeTime: parsedData.routeTime || 'morning',
+            routeTime: parsedData.routeTime,
+            period: parsedData.period,
             isService: true,
             serviceId: parsedData.serviceId,
             serviceCode: parsedData.serviceCode,
@@ -6287,7 +6313,7 @@ export default function ServiceAcompanharPage() {
           <DialogHeader>
             <DialogTitle>Transferir Parada para Outra Rota</DialogTitle>
             <DialogDescription>
-              Escolha para qual rota você deseja transferir a parada "{transferData?.stop.customerName || transferData?.stop.address}".
+              Escolha para qual rota você deseja transferir a parada &quot;{transferData?.stop.customerName || transferData?.stop.address}&quot;.
               Os motoristas de ambas as rotas serão notificados.
             </DialogDescription>
           </DialogHeader>
