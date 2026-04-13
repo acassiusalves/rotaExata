@@ -14,17 +14,32 @@ function getGitCommitSha() {
   }
 }
 
+function normalizeBuildId(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return /^[0-9a-f]{40}$/i.test(trimmed) ? trimmed.slice(0, 12) : trimmed;
+}
+
 function resolveBuildId() {
   const explicitBuildId =
-    process.env.NEXT_PUBLIC_BUILD_ID ||
+    process.env.BUILD_ID_OVERRIDE ||
     process.env.VERCEL_GIT_COMMIT_SHA ||
     process.env.GITHUB_SHA ||
     process.env.COMMIT_SHA ||
     process.env.SOURCE_COMMIT ||
     getGitCommitSha();
 
-  if (explicitBuildId) {
-    return explicitBuildId;
+  const normalizedBuildId = normalizeBuildId(explicitBuildId);
+
+  if (normalizedBuildId) {
+    return normalizedBuildId;
   }
 
   if (process.env.NODE_ENV === 'production') {
