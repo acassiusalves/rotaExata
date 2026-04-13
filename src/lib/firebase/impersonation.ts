@@ -1,11 +1,11 @@
 // Firebase instance isolada para impersonação
 // Usa um nome de app diferente para evitar conflito de sessão com a aba principal
 
-import { initializeApp, getApp, getApps } from 'firebase/app';
+import { initializeApp, getApp, type FirebaseOptions } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
-const firebaseConfig = {
+const explicitFirebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
@@ -13,6 +13,10 @@ const firebaseConfig = {
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
+
+function getFirebaseOptions(): FirebaseOptions | undefined {
+  return explicitFirebaseConfig.apiKey ? explicitFirebaseConfig : undefined;
+}
 
 // Nome único para a app de impersonação
 const IMPERSONATION_APP_NAME = 'impersonation-app';
@@ -27,7 +31,7 @@ try {
   impersonationApp = getApp(IMPERSONATION_APP_NAME);
 } catch (error) {
   // Se não existir, criar nova
-  impersonationApp = initializeApp(firebaseConfig, IMPERSONATION_APP_NAME);
+  impersonationApp = initializeApp(getFirebaseOptions(), IMPERSONATION_APP_NAME);
 }
 
 impersonationAuth = getAuth(impersonationApp);
