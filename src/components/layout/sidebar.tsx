@@ -21,6 +21,7 @@ import {
   Shield,
   DollarSign,
   Activity,
+  AlertCircle,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import {
@@ -109,6 +110,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const canManagePermissions = userRole === 'admin' || userRole === 'socio';
 
   const settingsItems = [
+    { href: '/admin/erros', icon: AlertCircle, label: 'Reportes de Erro' },
     { href: '/settings', icon: Settings, label: 'Configurações' },
     ...(canManagePermissions ? [{ href: '/permissions', icon: Shield, label: 'Permissões' }] : []),
     { href: '/api', icon: Code, label: 'API' },

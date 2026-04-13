@@ -152,23 +152,40 @@ export function calculateRouteEarnings(
   const origin = (route as any).origin || route.stops[0];
 
   let basePay = 0;
+  let distanceEarnings = 0;
   let deliveryBonuses = 0;
   let failedAttemptBonuses = 0;
 
-  // Calcula o valor de cada parada individualmente
-  for (const stop of route.stops) {
-    const stopValue = calculateStopPrice(stop, origin, rules);
-
-    if (stop.deliveryStatus === 'completed') {
-      deliveryBonuses += stopValue;
-    } else if (stop.deliveryStatus === 'failed' && stop.wentToLocation === true) {
-      // Tentativa falhada onde foi ao local = 20% do valor da parada
-      failedAttemptBonuses += stopValue * 0.2;
-    }
+  if (rules.pricingMode === 'distance') {
+    // Modo distância: pagamento base fixo + valor por km
+    basePay = rules.basePayPerRoute;
+    distanceEarnings = distanceKm * rules.pricePerKm;
+  } else if (rules.pricingMode === 'hybrid') {
+    // Modo híbrido: valor por zona em cada parada + valor por km além da zona
+    distanceEarnings = distanceKm * rules.pricePerKm;
   }
 
-  // Distância não é mais usada diretamente, mas mantemos para compatibilidade
-  const distanceEarnings = 0;
+  // Calcula o valor de cada parada individualmente (zone e hybrid usam zonas)
+  if (rules.pricingMode === 'zone' || rules.pricingMode === 'hybrid') {
+    for (const stop of route.stops) {
+      const stopValue = calculateStopPrice(stop, origin, rules);
+
+      if (stop.deliveryStatus === 'completed') {
+        deliveryBonuses += stopValue;
+      } else if (stop.deliveryStatus === 'failed' && stop.wentToLocation === true) {
+        failedAttemptBonuses += stopValue * 0.2;
+      }
+    }
+  } else {
+    // Modo distância: bônus por entrega fixo (bonusPerDelivery) e por tentativa falhada
+    for (const stop of route.stops) {
+      if (stop.deliveryStatus === 'completed') {
+        deliveryBonuses += rules.bonusPerDelivery;
+      } else if (stop.deliveryStatus === 'failed' && stop.wentToLocation === true) {
+        failedAttemptBonuses += rules.bonusPerFailedAttempt;
+      }
+    }
+  }
 
   const lunnaBonus = lunnaOrderCount * rules.lunnaOrderBonus;
 
@@ -224,8 +241,8 @@ export function calculateRouteEarnings(
   }
 
   // 7. Calcula o bônus de horário
-  // Aplica o multiplicador sobre base pay + distância
-  const baseComponents = basePay + distanceEarnings;
+  // Aplica o multiplicador sobre base pay + distância + entregas (componentes variáveis da rota)
+  const baseComponents = basePay + distanceEarnings + deliveryBonuses + failedAttemptBonuses;
   const timeBonusAmount =
     timeBonusMultiplier > 1
       ? baseComponents * (timeBonusMultiplier - 1)
@@ -291,25 +308,47 @@ export function formatCurrency(value: number): string {
  * @returns Exemplo de cálculo
  */
 export function calculatePreviewEarnings(rules: EarningsRules): EarningsCalculationResult {
-  // Dados mockados para preview
+  // Determina cidade de exemplo baseada na primeira zona configurada (se houver)
+  const firstZone = rules.pricingZones?.[0];
+  const firstCity =
+    firstZone?.cities && firstZone.cities.length > 0
+      ? (typeof firstZone.cities[0] === 'string'
+          ? (firstZone.cities[0] as string)
+          : (firstZone.cities[0] as any).name || 'Goiânia')
+      : 'Goiânia';
+
+  // Origem mock com coordenadas centrais de Goiânia
+  const mockOrigin: PlaceValue = {
+    id: 'origin',
+    address: 'Origem',
+    placeId: 'origin',
+    lat: -16.6869,
+    lng: -49.2648,
+    cidade: firstCity,
+    city: firstCity,
+  } as PlaceValue;
+
   const mockRoute: RouteForCalculation = {
     driverId: 'mock-driver',
     driverName: 'Motorista Exemplo',
-    completedAt: new Date(), // Agora
+    completedAt: new Date(),
     stops: Array(15).fill(null).map((_, i) => ({
       id: `stop-${i}`,
-      address: `Endereço ${i}`,
+      address: `Endereço ${i + 1}`,
       placeId: `place-${i}`,
-      lat: 0,
-      lng: 0,
+      lat: -16.6869 + (i * 0.003), // varia ~300m por parada
+      lng: -49.2648 + (i * 0.003),
+      cidade: firstCity,
+      city: firstCity,
       deliveryStatus: i < 13 ? 'completed' : i < 14 ? 'failed' : 'pending',
       wentToLocation: i === 13 ? true : undefined,
     } as PlaceValue)),
     encodedPolyline: '',
     distanceMeters: 25000, // 25 km
-    duration: '3600s', // 1 hora
-    lunnaOrderIds: ['P0001', 'P0002', 'P0003'], // 3 pedidos Lunna
-  };
+    duration: '3600s',
+    lunnaOrderIds: ['P0001', 'P0002', 'P0003'],
+    origin: mockOrigin,
+  } as RouteForCalculation;
 
   return calculateRouteEarnings(mockRoute, rules);
 }

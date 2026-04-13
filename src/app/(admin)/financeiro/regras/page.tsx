@@ -29,9 +29,10 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Plus, Trash2, DollarSign, Calculator, MapPin } from 'lucide-react';
+import { Loader2, Plus, Trash2, DollarSign, Calculator, MapPin, RefreshCw } from 'lucide-react';
 import type { EarningsRules } from '@/lib/types';
 import { calculatePreviewEarnings, formatCurrency } from '@/lib/earnings-calculator';
+import { generatePendingPayments } from '@/lib/payment-generator';
 
 const rulesSchema = z.object({
   pricingMode: z.enum(['zone', 'distance', 'hybrid']),
@@ -66,7 +67,28 @@ const rulesSchema = z.object({
     minStops: z.coerce.number().min(1),
     maxStops: z.coerce.number().min(1),
     bonus: z.coerce.number().min(0),
-  })),
+  })).superRefine((tiers, ctx) => {
+    for (let i = 0; i < tiers.length; i++) {
+      if (tiers[i].maxStops < tiers[i].minStops) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Faixa ${i + 1}: máximo deve ser maior ou igual ao mínimo`,
+          path: [i, 'maxStops'],
+        });
+      }
+      for (let j = i + 1; j < tiers.length; j++) {
+        const a = tiers[i];
+        const b = tiers[j];
+        if (a.minStops <= b.maxStops && b.minStops <= a.maxStops) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Faixas ${i + 1} e ${j + 1} se sobrepõem`,
+            path: [j, 'minStops'],
+          });
+        }
+      }
+    }
+  }),
   lunnaOrderBonus: z.coerce.number().min(0),
   notes: z.string().optional(),
 });
@@ -92,6 +114,7 @@ function removeUndefined(obj: any): any {
 export default function RegrasPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isGenerating, setIsGenerating] = React.useState(false);
   const [currentVersion, setCurrentVersion] = React.useState(1);
   const [previewEarnings, setPreviewEarnings] = React.useState<any>(null);
   const { toast } = useToast();
@@ -337,6 +360,11 @@ export default function RegrasPage() {
       const cleanRules = removeUndefined(newRules);
 
       await setDoc(rulesRef, cleanRules);
+
+      // Salva snapshot imutável por versão para rastreabilidade dos pagamentos
+      const snapshotRef = doc(db, 'earningsRules', `v${newRules.version}`);
+      await setDoc(snapshotRef, cleanRules);
+
       setCurrentVersion(currentVersion + 1);
 
       toast({
@@ -355,6 +383,37 @@ export default function RegrasPage() {
     }
   };
 
+  const handleGeneratePayments = async () => {
+    setIsGenerating(true);
+    try {
+      const result = await generatePendingPayments();
+      if (result.generated === 0 && result.errors.length === 0) {
+        toast({
+          title: 'Nenhum pagamento pendente',
+          description: 'Todas as rotas completadas já possuem pagamento gerado.',
+        });
+      } else {
+        toast({
+          title: `${result.generated} pagamento(s) gerado(s)`,
+          description: result.errors.length > 0
+            ? `${result.errors.length} rota(s) com erro — verifique o console.`
+            : 'Pagamentos criados com sucesso.',
+        });
+        if (result.errors.length > 0) {
+          console.error('[Regras] Erros ao gerar pagamentos:', result.errors);
+        }
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao gerar pagamentos',
+        description: error instanceof Error ? error.message : 'Erro desconhecido.',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -365,14 +424,27 @@ export default function RegrasPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Regras de Ganhos</h2>
-        <p className="text-muted-foreground">
-          Configure os parâmetros para cálculo automático de ganhos dos motoristas
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Versão atual: {currentVersion}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">Regras de Ganhos</h2>
+          <p className="text-muted-foreground">
+            Configure os parâmetros para cálculo automático de ganhos dos motoristas
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Versão atual: {currentVersion}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleGeneratePayments}
+          disabled={isGenerating}
+        >
+          {isGenerating
+            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            : <RefreshCw className="mr-2 h-4 w-4" />}
+          {isGenerating ? 'Gerando...' : 'Gerar pagamentos pendentes'}
+        </Button>
       </div>
 
       <Form {...form}>
