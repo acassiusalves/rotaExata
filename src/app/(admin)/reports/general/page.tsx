@@ -23,6 +23,7 @@ import {
   Sparkles,
   Loader2,
   SlidersHorizontal,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,6 +64,7 @@ import {
   orderBy,
   onSnapshot,
   Timestamp,
+  getDoc,
   getDocs,
   doc,
   updateDoc,
@@ -86,6 +88,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
 import { Progress } from '@/components/ui/progress';
 import {
+  DeliveryReportEditDialog,
+  type DeliveryReportEditValues,
+} from '@/components/reports/delivery-report-edit-dialog';
+import { logPointDataUpdated } from '@/lib/firebase/activity-log';
+import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
+import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -93,6 +101,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import type { ActivityChange, Payment } from '@/lib/types';
 
 // Tipos para conciliação com IA
 type AIReconciliationResult = {
@@ -118,7 +127,7 @@ type AIReconciliationSummary = {
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
+  status: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
   driverInfo: {
     name: string;
     vehicle: { type: string; plate: string };
@@ -148,11 +157,11 @@ type DeliveryReport = {
   phone?: string;
   notes?: string;
   plannedDate: Date;
-  payments?: any[];
+  payments?: Payment[];
   photoUrl?: string;
   signatureUrl?: string;
   reconciled?: boolean;
-  reconciledAt?: Date;
+  reconciledAt?: Date | Timestamp;
   reconciledBy?: string;
   reconciledMethod?: 'manual' | 'ai';
   aiExtractedValue?: number;
@@ -165,6 +174,14 @@ const formatCurrency = (value: number) => {
     style: 'currency',
     currency: 'BRL',
   }).format(value);
+};
+
+const formatPaymentSummary = (payments?: Payment[]) => {
+  if (!payments || payments.length === 0) return 'Nenhum pagamento';
+
+  return payments
+    .map(payment => `${payment.method || 'sem método'} ${formatCurrency(payment.value || 0)}`)
+    .join(', ');
 };
 
 // Função para determinar o período (Matutino, Vespertino ou Noturno)
@@ -268,6 +285,9 @@ export default function ReportsPage() {
   // Dialog
   const [selectedDelivery, setSelectedDelivery] = React.useState<DeliveryReport | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
+  const [editingDelivery, setEditingDelivery] = React.useState<DeliveryReport | null>(null);
+  const [isEditOpen, setIsEditOpen] = React.useState(false);
+  const [isSavingDeliveryEdit, setIsSavingDeliveryEdit] = React.useState(false);
 
   // Seleção para conciliação
   const [selectedDeliveryIds, setSelectedDeliveryIds] = React.useState<Set<string>>(new Set());
@@ -444,7 +464,10 @@ export default function ReportsPage() {
               street: stop.rua || stop.street || extractStreetFromAddress(stop.address),
               city: stop.cidade || stop.city || extractCityFromAddress(stop.address),
               orderNumber: stop.orderNumber,
-              deliveryStatus: stop.deliveryStatus,
+              deliveryStatus:
+                stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed'
+                  ? stop.deliveryStatus
+                  : undefined,
               completedAt: stop.completedAt ? (stop.completedAt instanceof Timestamp ? stop.completedAt.toDate() : stop.completedAt) : undefined,
               arrivedAt: stop.arrivedAt ? (stop.arrivedAt instanceof Timestamp ? stop.arrivedAt.toDate() : stop.arrivedAt) : undefined,
               failureReason: stop.failureReason,
@@ -1030,6 +1053,180 @@ export default function ReportsPage() {
     setIsDetailsOpen(true);
   };
 
+  const handleEditDelivery = (delivery: DeliveryReport) => {
+    setEditingDelivery(delivery);
+    setIsEditOpen(true);
+  };
+
+  const handleSaveDeliveryEdit = async (values: DeliveryReportEditValues) => {
+    if (!editingDelivery) return;
+
+    setIsSavingDeliveryEdit(true);
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const routeRef = doc(db, 'routes', editingDelivery.routeId);
+      const routeSnap = await getDoc(routeRef);
+
+      if (!routeSnap.exists()) {
+        throw new Error('Rota não encontrada');
+      }
+
+      const routeData = { id: routeSnap.id, ...routeSnap.data() } as RouteDocument;
+      const routeStops = routeData.stops || [];
+      const now = Timestamp.now();
+      const changes: ActivityChange[] = [];
+
+      const targetStopIndex = routeStops.findIndex(
+        (stop, index) =>
+          stop.id === editingDelivery.stopId ||
+          (!stop.id && index === editingDelivery.stopIndex)
+      );
+
+      if (targetStopIndex === -1) {
+        throw new Error('Parada não encontrada na rota');
+      }
+
+      const targetStop = routeStops[targetStopIndex];
+      const previousStatus = targetStop.deliveryStatus;
+      const previousPayments = targetStop.payments || [];
+      const nextPayments = values.status === 'completed' ? values.payments || [] : undefined;
+      const paymentsChanged = formatPaymentSummary(previousPayments) !== formatPaymentSummary(nextPayments);
+      const statusChanged = previousStatus !== values.status;
+      const failureReasonChanged = (targetStop.failureReason || '') !== (values.failureReason || '');
+
+      if (statusChanged) {
+        changes.push({
+          field: 'deliveryStatus',
+          oldValue: previousStatus || 'pending',
+          newValue: values.status,
+          fieldLabel: 'Status da entrega',
+        });
+      }
+
+      if (paymentsChanged) {
+        changes.push({
+          field: 'payments',
+          oldValue: formatPaymentSummary(previousPayments),
+          newValue: formatPaymentSummary(nextPayments),
+          fieldLabel: 'Pagamentos',
+        });
+      }
+
+      if (values.status === 'failed' && failureReasonChanged) {
+        changes.push({
+          field: 'failureReason',
+          oldValue: targetStop.failureReason || '-',
+          newValue: values.failureReason || '-',
+          fieldLabel: 'Motivo da falha',
+        });
+      }
+
+      changes.push({
+        field: 'adminEditReason',
+        oldValue: '-',
+        newValue: values.adminEditReason,
+        fieldLabel: 'Motivo da correção',
+      });
+
+      const updatedStop: PlaceValue & Record<string, unknown> = {
+        ...targetStop,
+        deliveryStatus: values.status,
+        completedAt: targetStop.completedAt || now,
+        editedByAdmin: true,
+        adminEditedAt: now,
+        adminEditedBy: currentUser.uid,
+        adminEditReason: values.adminEditReason,
+      };
+
+      if (values.status === 'completed') {
+        updatedStop.payments = nextPayments;
+        delete updatedStop.failureReason;
+        delete updatedStop.wentToLocation;
+        delete updatedStop.attemptPhotoUrl;
+      } else {
+        updatedStop.failureReason = values.failureReason;
+        updatedStop.wentToLocation = targetStop.wentToLocation ?? false;
+        delete updatedStop.payments;
+      }
+
+      if (statusChanged || paymentsChanged) {
+        delete updatedStop.reconciled;
+        delete updatedStop.reconciledAt;
+        delete updatedStop.reconciledBy;
+        delete updatedStop.reconciledMethod;
+        delete updatedStop.aiExtractedValue;
+      }
+
+      const updatedStops = routeStops.map((stop, index) =>
+        index === targetStopIndex ? updatedStop : stop
+      );
+
+      await updateDoc(routeRef, {
+        stops: updatedStops,
+        lastModifiedAt: now,
+        lastModifiedBy: currentUser.uid,
+      });
+
+      await logPointDataUpdated({
+        userId: currentUser.uid,
+        userName: currentUser.email || 'Administrador',
+        pointId: updatedStop.id || updatedStop.placeId || editingDelivery.stopId,
+        pointCode: updatedStop.pointCode,
+        routeId: editingDelivery.routeId,
+        routeCode: routeData.code || editingDelivery.routeCode || routeData.name || editingDelivery.routeId,
+        serviceId: routeData.serviceId,
+        serviceCode: routeData.serviceCode,
+        changes,
+        customerName: updatedStop.customerName,
+      });
+
+      let hasLunnaSyncWarning = false;
+
+      if (routeData.source === 'lunna') {
+        try {
+          await syncLunnaOrderStatus(
+            routeData,
+            updatedStop,
+            values.status === 'completed' ? 'entregue' : 'falha'
+          );
+        } catch (syncError) {
+          console.error('Erro ao sincronizar status com Lunna:', syncError);
+          hasLunnaSyncWarning = true;
+        }
+      }
+
+      if (hasLunnaSyncWarning) {
+        toast({
+          variant: 'destructive',
+          title: 'Entrega salva com aviso',
+          description: 'A correção foi salva, mas a sincronização com Lunna falhou.',
+        });
+      } else {
+        toast({
+          title: 'Entrega atualizada!',
+          description: 'Status e pagamento foram corrigidos com sucesso.',
+        });
+      }
+
+      setIsEditOpen(false);
+      setEditingDelivery(null);
+    } catch (error) {
+      console.error('Erro ao editar entrega:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar correção',
+        description: error instanceof Error ? error.message : 'Não foi possível atualizar a entrega.',
+      });
+    } finally {
+      setIsSavingDeliveryEdit(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -1579,13 +1776,24 @@ export default function ReportsPage() {
                       )}
                       {columnVisibility.actions && (
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewDetails(delivery)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleViewDetails(delivery)}
+                              aria-label="Ver detalhes"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditDelivery(delivery)}
+                              aria-label="Editar entrega"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       )}
                     </TableRow>
@@ -1858,6 +2066,19 @@ export default function ReportsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <DeliveryReportEditDialog
+        open={isEditOpen}
+        delivery={editingDelivery}
+        isSaving={isSavingDeliveryEdit}
+        onOpenChange={(open) => {
+          setIsEditOpen(open);
+          if (!open) {
+            setEditingDelivery(null);
+          }
+        }}
+        onSubmit={handleSaveDeliveryEdit}
+      />
 
       {/* Modal de Progresso da IA */}
       <Dialog open={isAIReconciling} onOpenChange={() => {}}>
