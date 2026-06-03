@@ -2934,6 +2934,9 @@ export default function ServiceAcompanharPage() {
           dynamicRoutes.forEach(dr => {
             if (dr.firestoreId) allRouteIds.push(dr.firestoreId);
           });
+          additionalRoutes.forEach(route => {
+            allRouteIds.push(route.id);
+          });
 
           console.log('📋 [handleAddService] IDs das rotas encontradas:', allRouteIds);
 
@@ -3286,9 +3289,9 @@ export default function ServiceAcompanharPage() {
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
-              unassignedStops: updatedUnassignedStops,
               updatedAt: serverTimestamp(),
             });
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
 
             // Registrar no activity log
@@ -3342,9 +3345,9 @@ export default function ServiceAcompanharPage() {
 
             await updateDoc(routeRef, {
               stops: newTargetStops,
-              unassignedStops: updatedUnassignedStops,
               updatedAt: serverTimestamp(),
             });
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO (sem polyline)');
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
@@ -4484,6 +4487,10 @@ export default function ServiceAcompanharPage() {
     if (routeData?.currentRouteId) {
       routeIds.add(routeData.currentRouteId);
     }
+
+    additionalRoutes.forEach(route => {
+      routeIds.add(route.id);
+    });
 
     return Array.from(routeIds);
   };

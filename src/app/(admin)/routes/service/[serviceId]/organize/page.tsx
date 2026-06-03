@@ -96,47 +96,11 @@ export default function ServiceOrganizePage() {
             if (stop.orderNumber) assignedOrderNumbers.add(stop.orderNumber);
           });
 
-          // Coletar unassignedStops das rotas (adicionados via Luna diretamente)
+          // Coletar unassignedStops das rotas. Nao mover automaticamente para stops:
+          // um ponto nao alocado so deve voltar para uma rota por acao explicita do usuario.
           const routeUnassigned = (routeData.unassignedStops || []) as PlaceValue[];
           if (routeUnassigned.length > 0) {
-            // Auto-merge: mover unassignedStops com coordenadas válidas para stops da rota
-            const validUnassigned = routeUnassigned.filter(s => s.lat && s.lng && s.lat !== 0 && s.lng !== 0);
-            const invalidUnassigned = routeUnassigned.filter(s => !s.lat || !s.lng || s.lat === 0 || s.lng === 0);
-
-            if (validUnassigned.length > 0) {
-              // Deduplicar contra stops existentes da rota
-              const existingRouteOrders = new Set(routeStops.map(s => s.orderNumber).filter(Boolean));
-              const newValidStops = validUnassigned.filter(s => !s.orderNumber || !existingRouteOrders.has(s.orderNumber));
-
-              if (newValidStops.length > 0) {
-                const mergedStops = [...routeStops, ...newValidStops];
-                // Atualizar Firestore: mover para stops e limpar unassignedStops
-                try {
-                  await updateDoc(doc(db, 'routes', routeDoc.id), {
-                    stops: mergedStops,
-                    unassignedStops: invalidUnassigned, // Manter apenas os sem coordenadas
-                    updatedAt: serverTimestamp(),
-                  });
-                  console.log(`✅ [ServiceOrganize] Auto-merge: ${newValidStops.length} stop(s) movido(s) para rota ${routeData.code || routeDoc.id}`);
-                  // Atualizar routeStops local para refletir a mudança
-                  routeStops.push(...newValidStops);
-                  // Registrar os novos stops como atribuídos
-                  newValidStops.forEach(s => {
-                    const sid = String(s.id ?? s.placeId);
-                    if (sid) assignedStopIds.add(sid);
-                    if (s.orderNumber) assignedOrderNumbers.add(s.orderNumber);
-                  });
-                } catch (err) {
-                  console.error('❌ [ServiceOrganize] Erro ao auto-merge:', err);
-                  // Em caso de erro, tratar como não atribuídos normalmente
-                  routeUnassignedStops.push(...validUnassigned);
-                }
-              }
-            }
-            // Stops sem coordenadas continuam como não atribuídos
-            if (invalidUnassigned.length > 0) {
-              routeUnassignedStops.push(...invalidUnassigned);
-            }
+            routeUnassignedStops.push(...routeUnassigned);
           }
 
           existingServiceRoutes.push({
@@ -270,6 +234,8 @@ export default function ServiceOrganizePage() {
         );
         const newFromRoutes = routeUnassignedStops.filter(s => {
           const sid = String(s.id ?? s.placeId);
+          // Evitar que um ponto ja alocado continue aparecendo como nao alocado
+          if (assignedStopIds.has(sid)) return false;
           // Evitar duplicata por ID
           if (allUnassignedIds.has(sid)) return false;
           // Evitar duplicata por orderNumber (mesmo pedido com ID diferente)

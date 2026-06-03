@@ -2801,17 +2801,12 @@ export default function RouteAcompanharPage() {
 
         // Salvar no Firestore se for uma rota existente
         if (routeData?.isExistingRoute && routeData?.currentRouteId) {
-          console.log('💾 [handleAddService] SALVANDO unassignedStops no Firestore - Route ID:', routeData.currentRouteId);
+          console.log('💾 [handleAddService] Sincronizando unassignedStops no Firestore');
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
-
             // Replace entire array instead of using arrayUnion to prevent duplicates
             const updatedUnassignedStops = upsertStopInCollection(unassignedStops, newStop);
 
-            await updateDoc(routeRef, {
-              unassignedStops: updatedUnassignedStops,
-              updatedAt: serverTimestamp(),
-            });
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
             console.log('✅ [handleAddService] UnassignedStops SALVO no Firestore com sucesso!');
             toast({
               title: 'Serviço Adicionado!',
@@ -3087,9 +3082,9 @@ export default function RouteAcompanharPage() {
               encodedPolyline: newRouteInfo.encodedPolyline,
               distanceMeters: newRouteInfo.distanceMeters,
               duration: newRouteInfo.duration,
-              unassignedStops: updatedUnassignedStops,
               updatedAt: serverTimestamp(),
             });
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
@@ -3130,9 +3125,9 @@ export default function RouteAcompanharPage() {
 
             await updateDoc(routeRef, {
               stops: newTargetStops,
-              unassignedStops: updatedUnassignedStops,
               updatedAt: serverTimestamp(),
             });
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
             console.log('✅ [handleDragEnd] Firestore ATUALIZADO (sem polyline)');
           } catch (error) {
             console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
@@ -4143,6 +4138,10 @@ export default function RouteAcompanharPage() {
     if (routeData?.currentRouteId) {
       routeIds.add(routeData.currentRouteId);
     }
+
+    additionalRoutes.forEach(route => {
+      routeIds.add(route.id);
+    });
 
     return Array.from(routeIds);
   };
