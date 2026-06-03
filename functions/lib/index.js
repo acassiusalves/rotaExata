@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.updateDriverProfile = exports.deleteUser = exports.inviteUser = void 0;
+exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.updateDriverProfile = exports.resetUserPassword = exports.deleteUser = exports.inviteUser = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
@@ -43,6 +43,7 @@ const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
 (0, app_1.initializeApp)();
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
+const DEFAULT_TEMPORARY_PASSWORD = "123456";
 const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
     "draft",
     "pending",
@@ -270,6 +271,60 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
                 throw new https_1.HttpsError("internal", dbMsg);
             }
         }
+        throw new https_1.HttpsError("internal", msg);
+    }
+});
+/* ========== resetUserPassword (callable) ========== */
+exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+    if (!uid) {
+        throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
+    }
+    const requesterRole = await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem resetar senhas");
+    const requesterUid = req.auth?.uid || "";
+    try {
+        const auth = (0, auth_1.getAuth)();
+        const db = (0, firestore_1.getFirestore)();
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) {
+            throw new https_1.HttpsError("not-found", "Usuário não encontrado.");
+        }
+        const userData = userSnap.data() || {};
+        const targetRole = String(userData.role || "").trim();
+        if (targetRole === "admin" && requesterRole !== "admin") {
+            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem resetar a senha de outro admin.");
+        }
+        const targetRecord = await auth.updateUser(uid, {
+            password: DEFAULT_TEMPORARY_PASSWORD,
+        });
+        await auth.revokeRefreshTokens(uid);
+        await userRef.set({
+            mustChangePassword: true,
+            forceLogoutAt: firestore_1.FieldValue.serverTimestamp(),
+            passwordResetAt: firestore_1.FieldValue.serverTimestamp(),
+            passwordResetBy: requesterUid,
+            passwordResetByRole: requesterRole,
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return {
+            ok: true,
+            uid,
+            email: targetRecord.email || userData.email || "",
+            temporaryPassword: DEFAULT_TEMPORARY_PASSWORD,
+            message: "Senha resetada com sucesso.",
+        };
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError) {
+            throw err;
+        }
+        const error = err;
+        if (error.code === "auth/user-not-found") {
+            throw new https_1.HttpsError("not-found", "Usuário não encontrado no Firebase Authentication.");
+        }
+        const msg = error.message || "Falha ao resetar senha do usuário.";
         throw new https_1.HttpsError("internal", msg);
     }
 });

@@ -18,6 +18,7 @@ import { ForceLogoutDialog } from '@/components/drivers/force-logout-dialog';
 import { ImpersonateDriverDialog } from '@/components/drivers/impersonate-driver-dialog';
 import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
 import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
+import { ResetPasswordDialog } from '@/components/drivers/reset-password-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { functions } from '@/lib/firebase/client';
 import { httpsCallable } from 'firebase/functions';
@@ -79,6 +80,8 @@ export default function DriversPage() {
   const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const [driverToLogout, setDriverToLogout] = React.useState<Driver | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = React.useState(false);
+  const [driverToResetPassword, setDriverToResetPassword] = React.useState<Driver | null>(null);
   const [isImpersonating, setIsImpersonating] = React.useState(false);
   const [driverToImpersonate, setDriverToImpersonate] = React.useState<Driver | null>(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
@@ -288,6 +291,37 @@ export default function DriversPage() {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!driverToResetPassword) return;
+    setIsResettingPassword(true);
+
+    try {
+      const resetUserPasswordFn = httpsCallable<
+        { uid: string },
+        { ok: boolean; temporaryPassword: string; message: string }
+      >(functions, 'resetUserPassword');
+
+      const result = await resetUserPasswordFn({ uid: driverToResetPassword.id });
+      const temporaryPassword = result.data.temporaryPassword || '123456';
+
+      toast({
+        title: 'Senha resetada!',
+        description: `Senha temporária: ${temporaryPassword}. O motorista deverá criar uma nova senha no próximo acesso.`,
+      });
+
+      setDriverToResetPassword(null);
+    } catch (error: any) {
+      console.error('Error resetting driver password:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Resetar Senha',
+        description: error.message || 'Não foi possível resetar a senha do motorista.',
+      });
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   const handleRefreshStatus = async () => {
     setIsRefreshingStatus(true);
 
@@ -405,6 +439,7 @@ export default function DriversPage() {
                 onEditClick={(driver) => setDriverToEditId(driver.id)}
                 onDeleteClick={(driver) => setDriverToDelete(driver)}
                 onForceLogoutClick={(driver) => setDriverToLogout(driver)}
+                onResetPasswordClick={(driver) => setDriverToResetPassword(driver)}
                 onImpersonateClick={(driver) => setDriverToImpersonate(driver)}
               />
             )}
@@ -425,6 +460,14 @@ export default function DriversPage() {
         onConfirm={handleForceLogout}
         driverName={driverToLogout?.name}
         isLoading={isLoggingOut}
+      />
+      <ResetPasswordDialog
+        isOpen={!!driverToResetPassword}
+        onClose={() => setDriverToResetPassword(null)}
+        onConfirm={handleResetPassword}
+        driverName={driverToResetPassword?.name}
+        driverEmail={driverToResetPassword?.email}
+        isLoading={isResettingPassword}
       />
       <ImpersonateDriverDialog
         isOpen={!!driverToImpersonate}

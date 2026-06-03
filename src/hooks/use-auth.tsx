@@ -186,7 +186,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 const currentForceLogoutAt = data?.forceLogoutAt?.toMillis?.() || null;
 
                 // Se forceLogoutAt mudou desde o login, significa que o admin forçou logout
-                if (currentForceLogoutAt && lastForceLogoutAt !== null && currentForceLogoutAt > lastForceLogoutAt) {
+                if (currentForceLogoutAt && (lastForceLogoutAt === null || currentForceLogoutAt > lastForceLogoutAt)) {
                   log.warn('Logout forçado detectado pelo administrador');
 
                   // Fazer logout local

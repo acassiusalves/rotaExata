@@ -10,6 +10,7 @@ import {randomBytes} from "node:crypto";
 initializeApp();
 
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
+const DEFAULT_TEMPORARY_PASSWORD = "123456";
 const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
   "draft",
   "pending",
@@ -305,6 +306,88 @@ export const deleteUser = onCall(
              throw new HttpsError("internal", dbMsg);
           }
       }
+      throw new HttpsError("internal", msg);
+    }
+  }
+);
+
+/* ========== resetUserPassword (callable) ========== */
+export const resetUserPassword = onCall(
+  { region: "southamerica-east1" },
+  async (req) => {
+    const d = req.data || {};
+    const uid = String(d.uid || "").trim();
+
+    if (!uid) {
+      throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
+    }
+
+    const requesterRole = await assertAuthorizedRole(
+      req.auth?.uid,
+      "Apenas administradores, sócios e gestores podem resetar senhas"
+    );
+    const requesterUid = req.auth?.uid || "";
+
+    try {
+      const auth = getAuth();
+      const db = getFirestore();
+      const userRef = db.collection("users").doc(uid);
+      const userSnap = await userRef.get();
+
+      if (!userSnap.exists) {
+        throw new HttpsError("not-found", "Usuário não encontrado.");
+      }
+
+      const userData = userSnap.data() || {};
+      const targetRole = String(userData.role || "").trim();
+
+      if (targetRole === "admin" && requesterRole !== "admin") {
+        throw new HttpsError(
+          "permission-denied",
+          "Apenas administradores podem resetar a senha de outro admin."
+        );
+      }
+
+      const targetRecord = await auth.updateUser(uid, {
+        password: DEFAULT_TEMPORARY_PASSWORD,
+      });
+
+      await auth.revokeRefreshTokens(uid);
+
+      await userRef.set(
+        {
+          mustChangePassword: true,
+          forceLogoutAt: FieldValue.serverTimestamp(),
+          passwordResetAt: FieldValue.serverTimestamp(),
+          passwordResetBy: requesterUid,
+          passwordResetByRole: requesterRole,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      return {
+        ok: true,
+        uid,
+        email: targetRecord.email || userData.email || "",
+        temporaryPassword: DEFAULT_TEMPORARY_PASSWORD,
+        message: "Senha resetada com sucesso.",
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) {
+        throw err;
+      }
+
+      const error = err as { code?: string; message?: string };
+
+      if (error.code === "auth/user-not-found") {
+        throw new HttpsError(
+          "not-found",
+          "Usuário não encontrado no Firebase Authentication."
+        );
+      }
+
+      const msg = error.message || "Falha ao resetar senha do usuário.";
       throw new HttpsError("internal", msg);
     }
   }

@@ -24,7 +24,22 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Driver, DriverStatus } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { MoreHorizontal, Star, Trash2, Smartphone, Wifi, WifiOff, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull, LogOut, Clock } from 'lucide-react';
+import {
+  MoreHorizontal,
+  Star,
+  Trash2,
+  Smartphone,
+  Wifi,
+  WifiOff,
+  Battery,
+  BatteryCharging,
+  BatteryLow,
+  BatteryMedium,
+  BatteryFull,
+  LogOut,
+  Clock,
+  KeyRound,
+} from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DeviceInfo } from '@/lib/types';
@@ -149,6 +164,7 @@ const getDriverColumns = (
   onEditClick: (driver: Driver) => void,
   onDeleteClick: (driver: Driver) => void,
   onForceLogoutClick: (driver: Driver) => void,
+  onResetPasswordClick: (driver: Driver) => void,
   onImpersonateClick: (driver: Driver) => void
 ): ColumnDef<Driver>[] => [
   {
@@ -420,6 +436,10 @@ const getDriverColumns = (
                        <LogOut className="mr-2 h-4 w-4" />
                        Deslogar Motorista
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onResetPasswordClick(driver)}>
+                       <KeyRound className="mr-2 h-4 w-4" />
+                       Resetar Senha
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
                        <Trash2 className="mr-2 h-4 w-4" />
@@ -439,6 +459,7 @@ export function DriverTable({
   onEditClick,
   onDeleteClick,
   onForceLogoutClick,
+  onResetPasswordClick,
   onImpersonateClick
 }: {
   drivers: Driver[],
@@ -446,6 +467,7 @@ export function DriverTable({
   onEditClick: (driver: Driver) => void,
   onDeleteClick: (driver: Driver) => void,
   onForceLogoutClick: (driver: Driver) => void,
+  onResetPasswordClick: (driver: Driver) => void,
   onImpersonateClick: (driver: Driver) => void
 }) {
   // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
@@ -459,9 +481,10 @@ export function DriverTable({
       onEditClick,
       onDeleteClick,
       onForceLogoutClick,
+      onResetPasswordClick,
       onImpersonateClick
     ),
-    [onViewDetailsClick, onEditClick, onDeleteClick, onForceLogoutClick, onImpersonateClick]
+    [onViewDetailsClick, onEditClick, onDeleteClick, onForceLogoutClick, onResetPasswordClick, onImpersonateClick]
   );
 
   const table = useReactTable({

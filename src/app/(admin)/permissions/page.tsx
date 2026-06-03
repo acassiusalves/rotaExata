@@ -8,6 +8,7 @@ import {
   Save,
   Shield,
   AlertCircle,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +39,9 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { functions } from '@/lib/firebase/client';
+import { httpsCallable } from 'firebase/functions';
+import { ResetPasswordDialog } from '@/components/drivers/reset-password-dialog';
 import {
   availableRoles,
   permissionGroups,
@@ -58,6 +62,8 @@ export default function PermissionsPage() {
   const [inactivePages, setInactivePages] = React.useState<Set<string>>(new Set());
   const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
   const [isSavingUsers, setIsSavingUsers] = React.useState(false);
+  const [isResettingPassword, setIsResettingPassword] = React.useState(false);
+  const [userToResetPassword, setUserToResetPassword] = React.useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const { toast } = useToast();
   const { user: currentUser, userRole } = useAuth();
@@ -77,7 +83,7 @@ export default function PermissionsPage() {
 
         if (permissionsData) {
           // Mesclar permissões salvas com as padrão
-          const mergedPermissions = { ...defaultPagePermissions };
+          const mergedPermissions: Record<string, string[]> = { ...defaultPagePermissions };
           for (const page in permissionsData.permissions) {
             mergedPermissions[page] = permissionsData.permissions[page];
           }
@@ -226,6 +232,37 @@ export default function PermissionsPage() {
       });
     } finally {
       setIsSavingUsers(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!userToResetPassword) return;
+    setIsResettingPassword(true);
+
+    try {
+      const resetUserPasswordFn = httpsCallable<
+        { uid: string },
+        { ok: boolean; temporaryPassword: string; message: string }
+      >(functions, 'resetUserPassword');
+
+      const result = await resetUserPasswordFn({ uid: userToResetPassword.id });
+      const temporaryPassword = result.data.temporaryPassword || '123456';
+
+      toast({
+        title: 'Senha resetada!',
+        description: `Senha temporária: ${temporaryPassword}. O usuário deverá criar uma nova senha no próximo acesso.`,
+      });
+
+      setUserToResetPassword(null);
+    } catch (error: any) {
+      console.error('Erro ao resetar senha:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao Resetar Senha',
+        description: error.message || 'Não foi possível resetar a senha do usuário.',
+      });
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -394,6 +431,7 @@ export default function PermissionsPage() {
                   <TableHead>Usuário</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead className="w-[200px]">Função</TableHead>
+                  <TableHead className="w-[140px] text-right">Senha</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -424,11 +462,22 @@ export default function PermissionsPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setUserToResetPassword(user)}
+                          disabled={user.id === currentUser?.uid}
+                        >
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          Resetar
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                       Nenhum usuário encontrado.
                     </TableCell>
                   </TableRow>
@@ -448,6 +497,15 @@ export default function PermissionsPage() {
           </Button>
         </CardFooter>
       </Card>
+      <ResetPasswordDialog
+        isOpen={!!userToResetPassword}
+        onClose={() => setUserToResetPassword(null)}
+        onConfirm={handleResetPassword}
+        entityLabel="usuário"
+        userName={userToResetPassword?.displayName || userToResetPassword?.email}
+        userEmail={userToResetPassword?.email}
+        isLoading={isResettingPassword}
+      />
     </div>
   );
 }
