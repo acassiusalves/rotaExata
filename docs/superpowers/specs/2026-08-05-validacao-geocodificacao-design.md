@@ -92,7 +92,9 @@ buildStop()                POST /api/geocode              address-resolver.ts
 
 **O fallback direto ao Google em `rota-exata-integration.ts` é removido.** Se `/api/geocode` não
 responder, o resolver retorna falha e o ponto entra pelo caminho de erro que já existe. Some uma cópia
-do código, e a chave do Google deixa de ter qualquer caminho que a exponha ao browser.
+do código e um dos caminhos que expõem a chave do Google ao browser — não todos: as telas de criação
+de pedido (`pedidos/novo`, `frente-caixa`, fora de escopo — ver Não-objetivos acima) continuam chamando
+o Google direto do browser com `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
 
 `/api/geocode` tem exatamente um caller (`rota-exata-integration.ts:612`), então o contrato pode mudar
 sem quebrar nada.

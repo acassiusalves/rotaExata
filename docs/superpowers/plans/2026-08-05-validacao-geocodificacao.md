@@ -10,6 +10,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-05-validacao-geocodificacao-design.md`
 
+> **Nota acrescentada na revisão final da branch:** os trechos de código deste plano — sobretudo os
+> dos Steps 5, 7 e 8 da Task 5 — refletem o estado do código **antes** das rodadas de revisão que
+> aconteceram durante a execução. Três divergências conhecidas entre o que está escrito abaixo e o
+> código que efetivamente foi mergeado:
+>
+> 1. O Step 8 (`resendOrderToRoute`) grava `hasValidationIssues: !resolved.verdict.trusted` de forma
+>    incondicional. A decisão tomada depois — e o código atual — deixam o campo **ausente** quando o
+>    veredito é limpo, em vez de gravar `false`.
+> 2. O Step 5 (`buildStop`) atribui `baseStop.validationIssues = resolved.verdict.issues` sem cópia. O
+>    código atual copia o array (`[...resolved.verdict.issues]`), porque o `geocodeCache` entrega o
+>    mesmo `Verdict` para pedidos com o mesmo endereço.
+> 3. O snippet do Step 7 não tem o campo `suspiciousGeocodings` nem o registro do caso "pedido sem
+>    cliente vinculado" — ambos presentes no código atual.
+>
+> Nada disso muda o resultado da implementação nem exige nova ação. Os snippets **não foram
+> reescritos** — para o comportamento real, a fonte de verdade é o código, não este documento.
+
 ## Global Constraints
 
 - **Repositórios:** Tasks 1–5 são em `/Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao` (worktree do `luna`, branch `fix/validacao-geocodificacao`, criada a partir de `main`). Task 6 é em `/Users/acassiusalves/rotaExata-1/.claude/worktrees/github-alignment-check-dc1542` (branch `claude/github-alignment-check-dc1542`).
