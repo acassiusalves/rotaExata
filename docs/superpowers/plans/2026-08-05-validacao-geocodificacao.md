@@ -1537,11 +1537,34 @@ O parâmetro `apiKey` de `resendOrderToRoute` fica sem uso. Manter na assinatura
 
 - [ ] **Step 9: Conferir que tudo compila e que a suíte passa**
 
+O repositório **já tem 165 erros de typecheck pré-existentes em 35 arquivos**, medidos em `main`
+antes desta branch (lista em `.superpowers/sdd/typecheck-baseline-main.txt`). `npm run typecheck`
+não passa limpo e nunca passou — não tente consertar isso.
+
+Os três arquivos desta mudança estão **limpos no baseline**, então o critério é: zero erro neles.
+
 ```bash
-cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm run typecheck && npm test
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm run typecheck 2>&1 | grep -E "address-resolver|rota-exata-integration|api/geocode" ; echo "--- fim (vazio acima = OK) ---" ; npm test
 ```
 
-Esperado: typecheck sem erros; toda a suíte de testes PASS.
+Esperado: nenhuma linha entre o comando e o marcador `--- fim ---`; toda a suíte de testes PASS.
+
+- [ ] **Step 9b: Conferir o contrato entre a rota e o caller — o compilador NÃO pega isso**
+
+`rota-exata-integration.ts` fala com `/api/geocode` por `fetch`, que é sem tipo. Se o corpo enviado
+não casar com o que a rota espera, **nada acusa em tempo de compilação** — quebra em produção, em
+silêncio. Confira à mão que os dois lados combinam:
+
+```bash
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
+echo "=== o que a rota LE do body ==="; grep -n "body?\." src/app/api/geocode/route.ts
+echo "=== o que o caller ENVIA ==="; grep -n -B2 -A2 "body: JSON.stringify" src/lib/rota-exata-integration.ts
+echo "=== o que a rota DEVOLVE ==="; grep -n "NextResponse.json" src/app/api/geocode/route.ts
+echo "=== o que o caller LE da resposta ==="; grep -n "data?\.\|data\.place\|data\.verdict\|data\.reason" src/lib/rota-exata-integration.ts
+```
+
+Os nomes de campo precisam bater exatamente nos dois sentidos: o caller envia
+`{rua, numero, bairro, cidade, cep}` e lê `{place, verdict, reason}`.
 
 - [ ] **Step 10: Confirmar que não sobrou chamada ao Google fora do resolver**
 
