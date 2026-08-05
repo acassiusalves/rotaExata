@@ -24,6 +24,34 @@ const createInfoWindowContent = (
   const title = index !== undefined ? `Parada ${index + 1}` : 'Serviço Avulso';
   const stopId = String(stop.id ?? stop.placeId ?? index);
 
+  // Aviso de endereço suspeito. O ponto entra na rota mesmo assim — o operador
+  // decide se corrige pelo botão Editar.
+  let addressWarning = '';
+  if (stop.hasValidationIssues && stop.validationIssues?.length) {
+    const grave = stop.addressSeverity !== 'conferir';
+    const cor = grave ? '#9E3423' : '#A66B15';
+    const fundo = grave ? '#FAEBE7' : '#FBF2E1';
+    const titulo = grave ? 'Endereço provavelmente errado' : 'Endereço a conferir';
+
+    const listaIssues = stop.validationIssues
+      .map((i) => `<li style="margin: 0 0 2px 0;">${i}</li>`)
+      .join('');
+
+    const comparacao = stop.geocodedAddress
+      ? `<p style="margin: 6px 0 0 0; font-size: 11px; color: #555;">
+           O Google apontou para:<br><em>${stop.geocodedAddress}</em>
+         </p>`
+      : '';
+
+    addressWarning = `
+      <div style="background: ${fundo}; border-left: 3px solid ${cor}; padding: 8px 10px; margin-bottom: 12px; border-radius: 2px;">
+        <strong style="color: ${cor}; font-size: 12px; display: block; margin-bottom: 4px;">⚠ ${titulo}</strong>
+        <ul style="margin: 0; padding-left: 16px; font-size: 11.5px; color: #333;">${listaIssues}</ul>
+        ${comparacao}
+      </div>
+    `;
+  }
+
   // Status badge
   let statusBadge = '';
   if (stop.deliveryStatus === 'completed') {
@@ -40,6 +68,7 @@ const createInfoWindowContent = (
     <div style="font-family: Inter, sans-serif; font-size: 14px; color: #333; max-width: 280px; padding: 4px;">
       <h4 style="font-weight: 600; font-size: 16px; margin: 0 0 8px 0;">${title}</h4>
       ${statusBadge}
+      ${addressWarning}
       <div style="display: grid; grid-template-columns: 90px 1fr; gap: 8px;">
         <span style="color: #666;">Cliente:</span>
         <strong style="color: #000;">${stop.customerName || '--'}</strong>
