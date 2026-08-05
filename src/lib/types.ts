@@ -51,6 +51,9 @@ export type PlaceValue = {
   originalAddressParts?: Record<string, string>;
   validationIssues?: string[];
   hasValidationIssues?: boolean;
+  /** Texto formatado que o Google devolveu. Só para conferência — a tela mostra os campos do cadastro. */
+  geocodedAddress?: string;
+  addressSeverity?: 'grave' | 'conferir';
   // Campos de rastreamento
   deliveryStatus?: DeliveryStatus;
   arrivedAt?: Timestamp | Date;
