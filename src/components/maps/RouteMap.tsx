@@ -13,6 +13,19 @@ export type RouteMapHandle = {
   centerOnLocation: (lat: number, lng: number, zoom?: number) => void;
 };
 
+// Escapa HTML nos dois campos usados logo abaixo (validationIssues, geocodedAddress):
+// vêm de fontes que não são constantes (planilha enviada pelo usuário, texto que o
+// Google devolveu) e entram direto na string do InfoWindow. O resto deste arquivo já
+// interpola outros campos sem escapar — problema pré-existente, tratado em separado;
+// não é escopo desta correção.
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 // Função para gerar o conteúdo HTML do InfoWindow
 const createInfoWindowContent = (
   stop: PlaceValue,
@@ -34,12 +47,12 @@ const createInfoWindowContent = (
     const titulo = grave ? 'Endereço provavelmente errado' : 'Endereço a conferir';
 
     const listaIssues = stop.validationIssues
-      .map((i) => `<li style="margin: 0 0 2px 0;">${i}</li>`)
+      .map((i) => `<li style="margin: 0 0 2px 0;">${escapeHtml(i)}</li>`)
       .join('');
 
     const comparacao = stop.geocodedAddress
       ? `<p style="margin: 6px 0 0 0; font-size: 11px; color: #555;">
-           O Google apontou para:<br><em>${stop.geocodedAddress}</em>
+           O Google apontou para:<br><em>${escapeHtml(stop.geocodedAddress)}</em>
          </p>`
       : '';
 

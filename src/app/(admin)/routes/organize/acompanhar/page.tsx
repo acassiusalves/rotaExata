@@ -3626,6 +3626,12 @@ export default function OrganizeRoutePage() {
 
     // Populate edit form with current stop data
     setStopToEdit({ stop: targetStop, routeKey, index });
+
+    // Endereço estruturado vem do cadastro do cliente (Luna). Pontos legados —
+    // gravados antes desta mudança, ou importados de planilha — não têm esses
+    // campos; só nesse caso cai na geocodificação reversa, a partir das coordenadas.
+    const hasStructuredAddress = Boolean(targetStop.rua);
+
     setEditService({
       customerName: targetStop.customerName || '',
       phone: targetStop.phone || '',
@@ -3633,20 +3639,20 @@ export default function OrganizeRoutePage() {
       timeWindowStart: targetStop.timeWindowStart || '',
       timeWindowEnd: targetStop.timeWindowEnd || '',
       locationLink: '',
-      cep: '',
-      rua: '',
-      numero: '',
+      cep: targetStop.cep || '',
+      rua: targetStop.rua || '',
+      numero: targetStop.numero || '',
       complemento: targetStop.complemento || '',
-      bairro: '',
-      cidade: '',
+      bairro: targetStop.bairro || '',
+      cidade: targetStop.cidade || '',
       notes: targetStop.notes || '',
     });
 
     // Open edit dialog
     setIsEditStopDialogOpen(true);
 
-    // Reverse geocode to get address components
-    if (targetStop.lat && targetStop.lng) {
+    // Reverse geocode só quando o ponto não tem endereço estruturado
+    if (!hasStructuredAddress && targetStop.lat && targetStop.lng) {
       const addressDetails = await reverseGeocode(targetStop.lat, targetStop.lng);
       if (addressDetails) {
         setEditService(prev => ({
