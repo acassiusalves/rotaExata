@@ -279,9 +279,15 @@ Nenhuma dessas situações derruba o envio do lote.
 
 `validate()` é pura, então o grosso da cobertura não toca a rede.
 
-- **Fixtures dos 14 casos críticos reais** — pares (candidato do Google, referência do ViaCEP)
-  capturados da amostra, cada um com o veredito esperado. O P3460 é o caso âncora: deve disparar R1,
-  R3 e R5.
+- **Fixtures reais cobrindo cada regra** — pares (candidato do Google, referência do ViaCEP)
+  capturados da produção, um por regra, cada um com o veredito esperado:
+  - P3460 (âncora) — dispara R1, R3 e R5 ao mesmo tempo
+  - P3370 — dispara R3 e R4, e **não** pode disparar R5 (bairro "Setor Central" nos dois lados)
+  - P3404 — dispara R2, sem referência do ViaCEP
+
+  Um caso por regra, e não os 14 críticos: as outras 11 ocorrências repetem as mesmas combinações e
+  exigiriam capturar 11 respostas do ViaCEP só para duplicar cobertura. O corpus completo de 200
+  pontos como fixture de regressão fica registrado em "fora de escopo".
 - **Fixture de falso positivo** — amostra de pontos bons (rua e bairro conferindo, CEP diferente por
   numeração) que devem passar como `trusted`. Trava a regra descartada de "CEP divergente puro".
 - **Sem referência** — os 9 casos sem ViaCEP: só R1 e R2 podem disparar.
@@ -309,6 +315,8 @@ O Luna já tem Vitest configurado (`vitest.config.ts`, `vitest.setup.ts`).
 
 - Varredura e correção dos 3.455 pontos históricos; os 14 críticos da amostra seguem gravados com
   coordenadas erradas.
+- Commitar o corpus de 200 pontos (candidato do Google + referência do ViaCEP) como fixture de
+  regressão, para recalibrar as regras sem depender de rede.
 - Remoção do endpoint órfão `rotaExata/src/app/api/import-lunna-orders/route.ts`.
 - Aplicar o mesmo tratamento às telas de criação de pedido do Luna (`pedidos/novo:1003`,
   `frente-caixa:1588`), que chamam o Google direto para autopreencher endereço a partir do CEP.
