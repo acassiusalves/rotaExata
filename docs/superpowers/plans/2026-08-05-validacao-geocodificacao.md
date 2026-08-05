@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- **Repositórios:** Tasks 1–5 são em `/Users/acassiusalves/luna`. Task 6 é em `/Users/acassiusalves/rotaExata-1`.
-- **Branch:** o `luna` está em `codex/historico-movimentacoes-completo`, que é de outra tarefa. **Antes da Task 1, criar uma branch nova a partir dela** (`git checkout -b fix/validacao-geocodificacao`) e commitar tudo lá.
+- **Repositórios:** Tasks 1–5 são em `/Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao` (worktree do `luna`, branch `fix/validacao-geocodificacao`, criada a partir de `main`). Task 6 é em `/Users/acassiusalves/rotaExata-1/.claude/worktrees/github-alignment-check-dc1542` (branch `claude/github-alignment-check-dc1542`).
+- **Ambiente:** os dois worktrees já estão prontos — branch criada, `node_modules` e `.env.local` no lugar. Baseline do `luna` verificado antes de começar: 47 arquivos, 682 testes, todos passando. Não criar branch nem rodar `npm install`.
 - **Testes:** `npm test` (`vitest run`) na raiz do `luna`. Testes ficam em `src/lib/__tests__/`, seguindo o padrão do repositório. Nenhum teste pode tocar a rede — `fetch` sempre mockado com `vi.stubGlobal`.
 - **Comentários e mensagens de commit em português.** Mensagens de erro voltadas ao operador também.
 - **ViaCEP é estritamente opcional.** Indisponível, lento ou CEP desconhecido nunca marca um ponto nem derruba o envio.
@@ -44,15 +44,13 @@
 - Consumes: nada.
 - Produces: `CadastroAddress`, `CepReference`, `GeocodeCandidate`, `Verdict`, `GeocodeReason`, `digitsOnly(v: string): string`, `normalizeText(s: string): string`, `lookupCep(cep: string): Promise<CepReference | null>`, `__clearCepCache(): void`.
 
-- [ ] **Step 1: Criar a branch**
+- [ ] **Step 1: Conferir o ponto de partida**
 
 ```bash
-cd /Users/acassiusalves/luna
-git checkout -b fix/validacao-geocodificacao
-git status --short
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && git branch --show-current && git status --short
 ```
 
-Esperado: nenhuma saída de `git status` (árvore limpa).
+Esperado: `fix/validacao-geocodificacao`, e nenhuma saída de `git status` além do symlink `node_modules` e do `.env.local` (ambos ignorados). A branch já existe — não criar.
 
 - [ ] **Step 2: Escrever o teste que falha**
 
@@ -163,7 +161,7 @@ describe('lookupCep', () => {
 - [ ] **Step 3: Rodar o teste e confirmar que falha**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: FAIL — `Failed to resolve import "@/lib/address-resolver"`.
@@ -321,7 +319,7 @@ export async function lookupCep(cep: string): Promise<CepReference | null> {
 - [ ] **Step 5: Rodar o teste e confirmar que passa**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: PASS, 10 testes.
@@ -329,7 +327,7 @@ Esperado: PASS, 10 testes.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/acassiusalves/luna
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
 git add src/lib/address-resolver.ts src/lib/__tests__/address-resolver.test.ts
 git commit -m "$(cat <<'EOF'
 feat(geocode): módulo address-resolver com consulta ao ViaCEP
@@ -526,7 +524,7 @@ describe('validate', () => {
 - [ ] **Step 2: Rodar e confirmar que falha**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: FAIL — `validate is not a function` (ou erro de import).
@@ -623,7 +621,7 @@ export function validate(
 - [ ] **Step 4: Rodar e confirmar que passa**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: PASS, 18 testes.
@@ -631,7 +629,7 @@ Esperado: PASS, 18 testes.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/acassiusalves/luna
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
 git add src/lib/address-resolver.ts src/lib/__tests__/address-resolver.test.ts
 git commit -m "$(cat <<'EOF'
 feat(geocode): regras de validação do resultado do Google
@@ -799,7 +797,7 @@ describe('resolveAddress', () => {
 - [ ] **Step 2: Rodar e confirmar que falha**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: FAIL — `buildQuery is not a function`.
@@ -963,7 +961,7 @@ export async function resolveAddress(
 - [ ] **Step 4: Rodar e confirmar que passa**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/address-resolver.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/address-resolver.test.ts
 ```
 
 Esperado: PASS, 25 testes.
@@ -971,7 +969,7 @@ Esperado: PASS, 25 testes.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/acassiusalves/luna
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
 git add src/lib/address-resolver.ts src/lib/__tests__/address-resolver.test.ts
 git commit -m "$(cat <<'EOF'
 feat(geocode): chamada ao Google e orquestração no resolver
@@ -1084,7 +1082,7 @@ export async function POST(request: NextRequest) {
 - [ ] **Step 2: Conferir que compila**
 
 ```bash
-cd /Users/acassiusalves/luna && npm run typecheck
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm run typecheck
 ```
 
 Esperado: erros **apenas** em `src/lib/rota-exata-integration.ts` (o caller antigo, corrigido na Task 5). Se aparecer erro em qualquer outro arquivo, parar e investigar.
@@ -1092,7 +1090,7 @@ Esperado: erros **apenas** em `src/lib/rota-exata-integration.ts` (o caller anti
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/acassiusalves/luna
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
 git add src/app/api/geocode/route.ts
 git commit -m "$(cat <<'EOF'
 refactor(geocode): /api/geocode recebe endereço estruturado
@@ -1249,7 +1247,7 @@ describe('buildStop', () => {
 - [ ] **Step 2: Rodar e confirmar que falha**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/rota-exata-buildstop.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/rota-exata-buildstop.test.ts
 ```
 
 Esperado: FAIL — `buildStop` não é exportado.
@@ -1431,7 +1429,7 @@ export function buildStop(
 - [ ] **Step 6: Rodar o teste de buildStop e confirmar que passa**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test -- src/lib/__tests__/rota-exata-buildstop.test.ts
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test -- src/lib/__tests__/rota-exata-buildstop.test.ts
 ```
 
 Esperado: PASS, 7 testes.
@@ -1540,7 +1538,7 @@ O parâmetro `apiKey` de `resendOrderToRoute` fica sem uso. Manter na assinatura
 - [ ] **Step 9: Conferir que tudo compila e que a suíte passa**
 
 ```bash
-cd /Users/acassiusalves/luna && npm run typecheck && npm test
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm run typecheck && npm test
 ```
 
 Esperado: typecheck sem erros; toda a suíte de testes PASS.
@@ -1548,7 +1546,7 @@ Esperado: typecheck sem erros; toda a suíte de testes PASS.
 - [ ] **Step 10: Confirmar que não sobrou chamada ao Google fora do resolver**
 
 ```bash
-cd /Users/acassiusalves/luna && grep -rn "maps.googleapis.com/maps/api/geocode" src/lib/ src/app/api/
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && grep -rn "maps.googleapis.com/maps/api/geocode" src/lib/ src/app/api/
 ```
 
 Esperado: uma única linha, em `src/lib/address-resolver.ts`.
@@ -1556,7 +1554,7 @@ Esperado: uma única linha, em `src/lib/address-resolver.ts`.
 - [ ] **Step 11: Commit**
 
 ```bash
-cd /Users/acassiusalves/luna
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao
 git add src/lib/rota-exata-integration.ts src/lib/__tests__/rota-exata-buildstop.test.ts
 git commit -m "$(cat <<'EOF'
 fix(rota-exata): ponto guarda o endereço do cadastro, não o do Google
@@ -1651,7 +1649,7 @@ Na string de retorno da mesma função, trocar a linha `${statusBadge}` (linha 4
 - [ ] **Step 4: Conferir que compila**
 
 ```bash
-cd /Users/acassiusalves/rotaExata-1 && npm run typecheck 2>&1 | tail -20
+cd /Users/acassiusalves/rotaExata-1/.claude/worktrees/github-alignment-check-dc1542 && npm run typecheck 2>&1 | tail -20
 ```
 
 Esperado: sem erros novos em `types.ts` nem em `RouteMap.tsx`. (Se o projeto já tiver erros pré-existentes em outros arquivos, comparar com `git stash && npm run typecheck` antes de concluir que a mudança quebrou algo.)
@@ -1659,7 +1657,7 @@ Esperado: sem erros novos em `types.ts` nem em `RouteMap.tsx`. (Se o projeto já
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/acassiusalves/rotaExata-1
+cd /Users/acassiusalves/rotaExata-1/.claude/worktrees/github-alignment-check-dc1542
 git add src/lib/types.ts src/components/maps/RouteMap.tsx
 git commit -m "$(cat <<'EOF'
 feat(mapa): aviso de endereço suspeito no popup da parada
@@ -1684,7 +1682,7 @@ EOF
 - [ ] **Suíte completa do Luna**
 
 ```bash
-cd /Users/acassiusalves/luna && npm test && npm run typecheck
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && npm test && npm run typecheck
 ```
 
 Esperado: tudo PASS, sem erro de tipo.
@@ -1692,7 +1690,7 @@ Esperado: tudo PASS, sem erro de tipo.
 - [ ] **Uma única chamada ao Google**
 
 ```bash
-cd /Users/acassiusalves/luna && grep -rn "maps/api/geocode/json" src/lib/ src/app/api/ | wc -l
+cd /Users/acassiusalves/luna/.claude/worktrees/validacao-geocodificacao && grep -rn "maps/api/geocode/json" src/lib/ src/app/api/ | wc -l
 ```
 
 Esperado: `1`.
