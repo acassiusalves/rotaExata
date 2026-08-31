@@ -10,12 +10,14 @@ export function AutocompleteInput({
   value,
   onChange,
   placeholder = "Digite o endereço",
+  disabled = false,
 }: {
   id?: string;
   label?: string;
   value?: PlaceValue | null;
   onChange: (v: PlaceValue | null) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const acRef = React.useRef<google.maps.places.Autocomplete | null>(null);
@@ -81,7 +83,8 @@ export function AutocompleteInput({
         ref={inputRef}
         defaultValue={value?.address}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-border bg-card text-foreground px-4 py-2.5 text-sm outline-none transition-all duration-300 focus:ring-2 focus:ring-primary focus:border-primary placeholder:text-muted-foreground"
+        disabled={disabled}
+        className="w-full rounded-xl border border-border bg-card text-foreground px-4 py-2.5 text-sm outline-none transition-all duration-300 focus:ring-2 focus:ring-primary focus:border-primary placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
     </div>
   );
