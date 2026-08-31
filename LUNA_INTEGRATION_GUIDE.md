@@ -7,12 +7,21 @@
 ```typescript
 const DEFAULT_ORIGIN = {
   id: 'default-origin-sol-de-maria',
-  address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-  placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-  lat: -16.6786,
-  lng: -49.2552,
+  customerName: 'Sol de Maria',
+  address: 'Av. Circular, 1028 - Qd.50 - Lt.08 - St. Pedro Ludovico, Goiânia - GO, 74823-020',
+  placeId: 'ChIJ1V3toTXyXpMR-1qQO17BY8c',
+  lat: -16.7123299,
+  lng: -49.2511399,
 };
 ```
+
+> **Não copie estes valores para o código.** O bloco acima é ilustrativo: a origem real
+> do sistema vive em `settings/defaultOrigin` no Firestore e é definida pela tela de
+> Configurações do RotaExata. Copiar o literal foi exatamente o que causou o bug de
+> 31/08/2026 — uma origem 3,78 km fora do endereço dela, duplicada em 12 lugares, que
+> chegou a todos os serviços e rotas criados até então. Se o Luna precisa da origem,
+> leia `settings/defaultOrigin`; se ela vier ausente ou sem coordenadas, o RotaExata
+> preenche sozinho.
 
 ## Ao criar um novo SERVIÇO
 

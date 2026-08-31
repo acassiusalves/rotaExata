@@ -10,6 +10,7 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as dotenv from 'dotenv';
+import { FALLBACK_ORIGIN } from '../src/lib/default-origin';
 
 // Carregar variáveis de ambiente
 dotenv.config({ path: '.env.local' });
@@ -42,13 +43,7 @@ if (getApps().length === 0) {
 const db = getFirestore();
 
 // Origem padrão Sol de Maria
-const DEFAULT_ORIGIN = {
-  id: 'default-origin-sol-de-maria',
-  address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-  placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-  lat: -16.6786,
-  lng: -49.2552,
-};
+const DEFAULT_ORIGIN = FALLBACK_ORIGIN;
 
 async function fixLunnaServiceOrigins() {
   console.log('Iniciando correção de origens dos serviços Lunna...\n');
