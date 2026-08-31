@@ -26,6 +26,8 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSavingOrigin, setIsSavingOrigin] = React.useState(false);
   const [defaultOrigin, setDefaultOrigin] = React.useState<PlaceValue | null>(null);
+  const [originLink, setOriginLink] = React.useState('');
+  const [isResolvingLink, setIsResolvingLink] = React.useState(false);
   const { toast } = useToast();
 
   React.useEffect(() => {
@@ -80,6 +82,61 @@ export default function SettingsPage() {
         title: 'Erro',
         description: 'Não foi possível salvar as configurações.',
       });
+    }
+  };
+
+  /**
+   * Resolve um link do Google Maps para uma origem completa.
+   *
+   * Falha sempre com mensagem. O comportamento antigo abortava em silêncio quando
+   * o link não batia com o regex — e como link curto nunca bate, colar o link que o
+   * app do Maps gera não fazia absolutamente nada, sem explicação.
+   */
+  const handleResolveOriginLink = async () => {
+    if (!originLink.trim()) return;
+    setIsResolvingLink(true);
+    try {
+      const res = await fetch('/api/resolve-maps-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: originLink.trim() }),
+      });
+      const dados = await res.json();
+      if (!res.ok) {
+        toast({ variant: 'destructive', title: 'Link não reconhecido', description: dados.error });
+        return;
+      }
+
+      // O SDK do Maps é carregado pelo AutocompleteInput desta mesma tela. Se o
+      // operador colar o link antes de o loader terminar, window.google não existe.
+      if (typeof window === 'undefined' || !window.google?.maps) {
+        toast({ variant: 'destructive', title: 'Mapa ainda carregando', description: 'Aguarde um instante e clique de novo.' });
+        return;
+      }
+
+      const geocoder = new google.maps.Geocoder();
+      const { results } = await geocoder.geocode({ location: { lat: dados.lat, lng: dados.lng } });
+      const encontrado = results?.[0];
+      if (!encontrado) {
+        toast({ variant: 'destructive', title: 'Endereço não encontrado', description: 'O link tem coordenadas, mas não achei o endereço delas.' });
+        return;
+      }
+
+      setDefaultOrigin({
+        id: encontrado.place_id,
+        placeId: encontrado.place_id,
+        address: encontrado.formatted_address,
+        lat: dados.lat,
+        lng: dados.lng,
+        customerName: defaultOrigin?.customerName ?? '',
+        phone: defaultOrigin?.phone ?? '',
+      });
+      toast({ title: 'Origem preenchida pelo link', description: `${encontrado.formatted_address}. Confira e clique em Salvar.` });
+    } catch (erro) {
+      console.error('[settings] falha ao resolver link:', erro);
+      toast({ variant: 'destructive', title: 'Falha ao ler o link', description: 'Tente novamente em instantes.' });
+    } finally {
+      setIsResolvingLink(false);
     }
   };
 
@@ -146,6 +203,31 @@ export default function SettingsPage() {
                 placeholder="Digite o endereço de origem..."
                 disabled={isLoading}
               />
+
+              <div className="space-y-2 pt-2">
+                <Label htmlFor="origin-link">Ou cole o link do Google Maps</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="origin-link"
+                    value={originLink}
+                    onChange={(e) => setOriginLink(e.target.value)}
+                    placeholder="https://maps.app.goo.gl/..."
+                    disabled={isLoading}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleResolveOriginLink}
+                    disabled={isLoading || isResolvingLink || !originLink.trim()}
+                  >
+                    {isResolvingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Usar link'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Aceita o link curto que o app do Google Maps gera ao compartilhar.
+                </p>
+              </div>
+
               {defaultOrigin && (
                 <div className="mt-2 p-3 rounded-lg bg-muted text-sm">
                   <p className="font-medium">{defaultOrigin.customerName || 'Origem'}</p>

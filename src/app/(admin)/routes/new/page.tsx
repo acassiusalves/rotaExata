@@ -415,24 +415,36 @@ export default function NewRoutePage() {
       }
   }
 
+  /**
+   * Resolve o link do Maps pela rota do servidor, que sabe expandir link curto.
+   * O regex antigo exigia @lat,lng na URL e abortava em silêncio quando não achava —
+   * link curto nunca tem coordenada, então colar o link do app não fazia nada.
+   */
   const handleOriginLinkChange = async (url: string) => {
     setNewOriginLink(url);
-    const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    if (!match) return;
+    if (!url.trim()) return;
 
-    const lat = parseFloat(match[1]);
-    const lng = parseFloat(match[2]);
-    
+    const res = await fetch('/api/resolve-maps-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    const dados = await res.json();
+    if (!res.ok) {
+      toast({ variant: 'destructive', title: 'Link não reconhecido', description: dados.error });
+      return;
+    }
+
     toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
 
-    const place = await reverseGeocode(lat, lng);
+    const place = await reverseGeocode(dados.lat, dados.lng);
     if (place) {
       setTempOrigin({
         id: `geocoded-${place.place_id}-${Date.now()}`,
         address: place.formatted_address,
         placeId: place.place_id,
-        lat: lat,
-        lng: lng,
+        lat: dados.lat,
+        lng: dados.lng,
       });
        toast({ title: "Endereço preenchido!", description: "O campo de endereço foi preenchido automaticamente." });
     } else {
