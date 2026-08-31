@@ -33,3 +33,24 @@ export function isValidOrigin(o: PlaceValue | undefined | null): boolean {
     o.lng !== 0
   );
 }
+
+/**
+ * Coordenada da origem errada que circulou pelo sistema até 31/08/2026 — 3,78 km
+ * ao norte do endereço que a acompanhava.
+ *
+ * Mantida só para RECONHECER dados legados e substituí-los: documentos do Firestore
+ * e a lista de origens que ficou salva no localStorage de cada operador. Nunca use
+ * como origem.
+ */
+export const COORD_ORIGEM_LEGADA = { lat: -16.6786, lng: -49.2552 };
+
+/** Reconhece a origem legada errada, para poder trocá-la por FALLBACK_ORIGIN. */
+export function isLegacyBadOrigin(o: { lat?: number; lng?: number } | null | undefined): boolean {
+  return !!(
+    o &&
+    typeof o.lat === 'number' &&
+    typeof o.lng === 'number' &&
+    Math.abs(o.lat - COORD_ORIGEM_LEGADA.lat) < 1e-4 &&
+    Math.abs(o.lng - COORD_ORIGEM_LEGADA.lng) < 1e-4
+  );
+}

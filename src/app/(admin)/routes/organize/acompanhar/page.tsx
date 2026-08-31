@@ -113,7 +113,8 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
-import { FALLBACK_ORIGIN, isValidOrigin } from '@/lib/default-origin';
+import { isValidOrigin } from '@/lib/default-origin';
+import { carregarOrigemPadrao } from '@/lib/default-origin-client';
 
 
 interface RouteData {
@@ -1144,7 +1145,7 @@ export default function OrganizeRoutePage() {
 
               // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
               // Definir origem padrão Sol de Maria
-              const defaultOrigin: PlaceValue = FALLBACK_ORIGIN;
+              const defaultOrigin: PlaceValue = await carregarOrigemPadrao();
 
               // Log para debug - ver quais origens estão disponíveis
               console.log('🔍 [useEffect:loadRouteData] Verificando origens:', {

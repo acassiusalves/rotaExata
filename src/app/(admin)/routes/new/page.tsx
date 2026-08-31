@@ -61,7 +61,8 @@ import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { FALLBACK_ORIGIN } from '@/lib/default-origin';
+import { FALLBACK_ORIGIN, isLegacyBadOrigin } from '@/lib/default-origin';
+import { useDefaultOrigin } from '@/hooks/use-default-origin';
 
 const initialSavedOrigins = [
   {
@@ -81,6 +82,16 @@ const initialSavedOrigins = [
     },
   },
 ];
+
+/**
+ * A lista de origens fica salva no localStorage do operador, então a origem errada
+ * sobrevive no navegador mesmo depois de corrigida no código e no Firestore.
+ * Troca as entradas com a coordenada antiga pela correta e preserva as que o
+ * próprio operador cadastrou.
+ */
+function sanitizarOrigensSalvas(origens: typeof initialSavedOrigins): typeof initialSavedOrigins {
+  return origens.map((o) => (isLegacyBadOrigin(o?.value) ? { ...o, value: FALLBACK_ORIGIN } : o));
+}
 
 const initialManualServiceState = {
   customerName: '',
@@ -137,7 +148,7 @@ export default function NewRoutePage() {
     const stored = localStorage.getItem('savedOrigins');
     if (stored) {
       try {
-        return JSON.parse(stored);
+        return sanitizarOrigensSalvas(JSON.parse(stored));
       } catch (e) {
         console.error('Erro ao carregar origens salvas:', e);
         return initialSavedOrigins;
@@ -152,6 +163,15 @@ export default function NewRoutePage() {
     }
     return null;
   });
+  // Origem padrão vinda de settings/defaultOrigin. Quando chega, substitui a origem
+  // em uso apenas se o operador ainda não tiver escolhido outra.
+  const { origin: origemPadrao } = useDefaultOrigin();
+  React.useEffect(() => {
+    setOrigin((atual) =>
+      !atual || atual.id === FALLBACK_ORIGIN.id || isLegacyBadOrigin(atual) ? origemPadrao : atual,
+    );
+  }, [origemPadrao]);
+
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
   const [routeTime, setRouteTime] = React.useState('18:10');
