@@ -113,6 +113,8 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
+import { isValidOrigin } from '@/lib/default-origin';
+import { carregarOrigemPadrao } from '@/lib/default-origin-client';
 
 
 interface RouteData {
@@ -1143,13 +1145,7 @@ export default function OrganizeRoutePage() {
 
               // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
               // Definir origem padrão Sol de Maria
-              const defaultOrigin: PlaceValue = {
-                id: 'default-origin-sol-de-maria',
-                address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-                placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-                lat: -16.6786,
-                lng: -49.2552,
-              };
+              const defaultOrigin: PlaceValue = await carregarOrigemPadrao();
 
               // Log para debug - ver quais origens estão disponíveis
               console.log('🔍 [useEffect:loadRouteData] Verificando origens:', {
@@ -1159,10 +1155,6 @@ export default function OrganizeRoutePage() {
               });
 
               // Verificar se a origem do Firestore é válida (tem coordenadas válidas)
-              const isValidOrigin = (o: PlaceValue | undefined | null): boolean => {
-                return !!(o && typeof o.lat === 'number' && typeof o.lng === 'number' && o.lat !== 0 && o.lng !== 0);
-              };
-
               let origin: PlaceValue;
               if (isValidOrigin(routeData.origin)) {
                 origin = routeData.origin;

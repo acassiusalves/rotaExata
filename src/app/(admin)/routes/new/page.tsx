@@ -61,18 +61,14 @@ import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { FALLBACK_ORIGIN, isLegacyBadOrigin } from '@/lib/default-origin';
+import { useDefaultOrigin } from '@/hooks/use-default-origin';
 
 const initialSavedOrigins = [
   {
     id: 'origin-1',
     name: 'Sol de Maria',
-    value: {
-      id: 'saved-origin-1',
-      address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-      placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-      lat: -16.6786,
-      lng: -49.2552,
-    },
+    value: FALLBACK_ORIGIN,
   },
   {
     id: 'origin-2',
@@ -86,6 +82,16 @@ const initialSavedOrigins = [
     },
   },
 ];
+
+/**
+ * A lista de origens fica salva no localStorage do operador, então a origem errada
+ * sobrevive no navegador mesmo depois de corrigida no código e no Firestore.
+ * Troca as entradas com a coordenada antiga pela correta e preserva as que o
+ * próprio operador cadastrou.
+ */
+function sanitizarOrigensSalvas(origens: typeof initialSavedOrigins): typeof initialSavedOrigins {
+  return origens.map((o) => (isLegacyBadOrigin(o?.value) ? { ...o, value: FALLBACK_ORIGIN } : o));
+}
 
 const initialManualServiceState = {
   customerName: '',
@@ -142,7 +148,7 @@ export default function NewRoutePage() {
     const stored = localStorage.getItem('savedOrigins');
     if (stored) {
       try {
-        return JSON.parse(stored);
+        return sanitizarOrigensSalvas(JSON.parse(stored));
       } catch (e) {
         console.error('Erro ao carregar origens salvas:', e);
         return initialSavedOrigins;
@@ -157,6 +163,15 @@ export default function NewRoutePage() {
     }
     return null;
   });
+  // Origem padrão vinda de settings/defaultOrigin. Quando chega, substitui a origem
+  // em uso apenas se o operador ainda não tiver escolhido outra.
+  const { origin: origemPadrao } = useDefaultOrigin();
+  React.useEffect(() => {
+    setOrigin((atual) =>
+      !atual || atual.id === FALLBACK_ORIGIN.id || isLegacyBadOrigin(atual) ? origemPadrao : atual,
+    );
+  }, [origemPadrao]);
+
   const [stops, setStops] = React.useState<PlaceValue[]>([]);
   const [routeDate, setRouteDate] = React.useState<Date | undefined>(undefined);
   const [routeTime, setRouteTime] = React.useState('18:10');
@@ -400,24 +415,36 @@ export default function NewRoutePage() {
       }
   }
 
+  /**
+   * Resolve o link do Maps pela rota do servidor, que sabe expandir link curto.
+   * O regex antigo exigia @lat,lng na URL e abortava em silêncio quando não achava —
+   * link curto nunca tem coordenada, então colar o link do app não fazia nada.
+   */
   const handleOriginLinkChange = async (url: string) => {
     setNewOriginLink(url);
-    const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    if (!match) return;
+    if (!url.trim()) return;
 
-    const lat = parseFloat(match[1]);
-    const lng = parseFloat(match[2]);
-    
+    const res = await fetch('/api/resolve-maps-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim() }),
+    });
+    const dados = await res.json();
+    if (!res.ok) {
+      toast({ variant: 'destructive', title: 'Link não reconhecido', description: dados.error });
+      return;
+    }
+
     toast({ title: "Analisando link...", description: "Buscando endereço a partir das coordenadas." });
 
-    const place = await reverseGeocode(lat, lng);
+    const place = await reverseGeocode(dados.lat, dados.lng);
     if (place) {
       setTempOrigin({
         id: `geocoded-${place.place_id}-${Date.now()}`,
         address: place.formatted_address,
         placeId: place.place_id,
-        lat: lat,
-        lng: lng,
+        lat: dados.lat,
+        lng: dados.lng,
       });
        toast({ title: "Endereço preenchido!", description: "O campo de endereço foi preenchido automaticamente." });
     } else {
