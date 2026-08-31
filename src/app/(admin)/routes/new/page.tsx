@@ -61,18 +61,13 @@ import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/client';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { FALLBACK_ORIGIN } from '@/lib/default-origin';
 
 const initialSavedOrigins = [
   {
     id: 'origin-1',
     name: 'Sol de Maria',
-    value: {
-      id: 'saved-origin-1',
-      address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-      placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-      lat: -16.6786,
-      lng: -49.2552,
-    },
+    value: FALLBACK_ORIGIN,
   },
   {
     id: 'origin-2',

@@ -119,6 +119,7 @@ import {
   removeStopWithSameIdentity,
   upsertStopInCollection,
 } from '@/lib/route-stop-utils';
+import { FALLBACK_ORIGIN, isValidOrigin } from '@/lib/default-origin';
 
 
 interface RouteData {
@@ -1224,20 +1225,10 @@ export default function ServiceAcompanharPage() {
         });
 
         // Definir origem padrão Sol de Maria
-        const defaultOrigin: PlaceValue = {
-          id: 'default-origin-sol-de-maria',
-          address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-          placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-          lat: -16.6786,
-          lng: -49.2552,
-        };
+        const defaultOrigin: PlaceValue = FALLBACK_ORIGIN;
 
         // Usar origem do serviço ou origem padrão
-        const serviceOrigin = serviceData.origin &&
-                              typeof serviceData.origin.lat === 'number' &&
-                              typeof serviceData.origin.lng === 'number' &&
-                              serviceData.origin.lat !== 0 &&
-                              serviceData.origin.lng !== 0
+        const serviceOrigin = isValidOrigin(serviceData.origin)
           ? serviceData.origin
           : defaultOrigin;
 
@@ -1365,13 +1356,7 @@ export default function ServiceAcompanharPage() {
 
               // Atualizar routeData com origem do Firestore (ou usar origem padrão do sistema)
               // Definir origem padrão Sol de Maria
-              const defaultOrigin: PlaceValue = {
-                id: 'default-origin-sol-de-maria',
-                address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-                placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-                lat: -16.6786,
-                lng: -49.2552,
-              };
+              const defaultOrigin: PlaceValue = FALLBACK_ORIGIN;
 
               // Log para debug - ver quais origens estão disponíveis
               console.log('🔍 [useEffect:loadRouteData] Verificando origens:', {
@@ -1381,10 +1366,6 @@ export default function ServiceAcompanharPage() {
               });
 
               // Verificar se a origem do Firestore é válida (tem coordenadas válidas)
-              const isValidOrigin = (o: PlaceValue | undefined | null): boolean => {
-                return !!(o && typeof o.lat === 'number' && typeof o.lng === 'number' && o.lat !== 0 && o.lng !== 0);
-              };
-
               let origin: PlaceValue;
               // Para serviços do Lunna, priorizar origem do parsedData (que já tem o default Sol de Maria)
               // Para rotas normais, usar origem do Firestore

@@ -4,6 +4,7 @@ import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestor
 import type { LunnaOrder, LunnaClient, PlaceValue, RouteInfo, LunnaOrderItem, LunnaService } from '@/lib/types';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
 import { logLunnaOrderSyncedAdmin, logActivityAdmin } from '@/lib/firebase/activity-log-admin';
+import { FALLBACK_ORIGIN } from '@/lib/default-origin';
 
 // CORS headers para permitir chamadas do Luna
 const corsHeaders = {
@@ -558,13 +559,7 @@ export async function POST(request: NextRequest) {
     const serviceCode = await generateLunnaServiceCode();
 
     // 5.1 Buscar origem padrão do sistema (configurada em settings ou usar padrão fixo)
-    let defaultOrigin: PlaceValue = {
-      id: 'default-origin-sol-de-maria',
-      address: 'Avenida Circular, 1028, Setor Pedro Ludovico, Goiânia-GO',
-      placeId: 'ChIJFT_4_9XFUpQRy_14vCVa2po',
-      lat: -16.6786,
-      lng: -49.2552,
-    };
+    let defaultOrigin: PlaceValue = FALLBACK_ORIGIN;
 
     // Tentar buscar origem personalizada do Firestore (se existir)
     try {
