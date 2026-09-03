@@ -1419,17 +1419,34 @@ export default function RouteAcompanharPage() {
                     );
 
                     if (allStops.length < origLen || cleanedUnassigned.length < (routeData.unassignedStops || []).length) {
+                      const [cleanupResult] = await saveExistingRoutePlansAtomically([{
+                        routeId: parsedData.currentRouteId!,
+                        baseStops: getPersistedStops(parsedData.currentRouteId!, routeData.stops || []),
+                        plannedStops: allStops,
+                      }]);
+                      allStops = cleanupResult.stops;
+                      rememberPersistedStops(cleanupResult.routeId, cleanupResult.stops);
+                      try {
+                        await notifySavedRouteChanges(cleanupResult);
+                      } catch (notifyError) {
+                        console.error('⚠️ [loadRouteData] Erro ao notificar motorista após limpeza:', notifyError);
+                      }
                       await updateDoc(doc(db, 'routes', parsedData.currentRouteId!), {
-                        stops: allStops,
                         unassignedStops: cleanedUnassigned,
                         updatedAt: serverTimestamp(),
                       });
-                      rememberPersistedStops(parsedData.currentRouteId!, allStops);
                       routeData.unassignedStops = cleanedUnassigned;
                       console.log(`✅ [loadRouteData] Removidos ${origLen - allStops.length} stop(s) desvinculado(s) da rota`);
                     }
                   }
                 } catch (err) {
+                  if (err instanceof RouteStructureConflictError) {
+                    toast({
+                      variant: 'destructive',
+                      title: 'A rota mudou durante a edição',
+                      description: 'Recarregue a rota para preservar as alterações mais recentes.',
+                    });
+                  }
                   console.error('❌ [loadRouteData] Erro ao verificar pedidos desvinculados:', err);
                 }
               }
@@ -1628,22 +1645,47 @@ export default function RouteAcompanharPage() {
 
                   if (unlinkedOrders.size > 0) {
                     console.log(`🧹 [loadRouteData:service] Pedidos desvinculados:`, Array.from(unlinkedOrders));
-                    for (const sr of serviceExistingRoutes!) {
-                      const origLen = sr.stops.length;
-                      sr.stops = sr.stops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
-                      if (sr.stops.length < origLen) {
-                        await updateDoc(doc(db, 'routes', sr.id), {
-                          stops: sr.stops,
-                          updatedAt: serverTimestamp(),
-                        });
-                        rememberPersistedStops(sr.id, sr.stops);
-                        console.log(`✅ [loadRouteData:service] Removidos ${origLen - sr.stops.length} stop(s) da rota ${sr.code}`);
+                    const cleanupEntries = serviceExistingRoutes!
+                      .map(route => ({
+                        route,
+                        plannedStops: route.stops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber)),
+                      }))
+                      .filter(entry => entry.plannedStops.length < entry.route.stops.length);
+
+                    if (cleanupEntries.length > 0) {
+                      const cleanupResults = await saveExistingRoutePlansAtomically(
+                        cleanupEntries.map(entry => ({
+                          routeId: entry.route.id,
+                          baseStops: getPersistedStops(entry.route.id, entry.route.stops),
+                          plannedStops: entry.plannedStops,
+                        })),
+                      );
+                      cleanupResults.forEach((result, index) => {
+                        const entry = cleanupEntries[index];
+                        const removedCount = entry.route.stops.length - result.stops.length;
+                        entry.route.stops = result.stops;
+                        rememberPersistedStops(result.routeId, result.stops);
+                        console.log(`✅ [loadRouteData:service] Removidos ${removedCount} stop(s) da rota ${entry.route.code}`);
+                      });
+                      for (const result of cleanupResults) {
+                        try {
+                          await notifySavedRouteChanges(result);
+                        } catch (notifyError) {
+                          console.error('⚠️ [loadRouteData:service] Erro ao notificar motorista após limpeza:', notifyError);
+                        }
                       }
                     }
                     // Atualizar sets
                     unlinkedOrders.forEach(on => assignedOrderNumbers.delete(on));
                   }
                 } catch (err) {
+                  if (err instanceof RouteStructureConflictError) {
+                    toast({
+                      variant: 'destructive',
+                      title: 'A rota mudou durante a edição',
+                      description: 'Recarregue a rota para preservar as alterações mais recentes.',
+                    });
+                  }
                   console.error('❌ [loadRouteData:service] Erro ao verificar desvinculados:', err);
                 }
               }
@@ -2065,7 +2107,7 @@ export default function RouteAcompanharPage() {
     };
 
     loadRouteData();
-  }, [routeId, router, toast, rememberPersistedStops]);
+  }, [routeId, router, toast, rememberPersistedStops, getPersistedStops]);
 
   // Real-time listener: sincronizar nome da rota
   React.useEffect(() => {
@@ -2631,15 +2673,16 @@ export default function RouteAcompanharPage() {
       if (stopToEdit.routeKey === 'unassigned') {
         const updatedStops = [...unassignedStops];
         const resolvedIndex = findStopIndexByIdentity(updatedStops, stopToEdit.stop);
-        const targetIndex = resolvedIndex !== -1 ? resolvedIndex : stopToEdit.index;
-        if (targetIndex >= 0 && targetIndex < updatedStops.length) {
-          updatedStops[targetIndex] = updatedStop;
+        if (resolvedIndex === -1) {
+          toast({
+            variant: 'destructive',
+            title: 'A parada mudou durante a edição',
+            description: 'Recarregue a rota e abra novamente a parada antes de salvar.',
+          });
+          return;
         }
-        const dedupedUpdatedStops = dedupeStops(
-          targetIndex >= 0 && targetIndex < updatedStops.length
-            ? updatedStops
-            : upsertStopInCollection(updatedStops, updatedStop)
-        );
+        updatedStops[resolvedIndex] = updatedStop;
+        const dedupedUpdatedStops = dedupeStops(updatedStops);
         setUnassignedStops(dedupedUpdatedStops);
 
         // Persistir no sessionStorage para que sobreviva a recarregamentos
@@ -2687,47 +2730,65 @@ export default function RouteAcompanharPage() {
 
         const updatedStops = [...targetRoute.stops];
         const resolvedIndex = findStopIndexByIdentity(updatedStops, stopToEdit.stop);
-        const targetIndex = resolvedIndex !== -1 ? resolvedIndex : stopToEdit.index;
-        if (targetIndex >= 0 && targetIndex < updatedStops.length) {
-          updatedStops[targetIndex] = updatedStop;
+        if (resolvedIndex === -1) {
+          toast({
+            variant: 'destructive',
+            title: 'A parada mudou durante a edição',
+            description: 'Recarregue a rota e abra novamente a parada antes de salvar.',
+          });
+          return;
         }
-        const dedupedUpdatedStops = dedupeStops(
-          targetIndex >= 0 && targetIndex < updatedStops.length
-            ? updatedStops
-            : upsertStopInCollection(updatedStops, updatedStop)
-        );
+        updatedStops[resolvedIndex] = updatedStop;
+        const dedupedUpdatedStops = dedupeStops(updatedStops);
 
         // Recalculate route
         const newRouteInfo = await computeRoute(routeData.origin, dedupedUpdatedStops);
-        setRoute(stopToEdit.routeKey, prev => prev ? {
-          ...prev,
-          ...(newRouteInfo ?? {}),
-          stops: dedupedUpdatedStops,
-          color: targetRoute.color,
-          visible: targetRoute.visible
-        } : null);
-
         const firestoreRouteId = getFirestoreRouteId(stopToEdit.routeKey);
+        const metrics: RouteMetrics | undefined = newRouteInfo ? {
+          encodedPolyline: newRouteInfo.encodedPolyline,
+          distanceMeters: newRouteInfo.distanceMeters,
+          duration: newRouteInfo.duration,
+        } : undefined;
+
         if (firestoreRouteId) {
           try {
-            const routeRef = doc(db, 'routes', firestoreRouteId);
-            await updateDoc(routeRef, {
-              stops: dedupedUpdatedStops,
-              ...(newRouteInfo ? {
-                encodedPolyline: newRouteInfo.encodedPolyline,
-                distanceMeters: newRouteInfo.distanceMeters,
-                duration: newRouteInfo.duration,
-              } : {}),
-              updatedAt: serverTimestamp(),
-            });
+            const [result] = await saveExistingRoutePlansAtomically([{
+              routeId: firestoreRouteId,
+              baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
+              plannedStops: dedupedUpdatedStops,
+              ...(metrics ? { metrics } : {}),
+            }]);
+            applySavedRouteResult(stopToEdit.routeKey, result, metrics);
+            try {
+              await notifySavedRouteChanges(result);
+            } catch (notifyError) {
+              console.error('⚠️ [handleSaveEditedService] Erro ao notificar motorista:', notifyError);
+            }
           } catch (error) {
+            if (error instanceof RouteStructureConflictError) {
+              toast({
+                variant: 'destructive',
+                title: 'A rota mudou durante a edição',
+                description: 'Recarregue a rota e abra novamente a parada antes de salvar.',
+              });
+              return;
+            }
             console.error('Erro ao atualizar rota no Firestore:', error);
             toast({
               variant: 'destructive',
-              title: 'Aviso',
-              description: 'O ponto foi atualizado localmente, mas pode não sincronizar com o app do motorista.',
+              title: 'Erro ao salvar',
+              description: 'O ponto não foi atualizado. Tente novamente.',
             });
+            return;
           }
+        } else {
+          setRoute(stopToEdit.routeKey, prev => prev ? {
+            ...prev,
+            ...(newRouteInfo ?? {}),
+            stops: dedupedUpdatedStops,
+            color: targetRoute.color,
+            visible: targetRoute.visible
+          } : null);
         }
 
         toast({
@@ -2841,7 +2902,6 @@ export default function RouteAcompanharPage() {
       } else {
         // Add to route A or B and recalculate
         const targetRoute = selectedRouteForNewService === 'A' ? routeA : routeB;
-        const setter = selectedRouteForNewService === 'A' ? setRouteA : setRouteB;
 
         console.log('🛤️ [handleAddService] Rota alvo:', {
           routeKey: selectedRouteForNewService,
@@ -2862,7 +2922,6 @@ export default function RouteAcompanharPage() {
 
         const newStops = dedupeStops([...targetRoute.stops, newStop]);
         console.log('📝 [handleAddService] Nova lista de stops:', newStops.length, 'paradas');
-        setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
 
         // Recalculate route
         console.log('🔄 [handleAddService] Recalculando rota com', newStops.length, 'paradas');
@@ -2874,51 +2933,61 @@ export default function RouteAcompanharPage() {
           hasPolyline: !!newRouteInfo?.encodedPolyline,
         });
 
-        if (newRouteInfo) {
-          setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops, color: targetRoute.color, visible: targetRoute.visible } : null);
+        const firestoreRouteId = getFirestoreRouteId(selectedRouteForNewService);
+        const metrics: RouteMetrics | undefined = newRouteInfo ? {
+          encodedPolyline: newRouteInfo.encodedPolyline,
+          distanceMeters: newRouteInfo.distanceMeters,
+          duration: newRouteInfo.duration,
+        } : undefined;
 
-          // If this is an existing route, update Firestore so driver app receives the update
-          console.log('💾 [handleAddService] Verificando se deve atualizar Firestore:', {
-            isExistingRoute: routeData.isExistingRoute,
-            currentRouteId: routeData.currentRouteId,
-          });
-
-          if (routeData.isExistingRoute && routeData.currentRouteId) {
-            console.log('💾 [handleAddService] ATUALIZANDO FIRESTORE - Route ID:', routeData.currentRouteId);
+        if (firestoreRouteId) {
+          try {
+            const [result] = await saveExistingRoutePlansAtomically([{
+              routeId: firestoreRouteId,
+              baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
+              plannedStops: newStops,
+              ...(metrics ? { metrics } : {}),
+            }]);
+            applySavedRouteResult(selectedRouteForNewService, result, metrics);
             try {
-              const routeRef = doc(db, 'routes', routeData.currentRouteId);
-              const updateData = {
-                stops: newStops,
-                encodedPolyline: newRouteInfo.encodedPolyline,
-                distanceMeters: newRouteInfo.distanceMeters,
-                duration: newRouteInfo.duration,
-              };
-              console.log('💾 [handleAddService] Dados para update:', {
-                stopsCount: updateData.stops.length,
-                hasPolyline: !!updateData.encodedPolyline,
-                distance: updateData.distanceMeters,
-                duration: updateData.duration,
-              });
-              await updateDoc(routeRef, updateData);
-              console.log('✅ [handleAddService] Firestore ATUALIZADO com sucesso!');
-            } catch (error) {
-              console.error('❌ [handleAddService] Erro ao atualizar rota no Firestore:', error);
+              await notifySavedRouteChanges(result);
+            } catch (notifyError) {
+              console.error('⚠️ [handleAddService] Erro ao notificar motorista:', notifyError);
+            }
+          } catch (error) {
+            if (error instanceof RouteStructureConflictError) {
               toast({
                 variant: 'destructive',
-                title: 'Aviso',
-                description: 'O ponto foi adicionado localmente, mas pode não sincronizar com o app do motorista.',
+                title: 'A rota mudou durante a edição',
+                description: 'Recarregue a rota e repita a adição para preservar as alterações mais recentes.',
               });
+              return;
             }
-          } else {
-            console.log('ℹ️ [handleAddService] NÃO é rota existente, não atualizando Firestore');
+            console.error('❌ [handleAddService] Erro ao atualizar rota no Firestore:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Erro ao salvar',
+              description: 'O ponto não foi adicionado. Tente novamente.',
+            });
+            return;
           }
         } else {
-          console.error('❌ [handleAddService] computeRoute retornou null/undefined');
+          setRoute(selectedRouteForNewService, prev => prev ? {
+            ...prev,
+            ...(newRouteInfo ?? {}),
+            stops: newStops,
+            encodedPolyline: newRouteInfo?.encodedPolyline || '',
+            color: targetRoute.color,
+            visible: targetRoute.visible,
+          } : null);
+          console.log('ℹ️ [handleAddService] Rota ainda não persistida; atualização somente local');
         }
+
+        if (!newRouteInfo) console.error('❌ [handleAddService] computeRoute retornou null/undefined');
 
         toast({
           title: 'Serviço Adicionado!',
-          description: `O serviço foi adicionado à ${routeNames[selectedRouteForNewService]}.${routeData.isExistingRoute ? ' O motorista receberá a atualização.' : ''}`,
+          description: `O serviço foi adicionado à ${routeNames[selectedRouteForNewService]}.${firestoreRouteId ? ' O motorista receberá a atualização.' : ''}`,
         });
       }
 
@@ -3025,16 +3094,13 @@ export default function RouteAcompanharPage() {
         return;
       }
 
-      // Remove from unassigned by matching the stop ID
-      setUnassignedStops(prev => removeStopWithSameIdentity(prev, stopToMove));
-
       // Add to target route
       const newTargetStops = targetRoute
         ? dedupeStops([...targetRoute.stops, stopToMove])
         : [stopToMove];
+      const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
       console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
 
-      // Atualizar rota temporariamente (será substituída após recalcular)
       const tempRouteData: RouteInfo = {
         stops: newTargetStops,
         distanceMeters: targetRoute?.distanceMeters || 0,
@@ -3043,7 +3109,6 @@ export default function RouteAcompanharPage() {
         color: targetRoute?.color || (overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : '#fa9200'),
         visible: targetRoute?.visible ?? true,
       };
-      setRoute(overRouteKey, () => tempRouteData);
 
       // Recalculate route
       console.log('🔄 [handleDragEnd] Recalculando rota...');
@@ -3054,104 +3119,79 @@ export default function RouteAcompanharPage() {
           duration: newRouteInfo.duration,
           hasPolyline: !!newRouteInfo.encodedPolyline,
         });
-
-        setRoute(overRouteKey, prev => prev ? {
-          ...prev,
-          ...newRouteInfo,
-          stops: newTargetStops,
-          color: targetRoute?.color || (overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200'),
-          visible: targetRoute?.visible ?? true
-        } : {
-          ...newRouteInfo,
-          stops: newTargetStops,
-          color: overRouteKey === 'A' ? '#e60000' : overRouteKey === 'B' ? '#1fd634' : dynamicRoutes.find(r => r.key === overRouteKey)?.color || '#fa9200',
-          visible: true
-        });
-
-        // Determinar o Firestore ID da rota alvo
-        let firestoreRouteId: string | null = null;
-        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
-          firestoreRouteId = routeData.currentRouteId;
-        } else if (routeData.isService) {
-          // Rotas de serviço: A/B têm serviceRouteIds, dinâmicas têm firestoreId
-          if (overRouteKey === 'A' || overRouteKey === 'B') {
-            firestoreRouteId = serviceRouteIds[overRouteKey as 'A' | 'B'];
-          } else {
-            const dynRoute = dynamicRoutes.find(r => r.key === overRouteKey);
-            firestoreRouteId = dynRoute?.firestoreId || null;
-          }
-        }
-
-        if (firestoreRouteId) {
-          console.log('💾 [handleDragEnd] SALVANDO NO FIRESTORE - Route ID:', firestoreRouteId);
-          try {
-            const routeRef = doc(db, 'routes', firestoreRouteId);
-            // Calcular unassignedStops atualizado (removendo o ponto que foi movido)
-            const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
-
-            await updateDoc(routeRef, {
-              stops: newTargetStops,
-              encodedPolyline: newRouteInfo.encodedPolyline,
-              distanceMeters: newRouteInfo.distanceMeters,
-              duration: newRouteInfo.duration,
-              updatedAt: serverTimestamp(),
-            });
-            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
-            console.log('✅ [handleDragEnd] Firestore ATUALIZADO com sucesso! UnassignedStops restantes:', updatedUnassignedStops.length);
-          } catch (error) {
-            console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
-            toast({
-              variant: 'destructive',
-              title: 'Aviso',
-              description: 'O ponto foi adicionado localmente, mas pode não sincronizar com o app do motorista.',
-            });
-          }
-        } else {
-          console.log('ℹ️ [handleDragEnd] Sem Firestore ID para salvar imediatamente:', {
-            isExistingRoute: routeData.isExistingRoute,
-            isService: routeData.isService,
-            currentRouteId: routeData.currentRouteId,
-            overRouteKey,
-          });
-        }
       } else {
         console.error('❌ [handleDragEnd] computeRoute retornou null - salvando sem polyline');
-        // Mesmo sem polyline, salvar no Firestore para manter consistência
-        // Reutilizar firestoreRouteId já determinado acima
-        let fallbackRouteId: string | null = null;
-        if (routeData.isExistingRoute && routeData.currentRouteId && overRouteKey === 'A') {
-          fallbackRouteId = routeData.currentRouteId;
-        } else if (routeData.isService) {
-          if (overRouteKey === 'A' || overRouteKey === 'B') {
-            fallbackRouteId = serviceRouteIds[overRouteKey as 'A' | 'B'];
-          } else {
-            const dynRoute = dynamicRoutes.find(r => r.key === overRouteKey);
-            fallbackRouteId = dynRoute?.firestoreId || null;
-          }
-        }
+      }
 
-        if (fallbackRouteId) {
+      const firestoreRouteId = getFirestoreRouteId(overRouteKey);
+      const metrics: RouteMetrics | undefined = newRouteInfo ? {
+        encodedPolyline: newRouteInfo.encodedPolyline,
+        distanceMeters: newRouteInfo.distanceMeters,
+        duration: newRouteInfo.duration,
+      } : undefined;
+
+      try {
+        if (firestoreRouteId) {
           try {
-            const routeRef = doc(db, 'routes', fallbackRouteId);
-            const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
-
-            await updateDoc(routeRef, {
-              stops: newTargetStops,
-              updatedAt: serverTimestamp(),
-            });
-            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
-            console.log('✅ [handleDragEnd] Firestore ATUALIZADO (sem polyline)');
+            const [result] = await saveExistingRoutePlansAtomically([{
+              routeId: firestoreRouteId,
+              baseStops: getPersistedStops(firestoreRouteId, targetRoute?.stops || []),
+              plannedStops: newTargetStops,
+              ...(metrics ? { metrics } : {}),
+            }]);
+            applySavedRouteResult(overRouteKey, result, metrics);
+            try {
+              await notifySavedRouteChanges(result);
+            } catch (notifyError) {
+              console.error('⚠️ [handleDragEnd] Erro ao notificar motorista:', notifyError);
+            }
           } catch (error) {
-            console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
+            if (error instanceof RouteStructureConflictError) {
+              toast({
+                variant: 'destructive',
+                title: 'A rota mudou durante a edição',
+                description: 'Recarregue a rota e repita a adição para preservar as alterações mais recentes.',
+              });
+              return;
+            }
+            throw error;
+          }
+        } else {
+          setRoute(overRouteKey, prev => prev ? {
+            ...prev,
+            ...(newRouteInfo ?? {}),
+            stops: newTargetStops,
+            encodedPolyline: newRouteInfo?.encodedPolyline || '',
+            color: targetRoute?.color || tempRouteData.color,
+            visible: targetRoute?.visible ?? true,
+          } : {
+            ...tempRouteData,
+            ...(newRouteInfo ?? {}),
+          });
+        }
+
+        setUnassignedStops(updatedUnassignedStops);
+        if (firestoreRouteId) {
+          try {
+            await syncUnassignedStopsInFirestore(updatedUnassignedStops);
+          } catch (syncError) {
+            console.error('❌ [handleDragEnd] Erro ao salvar unassignedStops:', syncError);
           }
         }
+      } catch (error) {
+        console.error('❌ [handleDragEnd] Erro ao atualizar Firestore:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao salvar',
+          description: 'O serviço não foi adicionado à rota. Tente novamente.',
+        });
+        return;
       }
 
       const routeName = getRouteDisplayName(overRouteKey);
-      const hasFirestoreId = !!(routeData.isExistingRoute && overRouteKey === 'A') || !!(routeData.isService && (serviceRouteIds[overRouteKey as 'A' | 'B'] || dynamicRoutes.find(r => r.key === overRouteKey)?.firestoreId));
       toast({
         title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.${hasFirestoreId ? ' Salvo automaticamente.' : ''}`,
+        description: `O serviço foi adicionado à ${routeName}.${firestoreRouteId ? ' Salvo automaticamente.' : ''}`,
       });
 
       return;
@@ -3699,14 +3739,34 @@ export default function RouteAcompanharPage() {
         if (existingDraftId) {
             // Atualiza o draft existente em vez de criar um novo documento duplicado.
             console.log(`📝 [handleDispatchRoute] Atualizando draft existente ${existingDraftId} para dispatched`);
-            const routeRef = doc(db, 'routes', existingDraftId);
-            await updateDoc(routeRef, routeDocData);
+            const metrics: RouteMetrics = {
+              encodedPolyline: routeToSave.encodedPolyline,
+              distanceMeters: routeToSave.distanceMeters,
+              duration: routeToSave.duration,
+            };
+            const [result] = await saveExistingRoutePlansAtomically([{
+              routeId: existingDraftId,
+              baseStops: getPersistedStops(existingDraftId, routeToSave.stops),
+              plannedStops: routeToSave.stops,
+              metrics,
+            }]);
+            applySavedRouteResult(routeKey, result, metrics);
+
+            const routeMetadata = { ...routeDocData };
+            delete routeMetadata.stops;
+            await updateDoc(doc(db, 'routes', existingDraftId), routeMetadata);
+            try {
+              await notifySavedRouteChanges(result);
+            } catch (notifyError) {
+              console.error('⚠️ [handleDispatchRoute] Erro ao notificar motorista:', notifyError);
+            }
             routeRefId = existingDraftId;
         } else {
             // Criar novo documento (fluxo não-serviço ou sem draft existente)
             routeDocData.createdAt = serverTimestamp();
             const routeRef = await addDoc(collection(db, "routes"), routeDocData);
             routeRefId = routeRef.id;
+            rememberPersistedStops(routeRefId, routeToSave.stops);
         }
 
         // Se é um serviço, atualizar o serviço com o ID da rota
@@ -3753,6 +3813,14 @@ export default function RouteAcompanharPage() {
         }
 
     } catch (error) {
+        if (error instanceof RouteStructureConflictError) {
+          toast({
+            variant: 'destructive',
+            title: 'A rota mudou durante a edição',
+            description: 'Recarregue a rota antes de despachá-la para preservar as alterações mais recentes.',
+          });
+          return;
+        }
         console.error("Error saving route:", error);
         toast({
             variant: 'destructive',
