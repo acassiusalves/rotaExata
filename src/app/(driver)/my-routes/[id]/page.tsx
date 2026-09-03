@@ -458,37 +458,41 @@ export default function RouteDetailsPage() {
 
       // Registrar no activity log
       const updatedStop = result.updatedStop;
-      if (updatedStop.deliveryStatus === 'completed') {
-        await logPointCompleted({
-          userId: user.uid,
-          userName: user.email || route.driverInfo?.name || 'Motorista',
-          pointId: updatedStop.id || updatedStop.placeId,
-          pointCode: updatedStop.pointCode,
-          routeId: routeId,
-          routeCode: route.code || 'Rota',
-          serviceId: route.serviceId,
-          serviceCode: route.serviceCode,
-          photoUrl: updatedStop.photoUrl,
-          address: updatedStop.address,
-          customerName: updatedStop.customerName,
-          notes: updatedStop.notes,
-        });
-      } else if (updatedStop.deliveryStatus === 'failed') {
-        await logPointFailed({
-          userId: user.uid,
-          userName: user.email || route.driverInfo?.name || 'Motorista',
-          pointId: updatedStop.id || updatedStop.placeId,
-          pointCode: updatedStop.pointCode,
-          routeId: routeId,
-          routeCode: route.code || 'Rota',
-          serviceId: route.serviceId,
-          serviceCode: route.serviceCode,
-          failureReason: updatedStop.failureReason,
-          wentToLocation: updatedStop.wentToLocation,
-          attemptPhotoUrl: updatedStop.attemptPhotoUrl,
-          address: updatedStop.address,
-          customerName: updatedStop.customerName,
-        });
+      try {
+        if (updatedStop.deliveryStatus === 'completed') {
+          await logPointCompleted({
+            userId: user.uid,
+            userName: user.email || route.driverInfo?.name || 'Motorista',
+            pointId: updatedStop.id || updatedStop.placeId,
+            pointCode: updatedStop.pointCode,
+            routeId: routeId,
+            routeCode: route.code || 'Rota',
+            serviceId: route.serviceId,
+            serviceCode: route.serviceCode,
+            photoUrl: updatedStop.photoUrl,
+            address: updatedStop.address,
+            customerName: updatedStop.customerName,
+            notes: updatedStop.notes,
+          });
+        } else if (updatedStop.deliveryStatus === 'failed') {
+          await logPointFailed({
+            userId: user.uid,
+            userName: user.email || route.driverInfo?.name || 'Motorista',
+            pointId: updatedStop.id || updatedStop.placeId,
+            pointCode: updatedStop.pointCode,
+            routeId: routeId,
+            routeCode: route.code || 'Rota',
+            serviceId: route.serviceId,
+            serviceCode: route.serviceCode,
+            failureReason: updatedStop.failureReason,
+            wentToLocation: updatedStop.wentToLocation,
+            attemptPhotoUrl: updatedStop.attemptPhotoUrl,
+            address: updatedStop.address,
+            customerName: updatedStop.customerName,
+          });
+        }
+      } catch (logError) {
+        console.error('⚠️ Erro ao registrar activity log (não crítico):', logError);
       }
 
       // Sincronizar status com pedidos do Lunna se a rota for importada
