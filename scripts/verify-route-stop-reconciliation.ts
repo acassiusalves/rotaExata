@@ -59,6 +59,13 @@ assert.deepEqual(reordered.map((item) => item.id), ['C', 'A', 'B']);
 assert.equal(reordered[0].attemptPhotoUrl, 'https://example.test/c.jpg');
 assert.equal(reordered[1].deliveryStatus, 'completed');
 
+const pendingNotes = rebasePlannedStops({
+  baseStops: [stop('P')],
+  plannedStops: [stop('P', { notes: 'Nota administrativa' })],
+  latestStops: [stop('P', { deliveryStatus: 'pending', notes: 'Nota atual' })],
+});
+assert.equal(pendingNotes[0].notes, 'Nota administrativa');
+
 assert.throws(
   () => rebasePlannedStops({
     baseStops: base,

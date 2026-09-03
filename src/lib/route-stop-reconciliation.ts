@@ -80,7 +80,10 @@ function mergeWithLatestExecution(latest: PlaceValue, planned: PlaceValue): Plac
     else delete merged[field];
   }
 
-  if (latest.deliveryStatus && hasOwn(latest, 'notes')) {
+  if (
+    (latest.deliveryStatus === 'completed' || latest.deliveryStatus === 'failed') &&
+    hasOwn(latest, 'notes')
+  ) {
     merged.notes = latest.notes;
   }
 
