@@ -2043,6 +2043,7 @@ export default function RouteAcompanharPage() {
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                   });
+                  rememberPersistedStops(routeADoc.id, stopsA);
                   savedIds.A = routeADoc.id;
                   console.log('💾 [calculateRoutes] Rota A salva no Firestore:', routeADoc.id);
                 }
@@ -2064,6 +2065,7 @@ export default function RouteAcompanharPage() {
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                   });
+                  rememberPersistedStops(routeBDoc.id, stopsB);
                   savedIds.B = routeBDoc.id;
                   console.log('💾 [calculateRoutes] Rota B salva no Firestore:', routeBDoc.id);
                 }
