@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import type { PlaceValue } from '../src/lib/types';
+import { getStopIdentityKey } from '../src/lib/route-stop-utils';
+import * as reconciliationModule from '../src/lib/route-stop-reconciliation';
 import {
   RouteStopNotFoundError,
   RouteStructureConflictError,
@@ -17,6 +19,36 @@ const stop = (id: string, extra: Partial<PlaceValue> = {}): PlaceValue => ({
   customerName: `Cliente ${id}`,
   ...extra,
 });
+
+const findSingleStopByIdentity = (
+  reconciliationModule as unknown as {
+    findSingleStopByIdentity?: (
+      stops: PlaceValue[],
+      target: Partial<PlaceValue>,
+    ) => PlaceValue;
+  }
+).findSingleStopByIdentity;
+assert.equal(typeof findSingleStopByIdentity, 'function');
+const latestRemoved = stop('removed-latest', {
+  deliveryStatus: 'completed',
+  photoUrl: 'https://example.test/latest-removal.jpg',
+});
+assert.equal(
+  findSingleStopByIdentity!([latestRemoved], stop('removed-latest')),
+  latestRemoved,
+  'remoção deve selecionar a versão mais recente pela identidade original',
+);
+assert.throws(
+  () => findSingleStopByIdentity!([], stop('removed-latest')),
+  RouteStructureConflictError,
+);
+assert.throws(
+  () => findSingleStopByIdentity!(
+    [stop('removed-latest'), stop('removed-latest')],
+    stop('removed-latest'),
+  ),
+  RouteStructureConflictError,
+);
 
 const base = [stop('A'), stop('B'), stop('C')];
 const latest = [
@@ -130,5 +162,142 @@ const completedEdit = updateStopByIdentity(
 );
 assert.equal(completedEdit.previousStop.deliveryStatus, 'completed');
 assert.equal(completedEdit.updatedStop.deliveryStatus, 'completed');
+
+// Regression: an administrative edit may change whichever field currently
+// wins the identity precedence. The non-persisted lineage must still locate
+// the latest stop and must never leak into the persisted/result object.
+const identityRenameCases: Array<{
+  label: string;
+  base: PlaceValue;
+  planned: PlaceValue;
+}> = [
+  {
+    label: 'orderNumber',
+    base: stop('order-id', { orderNumber: 'ORDER-OLD', pointCode: 'POINT-1' }),
+    planned: stop('order-id', { orderNumber: 'ORDER-NEW', pointCode: 'POINT-1' }),
+  },
+  {
+    label: 'pointCode fallback',
+    base: stop('point-id', { pointCode: 'POINT-OLD' }),
+    planned: stop('point-id', { pointCode: 'POINT-NEW' }),
+  },
+  {
+    label: 'id fallback',
+    base: stop('id-old'),
+    planned: stop('id-new', { placeId: 'place-id-old' }),
+  },
+  {
+    label: 'placeId fallback',
+    base: { ...stop('', { placeId: 'place-old' }), id: '' },
+    planned: { ...stop('', { placeId: 'place-new' }), id: '' },
+  },
+  {
+    label: 'coordinates and address fallback',
+    base: { ...stop('', { placeId: '' }), id: '', address: 'Rua antiga', lat: -16.7, lng: -49.2 },
+    planned: { ...stop('', { placeId: '' }), id: '', address: 'Rua nova', lat: -16.8, lng: -49.3 },
+  },
+  {
+    label: 'address fallback',
+    base: { id: '', placeId: '', address: 'Rua antiga', customerName: 'Cliente' } as PlaceValue,
+    planned: { id: '', placeId: '', address: 'Rua nova', customerName: 'Cliente' } as PlaceValue,
+  },
+];
+
+for (const identityCase of identityRenameCases) {
+  const originalKey = getStopIdentityKey(identityCase.base);
+  assert.ok(originalKey, `${identityCase.label}: fixture precisa de identidade`);
+  const latestStop = {
+    ...identityCase.base,
+    deliveryStatus: 'completed' as const,
+    completedAt: new Date('2026-09-03T12:00:00Z'),
+    payments: [{ id: 'latest', method: 'pix', value: 42 }],
+    notes: `latest-${identityCase.label}`,
+  };
+  const plannedWithLineage = {
+    ...identityCase.planned,
+    _originalStopKey: originalKey,
+    deliveryStatus: 'pending' as const,
+    notes: `stale-${identityCase.label}`,
+  } as PlaceValue & { _originalStopKey: string };
+  const [renamed] = rebasePlannedStops({
+    baseStops: [identityCase.base],
+    plannedStops: [plannedWithLineage],
+    latestStops: [latestStop],
+  });
+  assert.equal(renamed.deliveryStatus, 'completed', `${identityCase.label}: status mais recente`);
+  assert.deepEqual(renamed.payments, [{ id: 'latest', method: 'pix', value: 42 }]);
+  assert.equal(renamed.notes, `latest-${identityCase.label}`);
+  assert.equal(getStopIdentityKey(renamed), getStopIdentityKey(identityCase.planned));
+  assert.equal('_originalStopKey' in renamed, false, `${identityCase.label}: lineage não persiste`);
+}
+
+const renameCollisionBase = [
+  stop('collision-a', { orderNumber: 'ORDER-A' }),
+  stop('collision-b', { orderNumber: 'ORDER-B' }),
+];
+assert.throws(
+  () => rebasePlannedStops({
+    baseStops: renameCollisionBase,
+    plannedStops: [
+      {
+        ...renameCollisionBase[0],
+        orderNumber: 'ORDER-B',
+        _originalStopKey: getStopIdentityKey(renameCollisionBase[0]),
+      } as PlaceValue,
+      renameCollisionBase[1],
+    ],
+    latestStops: renameCollisionBase,
+  }),
+  RouteStructureConflictError,
+);
+
+for (const deliveryStatus of ['completed', 'failed'] as const) {
+  const terminalWithoutNotes = rebasePlannedStops({
+    baseStops: [stop(`terminal-absent-${deliveryStatus}`)],
+    plannedStops: [stop(`terminal-absent-${deliveryStatus}`, { notes: 'nota antiga' })],
+    latestStops: [stop(`terminal-absent-${deliveryStatus}`, { deliveryStatus })],
+  });
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(terminalWithoutNotes[0], 'notes'),
+    false,
+    `${deliveryStatus}: ausência mais recente remove nota obsoleta`,
+  );
+
+  const terminalWithNull = rebasePlannedStops({
+    baseStops: [stop(`terminal-null-${deliveryStatus}`)],
+    plannedStops: [stop(`terminal-null-${deliveryStatus}`, { notes: 'nota antiga' })],
+    latestStops: [{
+      ...stop(`terminal-null-${deliveryStatus}`),
+      deliveryStatus,
+      notes: null,
+    } as unknown as PlaceValue],
+  });
+  assert.equal(terminalWithNull[0].notes, null, `${deliveryStatus}: null explícito é preservado`);
+}
+
+assert.throws(
+  () => rebasePlannedStops({
+    baseStops: [stop('unique-base')],
+    plannedStops: [stop('duplicate-plan'), stop('duplicate-plan')],
+    latestStops: [stop('unique-base')],
+  }),
+  RouteStructureConflictError,
+);
+assert.throws(
+  () => updateStopByIdentity(
+    [stop('duplicate-latest'), stop('duplicate-latest')],
+    stop('duplicate-latest'),
+    { deliveryStatus: 'completed' },
+  ),
+  RouteStructureConflictError,
+);
+assert.throws(
+  () => updateStopByIdentity(
+    [{ id: '', placeId: '', address: '' } as PlaceValue],
+    { address: 'sem-identidade' },
+    { deliveryStatus: 'completed' },
+  ),
+  RouteStructureConflictError,
+);
 
 console.log('OK: reconciliação preserva execução e rejeita conflitos estruturais.');

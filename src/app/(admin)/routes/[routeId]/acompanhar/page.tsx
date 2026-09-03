@@ -110,14 +110,20 @@ import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
+  resolveRoutePlanMetrics,
   saveExistingRoutePlansAtomically,
+  saveRoutePlanBatchAtomically,
   type RouteMetrics,
   type SavedRoutePlan,
 } from '@/lib/firebase/route-stop-mutations';
-import { RouteStructureConflictError } from '@/lib/route-stop-reconciliation';
+import {
+  findSingleStopByIdentity,
+  RouteStructureConflictError,
+} from '@/lib/route-stop-reconciliation';
 import {
   dedupeStops,
   findStopIndexByIdentity,
+  getStopIdentityKey,
   hasStopWithSameIdentity,
   removeStopWithSameIdentity,
   upsertStopInCollection,
@@ -2740,12 +2746,17 @@ export default function RouteAcompanharPage() {
           });
           return;
         }
-        updatedStops[resolvedIndex] = updatedStop;
-        const dedupedUpdatedStops = dedupeStops(updatedStops);
+        const firestoreRouteId = getFirestoreRouteId(stopToEdit.routeKey);
+        updatedStops[resolvedIndex] = firestoreRouteId
+          ? {
+              ...updatedStop,
+              _originalStopKey: getStopIdentityKey(stopToEdit.stop) || undefined,
+            } as PlaceValue
+          : updatedStop;
+        const plannedStops = updatedStops;
 
         // Recalculate route
-        const newRouteInfo = await computeRoute(routeData.origin, dedupedUpdatedStops);
-        const firestoreRouteId = getFirestoreRouteId(stopToEdit.routeKey);
+        const newRouteInfo = await computeRoute(routeData.origin, plannedStops);
         const metrics: RouteMetrics | undefined = newRouteInfo ? {
           encodedPolyline: newRouteInfo.encodedPolyline,
           distanceMeters: newRouteInfo.distanceMeters,
@@ -2757,7 +2768,7 @@ export default function RouteAcompanharPage() {
             const [result] = await saveExistingRoutePlansAtomically([{
               routeId: firestoreRouteId,
               baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
-              plannedStops: dedupedUpdatedStops,
+              plannedStops,
               ...(metrics ? { metrics } : {}),
             }]);
             applySavedRouteResult(stopToEdit.routeKey, result, metrics);
@@ -2787,7 +2798,7 @@ export default function RouteAcompanharPage() {
           setRoute(stopToEdit.routeKey, prev => prev ? {
             ...prev,
             ...(newRouteInfo ?? {}),
-            stops: dedupedUpdatedStops,
+            stops: plannedStops,
             color: targetRoute.color,
             visible: targetRoute.visible
           } : null);
@@ -2922,7 +2933,7 @@ export default function RouteAcompanharPage() {
           return;
         }
 
-        const newStops = dedupeStops([...targetRoute.stops, newStop]);
+        const newStops = [...targetRoute.stops, newStop];
         console.log('📝 [handleAddService] Nova lista de stops:', newStops.length, 'paradas');
 
         // Recalculate route
@@ -3091,7 +3102,7 @@ export default function RouteAcompanharPage() {
 
       // Add to target route
       const newTargetStops = targetRoute
-        ? dedupeStops([...targetRoute.stops, stopToMove])
+        ? [...targetRoute.stops, stopToMove]
         : [stopToMove];
       const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
       console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
@@ -3337,7 +3348,7 @@ export default function RouteAcompanharPage() {
       const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? sourceIndex;
 
       // Remove from source
-      const newSourceStops = dedupeStops(removeStopWithSameIdentity(sourceStopsToEdit, stopToMove));
+      const newSourceStops = removeStopWithSameIdentity(sourceStopsToEdit, stopToMove);
 
       // Add to target at the position of the over item with marker for cross-route movement
       const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
@@ -3361,31 +3372,11 @@ export default function RouteAcompanharPage() {
 
       let newTargetStops: PlaceValue[];
       if (existsInTarget) {
-        // Stop already exists in target - reorder it in target AND remove from source
-        const existingIndex = findStopIndexByIdentity(targetStopsToEdit, stopToMove);
-        addDebugLog('DRAG_BETWEEN_ROUTES', 'Stop already exists in target - reordering in target and removing from source', {
-          existingIndex,
-          overIndex,
-          stopId: movedStopId,
-          stopName: stopToMove.customerName,
-          sourceRouteKey: activeRouteKey,
-          targetRouteKey: overRouteKey,
+        toast({
+          variant: 'destructive',
+          title: 'Identidade de parada duplicada',
+          description: 'A rota de destino já contém esta parada. Nenhuma alteração foi aplicada.',
         });
-
-        newTargetStops = [...targetStopsToEdit];
-        const [removed] = newTargetStops.splice(existingIndex, 1);
-        newTargetStops.splice(overIndex, 0, removed);
-        newTargetStops = dedupeStops(newTargetStops);
-
-        // ALSO remove from source to fix duplication
-        console.log('🔧 [CROSS-DRAG] Stop duplicado detectado - removendo da origem e reordenando no destino');
-        setPendingEdits(prev => ({
-          ...prev,
-          [activeRouteKey]: newSourceStops,  // Remove from source!
-          [overRouteKey]: newTargetStops
-        }));
-
-        addDebugLog('DRAG_BETWEEN_ROUTES', 'Saved reordering - source route ALSO updated to remove duplicate');
         return;
       } else {
         // Normal case: add to target
@@ -3396,11 +3387,10 @@ export default function RouteAcompanharPage() {
           ...stopToMove,
           _originalIndex: originalIndexOfMovedStop, // Preserve the original index from source route
           _wasMoved: true,
-          _movedFromRoute: activeRouteKey, // Track which route it came from
+          _movedFromRoute: (stopToMove as any)._movedFromRoute ?? activeRouteKey,
           _originalRouteColor: sourceRoute.color, // Preserve original route color
         };
         newTargetStops.splice(overIndex, 0, movedStop);
-        newTargetStops = dedupeStops(newTargetStops);
       }
 
       addDebugLog('DRAG_BETWEEN_ROUTES', 'Saving pending edits', {
@@ -3492,7 +3482,7 @@ export default function RouteAcompanharPage() {
     pendingEdits[routeKey] !== null && pendingEdits[routeKey] !== undefined;
 
   const getDisplayedStops = (routeKey: string, fallbackStops: PlaceValue[]) =>
-    dedupeStops(pendingEdits[routeKey] ?? fallbackStops);
+    pendingEdits[routeKey] ?? fallbackStops;
 
   const getRouteDisplayName = (routeKey: string) => {
     if (routeNames[routeKey]) return routeNames[routeKey];
@@ -3751,17 +3741,16 @@ export default function RouteAcompanharPage() {
               distanceMeters: routeToSave.distanceMeters,
               duration: routeToSave.duration,
             };
+            const routeMetadata = { ...routeDocData };
+            delete routeMetadata.stops;
             const [result] = await saveExistingRoutePlansAtomically([{
               routeId: existingDraftId,
               baseStops: getPersistedStops(existingDraftId, routeToSave.stops),
               plannedStops: routeToSave.stops,
               metrics,
+              metadata: routeMetadata,
             }]);
             applySavedRouteResult(routeKey, result, metrics);
-
-            const routeMetadata = { ...routeDocData };
-            delete routeMetadata.stops;
-            await updateDoc(doc(db, 'routes', existingDraftId), routeMetadata);
             try {
               await notifySavedRouteChanges(result);
             } catch (notifyError) {
@@ -3891,6 +3880,8 @@ export default function RouteAcompanharPage() {
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
+        const driverId = assignedDrivers[routeKey];
+        const driver = driverId ? availableDrivers.find(d => d.id === driverId) : null;
         const metrics: RouteMetrics = {
           encodedPolyline: routeToUpdate.encodedPolyline,
           distanceMeters: routeToUpdate.distanceMeters,
@@ -3901,25 +3892,14 @@ export default function RouteAcompanharPage() {
           baseStops: getPersistedStops(currentRouteId, routeToUpdate.stops),
           plannedStops: routeToUpdate.stops,
           metrics,
-        }]);
-        applySavedRouteResult(routeKey, result, metrics);
-
-        // Verificar se foi atribuído um motorista na aba Atribuir
-        const driverId = assignedDrivers[routeKey];
-        const driver = driverId ? availableDrivers.find(d => d.id === driverId) : null;
-        let driverAssignmentFailed = false;
-        if (driverId && driver) {
-          try {
-            await updateDoc(doc(db, 'routes', currentRouteId), {
+          ...(driverId && driver ? {
+            metadata: {
               driverId,
               driverInfo: { name: driver.name, vehicle: driver.vehicle },
-              updatedAt: serverTimestamp(),
-            });
-          } catch (driverError) {
-            driverAssignmentFailed = true;
-            console.error('Error assigning driver after route update:', driverError);
-          }
-        }
+            },
+          } : {}),
+        }]);
+        applySavedRouteResult(routeKey, result, metrics);
 
         let notificationFailed = false;
         if (result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)) {
@@ -3936,9 +3916,7 @@ export default function RouteAcompanharPage() {
           : result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)
             ? ` O motorista será notificado das ${result.changes.length} alterações.`
             : '';
-        const driverMessage = driverAssignmentFailed
-          ? ' A rota foi salva, mas não foi possível atribuir o motorista.'
-          : driverId && driver
+        const driverMessage = driverId && driver
             ? ` Motorista ${driver.name} atribuído.`
             : '';
         toast({
@@ -3950,7 +3928,7 @@ export default function RouteAcompanharPage() {
           toast({
             variant: 'destructive',
             title: 'A rota mudou durante a edição',
-            description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+            description: 'Recarregue a rota e tente aplicar a alteração novamente.',
           });
           return;
         }
@@ -4019,12 +3997,8 @@ export default function RouteAcompanharPage() {
     const stopToMove = targetRoute.stops.find(s => String(s.id ?? s.placeId) === stopId);
     if (!stopToMove) return;
 
-    // Add to unassigned stops (with idempotency check)
-    const alreadyExists = hasStopWithSameIdentity(unassignedStops, stopToMove);
-    const updatedUnassignedStops = alreadyExists
-      ? dedupeStops(unassignedStops)
-      : upsertStopInCollection(unassignedStops, stopToMove);
-    const plannedStops = dedupeStops(removeStopWithSameIdentity(targetRoute.stops, stopToMove));
+    let removedStop = stopToMove;
+    const plannedStops = removeStopWithSameIdentity(targetRoute.stops, stopToMove);
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     const routeInfo = plannedStops.length > 0
       ? await computeRoute(routeData.origin, plannedStops)
@@ -4047,6 +4021,7 @@ export default function RouteAcompanharPage() {
           plannedStops,
           ...(metrics ? { metrics } : {}),
         }]);
+        removedStop = findSingleStopByIdentity(result.removedStops, stopToMove);
         applySavedRouteResult(routeKey, result, metrics);
         try {
           await notifySavedRouteChanges(result);
@@ -4061,6 +4036,7 @@ export default function RouteAcompanharPage() {
         } : null);
       }
 
+      const updatedUnassignedStops = upsertStopInCollection(unassignedStops, removedStop);
       setUnassignedStops(updatedUnassignedStops);
       try {
         await syncUnassignedStopsInFirestore(updatedUnassignedStops);
@@ -4257,8 +4233,9 @@ export default function RouteAcompanharPage() {
     if (!targetRoute) return;
 
     const draftStops = pendingEdits[routeKey] ?? targetRoute.stops;
-    const plannedStops = dedupeStops(removeStopWithSameIdentity(draftStops, stop));
-    const updatedUnassignedStops = upsertStopInCollection(unassignedStops, stop);
+    const plannedStops = removeStopWithSameIdentity(draftStops, stop);
+    let removedStop = stop;
+    let updatedUnassignedStops: PlaceValue[] | null = null;
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     console.log('🔄 [handleRemoveFromRoute] Removendo stop da rota', routeKey, '→ Firestore ID:', firestoreRouteId, '| Stop:', stop.orderNumber || stop.customerName);
 
@@ -4283,6 +4260,7 @@ export default function RouteAcompanharPage() {
           plannedStops,
           ...(metrics ? { metrics } : {}),
         }]);
+        removedStop = findSingleStopByIdentity(result.removedStops, stop);
         applySavedRouteResult(routeKey, result, metrics);
         try {
           await notifySavedRouteChanges(result);
@@ -4298,6 +4276,7 @@ export default function RouteAcompanharPage() {
         console.warn('⚠️ [handleRemoveFromRoute] Sem Firestore ID para rota', routeKey, '- alteração apenas local.');
       }
 
+      updatedUnassignedStops = upsertStopInCollection(unassignedStops, removedStop);
       setUnassignedStops(updatedUnassignedStops);
       setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
     } catch (error) {
@@ -4318,6 +4297,7 @@ export default function RouteAcompanharPage() {
       return;
     }
 
+    if (!updatedUnassignedStops) return;
     try {
       await syncUnassignedStopsInFirestore(updatedUnassignedStops);
     } catch (error) {
@@ -4334,7 +4314,7 @@ export default function RouteAcompanharPage() {
     if (!targetRoute) return;
 
     const draftStops = pendingEdits[routeKey] ?? targetRoute.stops;
-    const plannedStops = dedupeStops(removeStopWithSameIdentity(draftStops, stop));
+    const plannedStops = removeStopWithSameIdentity(draftStops, stop);
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     console.log('🗑️ [handleDeleteStop] Excluindo stop da rota', routeKey, '→ Firestore ID:', firestoreRouteId, '| Stop:', stop.orderNumber || stop.customerName);
 
@@ -4475,12 +4455,15 @@ export default function RouteAcompanharPage() {
       }
 
       // Remove from source
-      const newSourceStops = dedupeStops(
-        removeStopWithSameIdentity(sourceRoute.data.stops, stop)
-      );
+      const newSourceStops = removeStopWithSameIdentity(sourceRoute.data.stops, stop);
 
       // Add to target
-      const newTargetStops = upsertStopInCollection(targetRoute.data.stops, stop);
+      if (hasStopWithSameIdentity(targetRoute.data.stops, stop)) {
+        throw new RouteStructureConflictError('A rota de destino já contém esta identidade de parada.');
+      }
+      const newTargetStops = [...targetRoute.data.stops, stop];
+      const stopKey = getStopIdentityKey(stop);
+      if (!stopKey) throw new RouteStructureConflictError('A parada não possui identidade estável.');
 
       // Recalculate both routes
       const [newSourceRouteInfo, newTargetRouteInfo] = await Promise.all([
@@ -4511,20 +4494,21 @@ export default function RouteAcompanharPage() {
         distanceMeters: newTargetRouteInfo.distanceMeters,
         duration: newTargetRouteInfo.duration,
       };
-      const [sourceResult, targetResult] = await saveExistingRoutePlansAtomically([
-        {
+      const transferBatch = await saveRoutePlanBatchAtomically({
+        existingPlans: [{
           routeId: sourceRouteId,
           baseStops: getPersistedStops(sourceRouteId, sourceRoute.data.stops),
           plannedStops: newSourceStops,
           ...(sourceMetrics ? { metrics: sourceMetrics } : {}),
-        },
-        {
+        }, {
           routeId: targetRouteId,
           baseStops: getPersistedStops(targetRouteId, targetRoute.data.stops),
           plannedStops: newTargetStops,
           metrics: targetMetrics,
-        },
-      ]);
+        }],
+        transferIntents: [{ sourceRouteId, targetRouteId, stopKey }],
+      });
+      const [sourceResult, targetResult] = transferBatch.existingRoutes;
 
       applySavedRouteResult(sourceRouteId, sourceResult, sourceMetrics);
       applySavedRouteResult(targetRouteId, targetResult, targetMetrics);
@@ -4550,7 +4534,7 @@ export default function RouteAcompanharPage() {
         toast({
           variant: 'destructive',
           title: 'A rota mudou durante a edição',
-          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+          description: 'Recarregue as rotas e tente transferir a parada novamente.',
         });
         return;
       }
@@ -4619,8 +4603,8 @@ export default function RouteAcompanharPage() {
         return null;
       }
 
-      const cleanedStops = dedupeStops(
-        pendingStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop)
+      const cleanedStops = pendingStops.map(
+        ({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...stop }: any) => stop,
       );
 
       addDebugLog('APPLY_PENDING_EDITS', `Preparing route ${key}`, { stopsCount: cleanedStops.length });
@@ -4752,106 +4736,136 @@ export default function RouteAcompanharPage() {
       routesToCreate: newRoutesToCreate.length
     });
 
-    try {
-      // First, create new routes (dynamic routes C, D, E, etc.)
-      for (const newRoute of newRoutesToCreate) {
-        const routeDate = new Date(routeData.routeDate);
-        const routeDocData: Record<string, any> = {
-          name: newRoute.dynamicRoute.name,
-          origin: routeData.origin,
-          stops: newRoute.cleanedStops,
-          encodedPolyline: newRoute.routeInfo?.encodedPolyline || '',
-          distanceMeters: newRoute.routeInfo?.distanceMeters || 0,
-          duration: newRoute.routeInfo?.duration || '0s',
-          color: newRoute.dynamicRoute.color,
-          status: 'draft',
-          plannedDate: Timestamp.fromDate(routeDate),
-          period: routeData.period || 'Matutino',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-
-        // Se for um serviço, adicionar serviceId e serviceCode
-        if (routeData.isService && routeData.serviceId) {
-          routeDocData.serviceId = routeData.serviceId;
-          routeDocData.serviceCode = routeData.serviceCode;
-          routeDocData.source = 'lunna';
-        }
-
-        const newRouteDoc = await addDoc(collection(db, 'routes'), routeDocData);
-        rememberPersistedStops(newRouteDoc.id, newRoute.cleanedStops);
-
-        addDebugLog('FIRESTORE_CREATE', `✅ Created new route ${newRoute.routeKey} in Firestore`, {
-          routeKey: newRoute.routeKey,
-          firestoreId: newRouteDoc.id,
-          stopsCount: newRoute.cleanedStops.length,
-          isService: routeData.isService,
-          serviceId: routeData.serviceId,
-        });
-
-        // Se for rota A ou B de um serviço, atualizar serviceRouteIds
-        if ((newRoute.routeKey === 'A' || newRoute.routeKey === 'B') && routeData.isService) {
-          setServiceRouteIds(prev => ({ ...prev, [newRoute.routeKey]: newRouteDoc.id }));
-        }
-
-        // Atualizar o serviço com o ID da rota
-        if (routeData.isService && routeData.serviceId) {
-          const serviceRef = doc(db, 'services', routeData.serviceId);
-          await updateDoc(serviceRef, {
-            routeIds: arrayUnion(newRouteDoc.id),
-            updatedAt: serverTimestamp(),
-          });
-        }
-
-        // Update local state for the dynamic route - keep in dynamicRoutes but mark with firestoreId
-        setDynamicRoutes(prev => prev.map(r =>
-          r.key === newRoute.routeKey
-            ? {
-                ...r,
-                firestoreId: newRouteDoc.id,
-                data: {
-                  ...r.data,
-                  stops: newRoute.cleanedStops,
-                  encodedPolyline: newRoute.routeInfo?.encodedPolyline || '',
-                  distanceMeters: newRoute.routeInfo?.distanceMeters || 0,
-                  duration: newRoute.routeInfo?.duration || '0s',
-                }
-              }
-            : r
-        ));
+    const existingPlans = routeUpdates.map((update) => {
+      const computedMetrics = update.routeInfo ? {
+        encodedPolyline: update.routeInfo.encodedPolyline,
+        distanceMeters: update.routeInfo.distanceMeters,
+        duration: update.routeInfo.duration,
+      } : null;
+      return {
+        routeId: update.routeId,
+        baseStops: getPersistedStops(update.routeId, getRoute(update.routeKey)?.stops || []),
+        plannedStops: update.cleanedStops,
+        metrics: resolveRoutePlanMetrics(update.cleanedStops, computedMetrics),
+      };
+    });
+    const preparedNewRoutes = newRoutesToCreate.map((newRoute) => {
+      const routeId = doc(collection(db, 'routes')).id;
+      const routeDate = new Date(routeData.routeDate);
+      const data: Record<string, any> = {
+        name: newRoute.dynamicRoute.name,
+        origin: routeData.origin,
+        encodedPolyline: newRoute.routeInfo?.encodedPolyline || '',
+        distanceMeters: newRoute.routeInfo?.distanceMeters || 0,
+        duration: newRoute.routeInfo?.duration || '0s',
+        color: newRoute.dynamicRoute.color,
+        status: 'draft',
+        plannedDate: Timestamp.fromDate(routeDate),
+        period: routeData.period || 'Matutino',
+        createdAt: serverTimestamp(),
+      };
+      if (routeData.isService && routeData.serviceId) {
+        data.serviceId = routeData.serviceId;
+        data.serviceCode = routeData.serviceCode;
+        data.source = 'lunna';
       }
+      return { ...newRoute, routeId, data };
+    });
+    const existingRouteIdsByKey = new Map(
+      routeUpdates.map((update) => [update.routeKey, update.routeId]),
+    );
+    const targetRouteIdsByKey = new Map([
+      ...routeUpdates.map((update) => [update.routeKey, update.routeId] as const),
+      ...preparedNewRoutes.map((route) => [route.routeKey, route.routeId] as const),
+    ]);
+    const transferIntents = allRoutesWithPending.flatMap((targetRouteKey) => {
+      const targetRouteId = targetRouteIdsByKey.get(targetRouteKey);
+      if (!targetRouteId) return [];
+      return (pendingEdits[targetRouteKey] || []).flatMap((stop) => {
+        const sourceRouteKey = (stop as any)._movedFromRoute as string | undefined;
+        if (!sourceRouteKey) return [];
+        const sourceRouteId = existingRouteIdsByKey.get(sourceRouteKey);
+        if (!sourceRouteId || sourceRouteId === targetRouteId) return [];
+        const stopKey = getStopIdentityKey(stop);
+        if (!stopKey) {
+          throw new RouteStructureConflictError('Uma transferência pendente está sem identidade estável.');
+        }
+        return [{ sourceRouteId, targetRouteId, stopKey }];
+      });
+    });
 
-      // Then, update all existing routes in one transaction
-      if (routeUpdates.length > 0) {
-        const existingPlans = routeUpdates.map((update) => ({
-          routeId: update.routeId,
-          baseStops: getPersistedStops(update.routeId, getRoute(update.routeKey)?.stops || []),
-          plannedStops: update.cleanedStops,
-          metrics: update.routeInfo ? {
-            encodedPolyline: update.routeInfo.encodedPolyline,
-            distanceMeters: update.routeInfo.distanceMeters,
-            duration: update.routeInfo.duration,
-          } : undefined,
-        }));
-        const savedResults = await saveExistingRoutePlansAtomically(existingPlans);
-        savedResults.forEach((result, index) => {
+    try {
+      const batchResult = await saveRoutePlanBatchAtomically({
+        existingPlans,
+        newRoutes: preparedNewRoutes.map((newRoute) => ({
+          routeId: newRoute.routeId,
+          data: newRoute.data,
+          plannedStops: newRoute.cleanedStops,
+        })),
+        transferIntents,
+        ...(routeData.isService && routeData.serviceId && preparedNewRoutes.length > 0 ? {
+          serviceLink: {
+            serviceId: routeData.serviceId,
+            routeIds: preparedNewRoutes.map((newRoute) => newRoute.routeId),
+          },
+        } : {}),
+      });
+
+      batchResult.existingRoutes.forEach((result, index) => {
           const update = routeUpdates[index];
           const metrics = existingPlans[index].metrics;
           applySavedRouteResult(update.routeKey, result, metrics);
-        });
-        for (const result of savedResults) {
-          try {
-            await notifySavedRouteChanges(result);
-          } catch (notifyErr) {
-            console.error('⚠️ [APPLY] Erro ao notificar motorista para rota', result.routeId, notifyErr);
-          }
+      });
+      batchResult.createdRoutes.forEach((result, index) => {
+        const created = preparedNewRoutes[index];
+        rememberPersistedStops(result.routeId, result.stops);
+        if ((created.routeKey === 'A' || created.routeKey === 'B') && routeData.isService) {
+          setServiceRouteIds((previous) => ({ ...previous, [created.routeKey]: result.routeId }));
+          setRoute(created.routeKey, (previous) => previous ? {
+            ...previous,
+            stops: result.stops,
+            encodedPolyline: created.routeInfo?.encodedPolyline || '',
+            distanceMeters: created.routeInfo?.distanceMeters || 0,
+            duration: created.routeInfo?.duration || '0s',
+          } : null);
+        } else {
+          setDynamicRoutes((previous) => previous.map((route) => (
+            route.key === created.routeKey
+              ? {
+                  ...route,
+                  firestoreId: result.routeId,
+                  data: {
+                    ...route.data,
+                    stops: result.stops,
+                    encodedPolyline: created.routeInfo?.encodedPolyline || '',
+                    distanceMeters: created.routeInfo?.distanceMeters || 0,
+                    duration: created.routeInfo?.duration || '0s',
+                  },
+                }
+              : route
+          )));
         }
-
-        addDebugLog('FIRESTORE_TRANSACTION', '✅ Atomic transaction successful', {
-          routesUpdated: routeUpdates.length
+        addDebugLog('FIRESTORE_CREATE', `✅ Created new route ${created.routeKey} in Firestore`, {
+          routeKey: created.routeKey,
+          firestoreId: result.routeId,
+          stopsCount: result.stops.length,
+          isService: routeData.isService,
+          serviceId: routeData.serviceId,
         });
+      });
+
+      for (const result of batchResult.existingRoutes) {
+        try {
+          await notifySavedRouteChanges(result);
+        } catch (notifyErr) {
+          console.error('⚠️ [APPLY] Erro ao notificar motorista para rota', result.routeId, notifyErr);
+        }
       }
 
+      addDebugLog('FIRESTORE_TRANSACTION', '✅ Atomic transaction successful', {
+        routesUpdated: routeUpdates.length,
+        routesCreated: preparedNewRoutes.length,
+      });
     } catch (error) {
       console.error('❌ Erro ao salvar edições no Firestore:', error);
       addDebugLog('FIRESTORE_ERROR', 'Firestore operation FAILED', { error });
@@ -4859,7 +4873,7 @@ export default function RouteAcompanharPage() {
         toast({
           variant: 'destructive',
           title: 'A rota mudou durante a edição',
-          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+          description: 'Recarregue as rotas e tente aplicar as alterações novamente.',
         });
         return;
       }

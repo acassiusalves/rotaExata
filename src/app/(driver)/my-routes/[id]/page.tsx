@@ -49,6 +49,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   acknowledgeRouteChangesAtomically,
   confirmRouteStopAtomically,
+  getRouteChangeNotificationFingerprint,
   RouteStopNotFoundError,
 } from '@/lib/firebase/route-stop-mutations';
 
@@ -192,7 +193,10 @@ export default function RouteDetailsPage() {
 
     setIsAcknowledging(true);
     try {
-      await acknowledgeRouteChangesAtomically(routeId);
+      await acknowledgeRouteChangesAtomically(
+        routeId,
+        getRouteChangeNotificationFingerprint(notification),
+      );
 
       toast({
         title: 'Alterações confirmadas',

@@ -1,6 +1,11 @@
 import type { PlaceValue } from '@/lib/types';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 
+export type PlannedRouteStop = PlaceValue & {
+  /** Identidade da parada antes de uma edição. Nunca deve ser persistida. */
+  _originalStopKey?: string;
+};
+
 const EXECUTION_FIELDS = [
   'deliveryStatus',
   'arrivedAt',
@@ -42,7 +47,7 @@ export class RouteStopNotFoundError extends Error {
   }
 }
 
-function keysOf(stops: PlaceValue[], label: string): string[] {
+export function validateStopIdentities(stops: PlaceValue[], label: string): string[] {
   const keys = stops.map((item) => getStopIdentityKey(item));
   if (keys.some((key) => !key)) {
     throw new RouteStructureConflictError(`${label} contém parada sem identidade estável.`);
@@ -54,12 +59,42 @@ function keysOf(stops: PlaceValue[], label: string): string[] {
   return normalized;
 }
 
+export function getPlannedStopSourceKey(stop: PlannedRouteStop): string | null {
+  if (!Object.prototype.hasOwnProperty.call(stop, '_originalStopKey')) {
+    return getStopIdentityKey(stop);
+  }
+
+  const originalStopKey = stop._originalStopKey?.trim();
+  if (!originalStopKey) {
+    throw new RouteStructureConflictError('O plano contém linhagem de parada inválida.');
+  }
+  return originalStopKey;
+}
+
+export function findSingleStopByIdentity(
+  stops: PlaceValue[],
+  target: Partial<PlaceValue>,
+): PlaceValue {
+  const targetKey = getStopIdentityKey(target);
+  if (!targetKey) {
+    throw new RouteStructureConflictError('A parada removida não possui identidade estável.');
+  }
+  const matches = stops.filter((stop) => getStopIdentityKey(stop) === targetKey);
+  if (matches.length !== 1) {
+    throw new RouteStructureConflictError(
+      'A parada removida não pôde ser identificada de forma única após o commit.',
+    );
+  }
+  return matches[0];
+}
+
 function stripTransientFields(stop: PlaceValue): PlaceValue {
   const {
     _originalIndex,
     _wasMoved,
     _movedFromRoute,
     _originalRouteColor,
+    _originalStopKey,
     wasModified,
     modifiedAt,
     modificationType,
@@ -80,11 +115,9 @@ function mergeWithLatestExecution(latest: PlaceValue, planned: PlaceValue): Plac
     else delete merged[field];
   }
 
-  if (
-    (latest.deliveryStatus === 'completed' || latest.deliveryStatus === 'failed') &&
-    hasOwn(latest, 'notes')
-  ) {
-    merged.notes = latest.notes;
+  if (latest.deliveryStatus === 'completed' || latest.deliveryStatus === 'failed') {
+    if (hasOwn(latest, 'notes')) merged.notes = latest.notes;
+    else delete merged.notes;
   }
 
   return merged as PlaceValue;
@@ -92,13 +125,19 @@ function mergeWithLatestExecution(latest: PlaceValue, planned: PlaceValue): Plac
 
 export function rebasePlannedStops(input: {
   baseStops: PlaceValue[];
-  plannedStops: PlaceValue[];
+  plannedStops: PlannedRouteStop[];
   latestStops: PlaceValue[];
 }): PlaceValue[] {
-  const baseKeys = keysOf(input.baseStops, 'A base');
-  const latestKeys = keysOf(input.latestStops, 'A versão atual');
+  const baseKeys = validateStopIdentities(input.baseStops, 'A base');
+  const latestKeys = validateStopIdentities(input.latestStops, 'A versão atual');
+  validateStopIdentities(input.plannedStops, 'O plano');
   if (JSON.stringify(baseKeys) !== JSON.stringify(latestKeys)) {
     throw new RouteStructureConflictError();
+  }
+
+  const plannedSourceKeys = input.plannedStops.map(getPlannedStopSourceKey);
+  if (new Set(plannedSourceKeys).size !== plannedSourceKeys.length) {
+    throw new RouteStructureConflictError('O plano reutiliza a mesma parada mais de uma vez.');
   }
 
   const baseKeySet = new Set(baseKeys);
@@ -106,12 +145,16 @@ export function rebasePlannedStops(input: {
     input.latestStops.map((item) => [getStopIdentityKey(item) as string, item]),
   );
 
-  return input.plannedStops.map((planned) => {
+  return input.plannedStops.map((planned, index) => {
     const key = getStopIdentityKey(planned);
     if (!key) throw new RouteStructureConflictError('O plano contém parada sem identidade estável.');
-    const latest = latestByKey.get(key);
+    const sourceKey = plannedSourceKeys[index];
+    if (!sourceKey) throw new RouteStructureConflictError('O plano contém parada sem identidade estável.');
+    const latest = latestByKey.get(sourceKey);
     if (latest) return mergeWithLatestExecution(latest, planned);
-    if (baseKeySet.has(key)) throw new RouteStructureConflictError();
+    if (baseKeySet.has(sourceKey) || Object.prototype.hasOwnProperty.call(planned, '_originalStopKey')) {
+      throw new RouteStructureConflictError();
+    }
     return stripTransientFields(planned);
   });
 }
@@ -121,6 +164,7 @@ export function updateStopByIdentity(
   target: Partial<PlaceValue>,
   patch: Partial<PlaceValue>,
 ): { stops: PlaceValue[]; previousStop: PlaceValue; updatedStop: PlaceValue; index: number } {
+  validateStopIdentities(stops, 'A versão atual');
   const targetKey = getStopIdentityKey(target);
   if (!targetKey) throw new RouteStopNotFoundError('Não foi possível identificar a parada.');
   const index = stops.findIndex((item) => getStopIdentityKey(item) === targetKey);
@@ -129,6 +173,7 @@ export function updateStopByIdentity(
   const updatedStop = { ...previousStop, ...patch };
   const next = [...stops];
   next[index] = updatedStop;
+  validateStopIdentities(next, 'A versão atualizada');
   return { stops: next, previousStop, updatedStop, index };
 }
 

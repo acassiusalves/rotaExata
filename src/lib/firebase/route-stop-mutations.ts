@@ -8,15 +8,18 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
-import type { PlaceValue } from '@/lib/types';
+import type { PlaceValue, RouteChangeNotification } from '@/lib/types';
 import { detectRouteChanges, markModifiedStops, type RouteChange } from '@/lib/route-change-tracker';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import {
   clearRouteChangeFlags,
+  getPlannedStopSourceKey,
+  type PlannedRouteStop,
   rebasePlannedStops,
   RouteStructureConflictError,
   RouteStopNotFoundError,
   updateStopByIdentity,
+  validateStopIdentities,
 } from '@/lib/route-stop-reconciliation';
 
 export type RouteMetrics = {
@@ -25,10 +28,21 @@ export type RouteMetrics = {
   duration: string;
 };
 
+export function resolveRoutePlanMetrics(
+  plannedStops: PlaceValue[],
+  computed?: RouteMetrics | null,
+): RouteMetrics | undefined {
+  if (plannedStops.length === 0) {
+    return { encodedPolyline: '', distanceMeters: 0, duration: '0s' };
+  }
+  if (computed) return computed;
+  return undefined;
+}
+
 export type ExistingRoutePlan = {
   routeId: string;
   baseStops: PlaceValue[];
-  plannedStops: PlaceValue[];
+  plannedStops: PlannedRouteStop[];
   metrics?: RouteMetrics;
   metadata?: Record<string, unknown>;
 };
@@ -38,7 +52,7 @@ export type SavedRoutePlan = {
   stops: PlaceValue[];
   removedStops: PlaceValue[];
   changes: RouteChange[];
-  previousStatus: string;
+  previousStatus?: string;
   previousDriverId?: string;
   status: string;
   driverId?: string;
@@ -47,12 +61,19 @@ export type SavedRoutePlan = {
 export type NewRoutePlan = {
   routeId: string;
   data: Record<string, unknown>;
-  plannedStops: PlaceValue[];
+  plannedStops: PlannedRouteStop[];
+};
+
+export type RouteStopTransferIntent = {
+  sourceRouteId: string;
+  targetRouteId: string;
+  stopKey: string;
 };
 
 export type RoutePlanBatchInput = {
   existingPlans: ExistingRoutePlan[];
   newRoutes?: NewRoutePlan[];
+  transferIntents?: RouteStopTransferIntent[];
   serviceLink?: {
     serviceId: string;
     routeIds: string[];
@@ -68,6 +89,29 @@ export type SavedRoutePlanBatch = {
   existingRoutes: SavedRoutePlan[];
   createdRoutes: SavedNewRoutePlan[];
 };
+
+export async function notifySavedRoutePlansAndCount(
+  results: SavedRoutePlan[],
+  notify: (result: SavedRoutePlan) => Promise<void>,
+  onError?: (result: SavedRoutePlan, error: unknown) => void,
+): Promise<number> {
+  let notifiedCount = 0;
+  for (const result of results) {
+    const eligible =
+      result.changes.length > 0 &&
+      Boolean(result.driverId) &&
+      ['dispatched', 'in_progress'].includes(result.status);
+    if (!eligible) continue;
+
+    try {
+      await notify(result);
+      notifiedCount++;
+    } catch (error) {
+      onError?.(result, error);
+    }
+  }
+  return notifiedCount;
+}
 
 export type RouteStopMutationSnapshot = {
   exists: () => boolean;
@@ -92,10 +136,127 @@ export type RouteStopMutationDependencies = {
   increment: (amount: number) => unknown;
 };
 
+export class RouteNotificationConflictError extends Error {
+  readonly code = 'route-notification-conflict';
+
+  constructor(message = 'A notificação da rota mudou antes da confirmação.') {
+    super(message);
+    this.name = 'RouteNotificationConflictError';
+  }
+}
+
+function normalizeFingerprintValue(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(normalizeFingerprintValue);
+  if (!value || typeof value !== 'object') return value;
+
+  const timestampLike = value as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
+  if (typeof timestampLike.toMillis === 'function') {
+    return { timestampMillis: timestampLike.toMillis() };
+  }
+  if (typeof timestampLike.seconds === 'number' && typeof timestampLike.nanoseconds === 'number') {
+    return { seconds: timestampLike.seconds, nanoseconds: timestampLike.nanoseconds };
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, normalizeFingerprintValue(item)]),
+  );
+}
+
+export function getRouteChangeNotificationFingerprint(
+  notification: Pick<RouteChangeNotification, 'routeId' | 'driverId' | 'changes' | 'createdAt'>,
+): string {
+  return JSON.stringify(normalizeFingerprintValue({
+    routeId: notification.routeId,
+    driverId: notification.driverId,
+    createdAt: notification.createdAt,
+    changes: notification.changes,
+  }));
+}
+
+function omitUndefinedDeep<Value>(value: Value): Value {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => omitUndefinedDeep(item)) as Value;
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+
+  const sanitized = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, omitUndefinedDeep(item)]),
+  );
+  return sanitized as Value;
+}
+
+function validateRoutePlanBatchInput(input: RoutePlanBatchInput): void {
+  const newRoutes = input.newRoutes || [];
+  const allPlans = [...input.existingPlans, ...newRoutes];
+  const routeIds = allPlans.map((plan) => plan.routeId);
+  if (routeIds.some((routeId) => !routeId.trim())) {
+    throw new RouteStructureConflictError('O lote contém rota sem identificador.');
+  }
+  if (new Set(routeIds).size !== routeIds.length) {
+    throw new RouteStructureConflictError('O lote contém identificadores de rota duplicados.');
+  }
+
+  input.existingPlans.forEach((plan) => {
+    validateStopIdentities(plan.baseStops, `A base da rota ${plan.routeId}`);
+    validateStopIdentities(plan.plannedStops, `O plano da rota ${plan.routeId}`);
+  });
+  newRoutes.forEach((plan) => {
+    validateStopIdentities(plan.plannedStops, `A nova rota ${plan.routeId}`);
+  });
+
+  const existingRouteIds = new Set(input.existingPlans.map((plan) => plan.routeId));
+  const allRouteIds = new Set(routeIds);
+  const sourceStops = new Set<string>();
+  const targetStops = new Set<string>();
+  (input.transferIntents || []).forEach((intent) => {
+    if (!intent.sourceRouteId.trim() || !intent.targetRouteId.trim() || !intent.stopKey.trim()) {
+      throw new RouteStructureConflictError('A intenção de transferência está incompleta.');
+    }
+    if (!existingRouteIds.has(intent.sourceRouteId)) {
+      throw new RouteStructureConflictError(`Rota de origem ${intent.sourceRouteId} ausente do lote.`);
+    }
+    if (!allRouteIds.has(intent.targetRouteId)) {
+      throw new RouteStructureConflictError(`Rota de destino ${intent.targetRouteId} ausente do lote.`);
+    }
+    if (intent.sourceRouteId === intent.targetRouteId) {
+      throw new RouteStructureConflictError('Uma transferência exige rotas distintas.');
+    }
+
+    const sourceKey = `${intent.sourceRouteId}\u0000${intent.stopKey}`;
+    const targetKey = `${intent.targetRouteId}\u0000${intent.stopKey}`;
+    if (sourceStops.has(sourceKey) || targetStops.has(targetKey)) {
+      throw new RouteStructureConflictError('A intenção de transferência não é um-para-um.');
+    }
+    sourceStops.add(sourceKey);
+    targetStops.add(targetKey);
+  });
+
+  if (input.serviceLink) {
+    const linkedIds = input.serviceLink.routeIds;
+    if (!input.serviceLink.serviceId.trim() || linkedIds.some((routeId) => !routeId.trim())) {
+      throw new RouteStructureConflictError('O vínculo do serviço contém identificador inválido.');
+    }
+    if (new Set(linkedIds).size !== linkedIds.length) {
+      throw new RouteStructureConflictError('O vínculo do serviço contém rotas duplicadas.');
+    }
+  }
+}
+
 export function createRouteStopMutationGateway(dependencies: RouteStopMutationDependencies) {
   async function saveRoutePlanBatchAtomically(
     input: RoutePlanBatchInput,
   ): Promise<SavedRoutePlanBatch> {
+    validateRoutePlanBatchInput(input);
     return dependencies.runTransaction(dependencies.db, async (transaction) => {
       const existingRefs = input.existingPlans.map((plan) => (
         dependencies.doc(dependencies.db, 'routes', plan.routeId)
@@ -137,46 +298,85 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
           plannedStops: plan.plannedStops,
           latestStops,
         });
-        const plannedKeys = new Set(rebased.map((stop) => getStopIdentityKey(stop)));
-        const removedStops = latestStops.filter((stop) => !plannedKeys.has(getStopIdentityKey(stop)));
-        return { plan, data, latestStops, rebased, removedStops };
+        const baseKeys = new Set(plan.baseStops.map((stop) => getStopIdentityKey(stop) as string));
+        const retainedLatestKeys = new Set(
+          plan.plannedStops
+            .map((stop) => getPlannedStopSourceKey(stop))
+            .filter((key): key is string => Boolean(key && baseKeys.has(key))),
+        );
+        const removedStops = latestStops.filter((stop) => (
+          !retainedLatestKeys.has(getStopIdentityKey(stop) as string)
+        ));
+        const metadata = omitUndefinedDeep(plan.metadata || {});
+        return { plan, data, latestStops, rebased, removedStops, baseKeys, metadata };
       });
 
-      const removedByIdentity = new Map<string, PlaceValue>();
-      preparedExisting.forEach(({ removedStops }) => {
-        removedStops.forEach((stop) => {
-          const key = getStopIdentityKey(stop);
-          if (!key) throw new RouteStructureConflictError('A parada removida não possui identidade estável.');
-          if (removedByIdentity.has(key)) {
-            throw new RouteStructureConflictError('A mesma parada foi removida de mais de uma rota.');
-          }
-          removedByIdentity.set(key, stop);
+      const transfersByTarget = new Map<string, Map<number, PlaceValue>>();
+      (input.transferIntents || []).forEach((intent) => {
+        const source = preparedExisting.find(({ plan }) => plan.routeId === intent.sourceRouteId);
+        const sourceMatches = source?.removedStops.filter((stop) => (
+          getStopIdentityKey(stop) === intent.stopKey
+        )) || [];
+        if (sourceMatches.length !== 1) {
+          throw new RouteStructureConflictError(
+            `A transferência de ${intent.stopKey} não corresponde a uma única remoção.`,
+          );
+        }
+
+        const existingTarget = preparedExisting.find(({ plan }) => (
+          plan.routeId === intent.targetRouteId
+        ));
+        const newTarget = newRoutes.find((plan) => plan.routeId === intent.targetRouteId);
+        const targetPlannedStops = existingTarget?.plan.plannedStops || newTarget?.plannedStops || [];
+        const targetBaseKeys = existingTarget?.baseKeys || new Set<string>();
+        const targetIndexes = targetPlannedStops.flatMap((stop, index) => {
+          const sourceKey = getPlannedStopSourceKey(stop);
+          return sourceKey === intent.stopKey && !targetBaseKeys.has(sourceKey) ? [index] : [];
         });
+        if (targetIndexes.length !== 1) {
+          throw new RouteStructureConflictError(
+            `A transferência de ${intent.stopKey} não corresponde a uma única adição.`,
+          );
+        }
+
+        const targetTransfers = transfersByTarget.get(intent.targetRouteId) || new Map<number, PlaceValue>();
+        if (targetTransfers.has(targetIndexes[0])) {
+          throw new RouteStructureConflictError('A adição de destino já foi consumida por outra transferência.');
+        }
+        targetTransfers.set(targetIndexes[0], sourceMatches[0]);
+        transfersByTarget.set(intent.targetRouteId, targetTransfers);
       });
 
-      const mergeTransferredExecution = (
-        plannedStops: PlaceValue[],
-        baseStops: PlaceValue[],
-      ): PlaceValue[] => {
-        const baseKeys = new Set(baseStops.map((stop) => getStopIdentityKey(stop)));
-        return plannedStops.map((plannedStop) => {
-          const key = getStopIdentityKey(plannedStop);
-          if (!key || baseKeys.has(key)) return plannedStop;
-          const sourceLatest = removedByIdentity.get(key);
-          if (!sourceLatest) return plannedStop;
+      const applyTransferredExecution = (
+        routeId: string,
+        plannedStops: PlannedRouteStop[],
+        rebasedStops?: PlaceValue[],
+      ): PlaceValue[] => plannedStops.map((plannedStop, index) => {
+        const sourceLatest = transfersByTarget.get(routeId)?.get(index);
+        if (sourceLatest) {
           return rebasePlannedStops({
             baseStops: [sourceLatest],
             plannedStops: [plannedStop],
             latestStops: [sourceLatest],
           })[0];
-        });
-      };
+        }
+        if (rebasedStops) return rebasedStops[index];
+        return rebasePlannedStops({
+          baseStops: [],
+          plannedStops: [plannedStop],
+          latestStops: [],
+        })[0];
+      });
 
       const existingResults = preparedExisting.map((prepared) => {
-        const rebased = mergeTransferredExecution(prepared.rebased, prepared.plan.baseStops);
-        const metadata = prepared.plan.metadata || {};
+        const rebased = applyTransferredExecution(
+          prepared.plan.routeId,
+          prepared.plan.plannedStops,
+          prepared.rebased,
+        );
+        const metadata = prepared.metadata;
         const changes = detectRouteChanges(prepared.latestStops, rebased);
-        const stops = markModifiedStops(rebased, changes);
+        const stops = omitUndefinedDeep(markModifiedStops(rebased, changes));
         return {
           routeId: prepared.plan.routeId,
           stops,
@@ -194,25 +394,28 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
 
       const createdRoutes = newRoutes.map((newRoute) => ({
         routeId: newRoute.routeId,
-        stops: mergeTransferredExecution(newRoute.plannedStops, []),
+        stops: omitUndefinedDeep(applyTransferredExecution(
+          newRoute.routeId,
+          newRoute.plannedStops,
+        )),
       }));
 
       existingResults.forEach((result, index) => {
         const plan = input.existingPlans[index];
-        transaction.update(existingRefs[index], {
-          ...(plan.metadata || {}),
+        transaction.update(existingRefs[index], omitUndefinedDeep({
+          ...preparedExisting[index].metadata,
           stops: result.stops,
           ...(plan.metrics || {}),
           updatedAt: dependencies.serverTimestamp(),
-        });
+        }));
       });
 
       createdRoutes.forEach((createdRoute, index) => {
-        transaction.set!(newRefs[index], {
+        transaction.set!(newRefs[index], omitUndefinedDeep({
           ...newRoutes[index].data,
           stops: createdRoute.stops,
           updatedAt: dependencies.serverTimestamp(),
-        });
+        }));
       });
 
       if (serviceRef && serviceSnapshot && input.serviceLink) {
@@ -263,7 +466,9 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
         input.targetStop,
         input.patch,
       );
-      const wasPreviouslyFinalized = Boolean(mutation.previousStop.deliveryStatus);
+      const wasPreviouslyFinalized =
+        mutation.previousStop.deliveryStatus === 'completed' ||
+        mutation.previousStop.deliveryStatus === 'failed';
       const transitionedToCompleted =
         mutation.previousStop.deliveryStatus !== 'completed' &&
         mutation.updatedStop.deliveryStatus === 'completed';
@@ -295,7 +500,10 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
     });
   }
 
-  async function acknowledgeRouteChangesAtomically(routeId: string): Promise<void> {
+  async function acknowledgeRouteChangesAtomically(
+    routeId: string,
+    expectedFingerprint?: string,
+  ): Promise<void> {
     await dependencies.runTransaction(dependencies.db, async (transaction) => {
       const routeRef = dependencies.doc(dependencies.db, 'routes', routeId);
       const notificationRef = dependencies.doc(dependencies.db, 'routeChangeNotifications', routeId);
@@ -303,6 +511,14 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
       const notificationSnapshot = await transaction.get(notificationRef);
       if (!routeSnapshot.exists()) throw new Error('Rota não encontrada.');
       if (!notificationSnapshot.exists()) throw new Error('Notificação não encontrada.');
+      if (expectedFingerprint) {
+        const currentFingerprint = getRouteChangeNotificationFingerprint(
+          notificationSnapshot.data() as RouteChangeNotification,
+        );
+        if (currentFingerprint !== expectedFingerprint) {
+          throw new RouteNotificationConflictError();
+        }
+      }
 
       transaction.update(routeRef, {
         stops: clearRouteChangeFlags((routeSnapshot.data().stops || []) as PlaceValue[]),
@@ -379,8 +595,11 @@ export async function confirmRouteStopAtomically(input: {
   return defaultGateway.confirmRouteStopAtomically(input);
 }
 
-export async function acknowledgeRouteChangesAtomically(routeId: string): Promise<void> {
-  return defaultGateway.acknowledgeRouteChangesAtomically(routeId);
+export async function acknowledgeRouteChangesAtomically(
+  routeId: string,
+  expectedFingerprint?: string,
+): Promise<void> {
+  return defaultGateway.acknowledgeRouteChangesAtomically(routeId, expectedFingerprint);
 }
 
 export { RouteStopNotFoundError };
