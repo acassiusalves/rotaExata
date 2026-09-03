@@ -6,12 +6,15 @@
  * 2. Conta quantas entregas bem-sucedidas cada motorista fez
  * 3. Atualiza o campo totalDeliveries de cada motorista
  *
- * Uso: npx tsx scripts/update-driver-deliveries.ts
+ * Uso: npx tsx scripts/update-driver-deliveries.ts [--apply]
  */
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as path from 'path';
+
+const shouldApply = process.argv.includes('--apply');
+const modeLabel = shouldApply ? 'APLICAÇÃO' : 'SIMULAÇÃO';
 
 // Inicializar Firebase Admin SDK
 if (getApps().length === 0) {
@@ -32,6 +35,7 @@ interface DeliveryCount {
 }
 
 async function updateDriverDeliveries() {
+  console.log(`Modo: ${modeLabel}`);
   console.log('🚀 Iniciando atualização de total de entregas dos motoristas...\n');
 
   try {
@@ -87,7 +91,7 @@ async function updateDriverDeliveries() {
     console.log(`\n📝 Total de motoristas: ${driverIds.length}\n`);
 
     // 3. Atualizar cada motorista no Firestore
-    console.log('🔄 Atualizando documentos dos motoristas...\n');
+    console.log('🔄 Conferindo documentos dos motoristas...\n');
 
     const batch = db.batch();
     let updateCount = 0;
@@ -100,23 +104,32 @@ async function updateDriverDeliveries() {
       const driverDoc = await driverRef.get();
 
       if (driverDoc.exists) {
-        batch.update(driverRef, {
-          totalDeliveries,
-          updatedAt: new Date(),
-        });
-        updateCount++;
-        console.log(`  ✅ ${driverName}: ${totalDeliveries} entregas → atualizado`);
+        const currentTotal = driverDoc.data()?.totalDeliveries || 0;
+
+        if (currentTotal !== totalDeliveries) {
+          console.log(`  ${driverName}: ${currentTotal} -> ${totalDeliveries}`);
+          updateCount++;
+
+          if (shouldApply) {
+            batch.update(driverRef, { totalDeliveries });
+          }
+        } else {
+          console.log(`  ${driverName}: ${currentTotal} (sem alteração)`);
+        }
       } else {
         console.log(`  ⚠️  ${driverName}: Documento não encontrado (ID: ${driverId})`);
       }
     }
 
-    // Executar batch update
+    if (!shouldApply) {
+      console.log(`\nSIMULAÇÃO: ${updateCount} motorista(s) precisariam de ajuste.`);
+      console.log('Execute novamente com --apply somente após revisar os valores.');
+      return;
+    }
+
     if (updateCount > 0) {
       await batch.commit();
-      console.log(`\n✨ Sucesso! ${updateCount} motoristas atualizados com sucesso!`);
-    } else {
-      console.log('\n⚠️  Nenhum motorista foi atualizado.');
+      console.log(`\n${updateCount} motorista(s) atualizado(s).`);
     }
 
     console.log('\n🎉 Migração concluída!\n');

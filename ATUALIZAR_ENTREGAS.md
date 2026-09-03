@@ -6,11 +6,24 @@ Este guia explica como atualizar o contador de entregas (`totalDeliveries`) de t
 
 ## ⚡ Execução Rápida
 
-Se você já tem o arquivo `serviceAccountKey.json` configurado:
+Se você já tem o arquivo `serviceAccountKey.json` configurado, execute primeiro a
+auditoria em modo simulação:
 
 ```bash
-npm run migrate:driver-deliveries
+npx tsx scripts/update-driver-deliveries.ts
 ```
+
+Esse comando apenas lê as rotas e os usuários, lista as diferenças entre o
+contador atual e o recalculado, e não grava nada. Depois de implantar a correção
+e conferir os valores exibidos, aplique somente os ajustes revisados com a flag
+explícita `--apply`:
+
+```bash
+npx tsx scripts/update-driver-deliveries.ts --apply
+```
+
+⚠️ `--apply` é a única opção que habilita escritas no Firestore. Nunca pule a
+simulação nem use essa flag sem revisar a auditoria.
 
 ## 📋 Passo a Passo Completo
 
@@ -32,8 +45,17 @@ mv ~/Downloads/seu-projeto-firebase-*.json /Users/acassiusalves/rotaExata/servic
 
 ### 3️⃣ Executar o Script
 
+Faça a simulação padrão e revise as diferenças:
+
 ```bash
-npm run migrate:driver-deliveries
+npx tsx scripts/update-driver-deliveries.ts
+```
+
+Após a implantação da correção e a conferência da simulação, execute a aplicação
+explicitamente:
+
+```bash
+npx tsx scripts/update-driver-deliveries.ts --apply
 ```
 
 ### 4️⃣ Verificar Resultados
@@ -41,6 +63,7 @@ npm run migrate:driver-deliveries
 Você verá uma saída como:
 
 ```
+Modo: SIMULAÇÃO
 🚀 Iniciando atualização de total de entregas dos motoristas...
 
 📦 Buscando todas as rotas...
@@ -55,13 +78,14 @@ Você verá uma saída como:
 
 📝 Total de motoristas: 3
 
-🔄 Atualizando documentos dos motoristas...
+🔄 Conferindo documentos dos motoristas...
 
-  ✅ João Silva: 28 entregas → atualizado
-  ✅ Maria Santos: 15 entregas → atualizado
-  ✅ Pedro Costa: 12 entregas → atualizado
+  João Silva: 20 -> 28
+  Maria Santos: 15 (sem alteração)
+  Pedro Costa: 12 (sem alteração)
 
-✨ Sucesso! 3 motoristas atualizados com sucesso!
+SIMULAÇÃO: 1 motorista(s) precisariam de ajuste.
+Execute novamente com --apply somente após revisar os valores.
 
 🎉 Migração concluída!
 ```
@@ -100,7 +124,10 @@ Após executar este script pela primeira vez:
 
 ### É seguro executar em produção?
 
-✅ Sim, o script apenas atualiza o campo `totalDeliveries`, não altera outros dados.
+✅ O padrão é seguro para auditoria: sem `--apply`, o script não chama escritas
+no Firestore e apenas lista diferenças. Depois de implantar a correção e revisar
+a simulação, `--apply` atualiza somente `totalDeliveries` dos motoristas que
+divergirem do valor recalculado.
 
 ## 🔒 Segurança
 
