@@ -35,8 +35,9 @@ class MemoryFirestore {
     set: (ref: Ref, data: StoredDocument) => void;
   }) => Promise<Result>): Promise<Result> {
     let hasWritten = false;
+    const stagedDocuments = new Map<string, StoredDocument>();
 
-    return callback({
+    const result = await callback({
       get: async (ref) => {
         if (hasWritten) throw new Error('Leitura após escrita na transação.');
         this.operations.push(`read:${ref.collection}/${ref.id}`);
@@ -50,7 +51,7 @@ class MemoryFirestore {
         hasWritten = true;
         this.operations.push(`write:${ref.collection}/${ref.id}`);
         const key = `${ref.collection}/${ref.id}`;
-        const current = this.documents.get(key);
+        const current = stagedDocuments.get(key) ?? this.documents.get(key);
         if (!current) throw new Error(`Documento ${key} não encontrado.`);
         const next = { ...current };
         Object.entries(patch).forEach(([field, value]) => {
@@ -59,14 +60,19 @@ class MemoryFirestore {
             ? Number(next[field] || 0) + increment.amount
             : structuredClone(value);
         });
-        this.documents.set(key, next);
+        stagedDocuments.set(key, next);
       },
       set: (ref, data) => {
         hasWritten = true;
         this.operations.push(`set:${ref.collection}/${ref.id}`);
-        this.documents.set(`${ref.collection}/${ref.id}`, structuredClone(data));
+        stagedDocuments.set(`${ref.collection}/${ref.id}`, structuredClone(data));
       },
     });
+
+    stagedDocuments.forEach((document, key) => {
+      this.documents.set(key, document);
+    });
+    return result;
   }
 }
 
@@ -127,6 +133,31 @@ assert.deepEqual(saveStore.operations, [
   'write:routes/r1',
   'write:routes/r2',
 ]);
+
+const rollbackStore = new MemoryFirestore({
+  'routes/source': { status: 'draft', stops: [stop('rollback')] },
+  'services/service-rollback': { routeIds: ['source'] },
+});
+await assert.rejects(
+  () => rollbackStore.runTransaction(async (transaction) => {
+    transaction.update(rollbackStore.ref('routes', 'source'), { status: 'dispatched' });
+    transaction.set(rollbackStore.ref('routes', 'new-route'), {
+      status: 'draft',
+      stops: [stop('new')],
+    });
+    transaction.update(rollbackStore.ref('services', 'service-rollback'), {
+      routeIds: ['source', 'new-route'],
+    });
+    throw new Error('falha injetada após escritas staged');
+  }),
+  /falha injetada após escritas staged/,
+);
+assert.equal(rollbackStore.data(rollbackStore.ref('routes', 'source')).status, 'draft');
+assert.equal(rollbackStore.has(rollbackStore.ref('routes', 'new-route')), false);
+assert.deepEqual(
+  rollbackStore.data(rollbackStore.ref('services', 'service-rollback')).routeIds,
+  ['source'],
+);
 
 const regressionFailures: string[] = [];
 
