@@ -103,4 +103,20 @@ assert.equal(clean[0].modificationType, undefined);
 assert.equal(clean[0].originalSequence, undefined);
 assert.equal(clean[0].deliveryStatus, 'completed');
 
+const firstCompletion = updateStopByIdentity(
+  [stop('A')],
+  stop('A'),
+  { deliveryStatus: 'completed' },
+);
+assert.equal(firstCompletion.previousStop.deliveryStatus, undefined);
+assert.equal(firstCompletion.updatedStop.deliveryStatus, 'completed');
+
+const completedEdit = updateStopByIdentity(
+  [stop('A', { deliveryStatus: 'completed' })],
+  stop('A'),
+  { deliveryStatus: 'completed', notes: 'Corrigida' },
+);
+assert.equal(completedEdit.previousStop.deliveryStatus, 'completed');
+assert.equal(completedEdit.updatedStop.deliveryStatus, 'completed');
+
 console.log('OK: reconciliação preserva execução e rejeita conflitos estruturais.');
