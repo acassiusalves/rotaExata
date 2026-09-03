@@ -115,6 +115,7 @@ export type RouteChangeNotification = {
   driverId: string;
   changes: Array<{
     stopId: string;
+    stopKey?: string;
     stopIndex: number;
     changeType: 'address' | 'sequence' | 'data' | 'removed' | 'added';
     oldValue?: any;
