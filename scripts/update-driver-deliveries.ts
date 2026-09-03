@@ -10,8 +10,9 @@
  */
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, type DocumentReference } from 'firebase-admin/firestore';
 import * as path from 'path';
+import { commitDriverDeliveryUpdates } from './driver-delivery-repair';
 
 const shouldApply = process.argv.includes('--apply');
 const modeLabel = shouldApply ? 'APLICAÇÃO' : 'SIMULAÇÃO';
@@ -119,8 +120,11 @@ async function updateDriverDeliveries() {
     // 3. Atualizar cada motorista no Firestore
     console.log('🔄 Conferindo documentos dos motoristas...\n');
 
-    const batch = db.batch();
     let updateCount = 0;
+    const pendingUpdates: Array<{
+      reference: DocumentReference;
+      totalDeliveries: number;
+    }> = [];
 
     for (const driverId of driverIds) {
       const driverDoc = driverDocs.get(driverId);
@@ -140,13 +144,23 @@ async function updateDriverDeliveries() {
         console.log(`  ${driverName}: ${currentTotal} -> ${totalDeliveries}`);
         updateCount++;
 
-        if (shouldApply) {
-          batch.update(driverDoc.ref, { totalDeliveries });
-        }
+        pendingUpdates.push({ reference: driverDoc.ref, totalDeliveries });
       } else {
         console.log(`  ${driverName}: ${currentTotal} (sem alteração)`);
       }
     }
+
+    const writeResult = await commitDriverDeliveryUpdates({
+      updates: pendingUpdates,
+      shouldApply,
+      createBatch: () => {
+        const batch = db.batch();
+        return {
+          update: (reference, data) => batch.update(reference, data),
+          commit: () => batch.commit(),
+        };
+      },
+    });
 
     if (!shouldApply) {
       console.log(`\nSIMULAÇÃO: ${updateCount} motorista(s) precisariam de ajuste.`);
@@ -154,9 +168,10 @@ async function updateDriverDeliveries() {
       return;
     }
 
-    if (updateCount > 0) {
-      await batch.commit();
-      console.log(`\n${updateCount} motorista(s) atualizado(s).`);
+    if (writeResult.updateCount > 0) {
+      console.log(
+        `\n${writeResult.updateCount} motorista(s) atualizado(s) em ${writeResult.commitCount} batch(es).`,
+      );
     }
 
     console.log('\n🎉 Migração concluída!\n');
