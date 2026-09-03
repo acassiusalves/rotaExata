@@ -83,6 +83,18 @@ const byOrder = updateStopByIdentity(
 assert.equal(byOrder.updatedStop.deliveryStatus, 'completed');
 assert.equal(byOrder.index, 0);
 
+const reorderedBeforeConfirmation = [stop('B'), stop('A')];
+const confirmation = updateStopByIdentity(
+  reorderedBeforeConfirmation,
+  stop('A'),
+  { deliveryStatus: 'completed', payments: [{ id: 'cash-1', method: 'dinheiro', value: 50 }] },
+);
+assert.equal(confirmation.index, 1);
+assert.equal(confirmation.stops[0].id, 'B');
+assert.equal(confirmation.stops[0].deliveryStatus, undefined);
+assert.equal(confirmation.stops[1].id, 'A');
+assert.equal(confirmation.stops[1].deliveryStatus, 'completed');
+
 assert.throws(
   () => updateStopByIdentity(latest, stop('removida'), { deliveryStatus: 'completed' }),
   RouteStopNotFoundError,

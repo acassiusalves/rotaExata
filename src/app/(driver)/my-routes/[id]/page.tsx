@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { db, storage } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp, updateDoc, increment, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, Timestamp, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -46,6 +46,11 @@ import { StopChangeBadge } from '@/components/driver/stop-change-badge';
 import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
 import { logPointCompleted, logPointFailed } from '@/lib/firebase/activity-log';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  acknowledgeRouteChangesAtomically,
+  confirmRouteStopAtomically,
+  RouteStopNotFoundError,
+} from '@/lib/firebase/route-stop-mutations';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -187,33 +192,7 @@ export default function RouteDetailsPage() {
 
     setIsAcknowledging(true);
     try {
-      const notificationRef = doc(db, 'routeChangeNotifications', routeId);
-      await updateDoc(notificationRef, {
-        acknowledged: true,
-        acknowledgedAt: Timestamp.now(),
-      });
-
-      // Limpar os flags wasModified das paradas
-      if (route) {
-        const updatedStops = route.stops.map((stop) => {
-          const {
-            modificationType: _modificationType,
-            originalSequence: _originalSequence,
-            ...cleanStop
-          } = stop;
-
-          return {
-            ...cleanStop,
-            wasModified: false,
-          };
-        });
-
-        const routeRef = doc(db, 'routes', routeId);
-        await updateDoc(routeRef, {
-          stops: updatedStops,
-          pendingChanges: false,
-        });
-      }
+      await acknowledgeRouteChangesAtomically(routeId);
 
       toast({
         title: 'Alterações confirmadas',
@@ -390,32 +369,23 @@ export default function RouteDetailsPage() {
     payments?: Payment[];
     deliveredItemIds?: string[];
   }) => {
-    if (!route || selectedStopIndex === null) {
-      console.error('❌ Confirmação falhou: route ou selectedStopIndex é null');
+    if (!route || selectedStopIndex === null || !user) {
+      console.error('Confirmação falhou: rota, parada ou motorista ausente.');
       return;
     }
 
-    // Detectar se é uma edição (stop já tinha deliveryStatus)
-    const currentStop = route.stops[selectedStopIndex];
-    const isEdit = !!currentStop.deliveryStatus;
+    const selectedStop = route.stops[selectedStopIndex];
+    let resolvedPhotoUrl: string | null = selectedStop.photoUrl || null;
+    let resolvedAttemptPhotoUrl: string | null = selectedStop.attemptPhotoUrl || null;
 
     try {
-      const updatedStops = [...route.stops];
-      const updatedStop: any = {
-        ...updatedStops[selectedStopIndex],
-        deliveryStatus: data.status,
-        completedAt: Timestamp.now(),
-        // Marcar que foi editado pelo motorista
-        ...(isEdit && { editedByDriver: true, editedAt: Timestamp.now() }),
-      };
-
       // Upload da foto para o Storage se houver nova foto (base64)
-      if (data.photo && data.photo.startsWith('data:')) {
+      if (data.photo?.startsWith('data:')) {
         try {
           // Cria referência única para a foto
           const photoRef = ref(
             storage,
-            `delivery-photos/${routeId}/${selectedStopIndex}-${Date.now()}.jpg`
+            `delivery-photos/${routeId}/${selectedStop.id || selectedStop.placeId}-${Date.now()}.jpg`,
           );
 
           // Faz upload da foto em base64
@@ -425,61 +395,33 @@ export default function RouteDetailsPage() {
           const photoURL = await getDownloadURL(photoRef);
 
           // Salva apenas a URL no documento
-          updatedStop.photoUrl = photoURL;
+          resolvedPhotoUrl = photoURL;
         } catch (photoError) {
           console.error('❌ Erro ao fazer upload da foto:', photoError);
-          // Se falhar o upload, continua sem a foto
+          // Se falhar o upload, mantém a foto anterior
           toast({
             variant: 'destructive',
             title: 'Aviso',
             description: 'Não foi possível salvar a foto, mas a entrega foi registrada.',
           });
         }
-      } else if (data.photo && data.photo.startsWith('http')) {
+      } else if (data.photo?.startsWith('http')) {
         // Manter URL existente (não foi alterada)
-        updatedStop.photoUrl = data.photo;
-      } else if (!data.photo && isEdit) {
-        // Foto foi removida na edição - limpar do Firestore
-        updatedStop.photoUrl = null;
-      }
-
-      // Atualizar ou limpar notas
-      if (data.notes) {
-        updatedStop.notes = data.notes;
-      } else if (isEdit) {
-        updatedStop.notes = null;
-      }
-
-      if (data.failureReason) {
-        updatedStop.failureReason = data.failureReason;
-      }
-      if (data.wentToLocation !== undefined) {
-        updatedStop.wentToLocation = data.wentToLocation;
-      }
-
-      // Atualizar ou limpar pagamentos
-      if (data.payments && data.payments.length > 0) {
-        updatedStop.payments = data.payments;
-      } else if (isEdit && data.status === 'failed') {
-        // Se mudou para falha, limpar pagamentos
-        updatedStop.payments = null;
-      }
-
-      // Salvar IDs dos itens entregues (Lunna)
-      if (data.deliveredItemIds && data.deliveredItemIds.length > 0) {
-        updatedStop.deliveredItemIds = data.deliveredItemIds;
+        resolvedPhotoUrl = data.photo;
+      } else if (!data.photo) {
+        resolvedPhotoUrl = null;
       }
 
       // Upload da foto da tentativa de entrega se houver nova foto (base64)
-      if (data.attemptPhoto && data.attemptPhoto.startsWith('data:')) {
+      if (data.attemptPhoto?.startsWith('data:')) {
         try {
           const attemptPhotoRef = ref(
             storage,
-            `delivery-attempt-photos/${routeId}/${selectedStopIndex}-${Date.now()}.jpg`
+            `delivery-attempt-photos/${routeId}/${selectedStop.id || selectedStop.placeId}-${Date.now()}.jpg`,
           );
           await uploadString(attemptPhotoRef, data.attemptPhoto, 'data_url');
           const attemptPhotoURL = await getDownloadURL(attemptPhotoRef);
-          updatedStop.attemptPhotoUrl = attemptPhotoURL;
+          resolvedAttemptPhotoUrl = attemptPhotoURL;
         } catch (photoError) {
           console.error('❌ Erro ao fazer upload da foto de tentativa:', photoError);
           toast({
@@ -488,69 +430,65 @@ export default function RouteDetailsPage() {
             description: 'Não foi possível salvar a foto de tentativa, mas a entrega foi registrada.',
           });
         }
-      } else if (data.attemptPhoto && data.attemptPhoto.startsWith('http')) {
+      } else if (data.attemptPhoto?.startsWith('http')) {
         // Manter URL existente
-        updatedStop.attemptPhotoUrl = data.attemptPhoto;
-      } else if (!data.attemptPhoto && isEdit) {
-        // Foto de tentativa foi removida - limpar do Firestore
-        updatedStop.attemptPhotoUrl = null;
+        resolvedAttemptPhotoUrl = data.attemptPhoto;
+      } else if (!data.attemptPhoto) {
+        resolvedAttemptPhotoUrl = null;
       }
 
-      updatedStops[selectedStopIndex] = updatedStop;
+      const deliveryPatch: Record<string, unknown> = {
+        deliveryStatus: data.status,
+        completedAt: Timestamp.now(),
+        notes: data.notes || null,
+        failureReason: data.status === 'failed' ? data.failureReason || null : null,
+        wentToLocation: data.status === 'failed' ? Boolean(data.wentToLocation) : null,
+        payments: data.status === 'completed' ? data.payments || [] : null,
+        deliveredItemIds: data.status === 'completed' ? data.deliveredItemIds || [] : null,
+        photoUrl: resolvedPhotoUrl,
+        attemptPhotoUrl: resolvedAttemptPhotoUrl,
+      };
 
-      const routeRef = doc(db, 'routes', routeId);
-      await updateDoc(routeRef, {
-        stops: updatedStops,
-        currentStopIndex: selectedStopIndex + 1,
+      const result = await confirmRouteStopAtomically({
+        routeId,
+        driverId: user.uid,
+        targetStop: selectedStop,
+        patch: deliveryPatch as Partial<PlaceValue>,
       });
 
       // Registrar no activity log
-      if (user) {
-        const stop = updatedStop;
-        if (data.status === 'completed') {
-          await logPointCompleted({
-            userId: user.uid,
-            userName: user.email || route.driverInfo?.name || 'Motorista',
-            pointId: stop.id || stop.placeId,
-            pointCode: stop.pointCode,
-            routeId: routeId,
-            routeCode: route.code || 'Rota',
-            serviceId: route.serviceId,
-            serviceCode: route.serviceCode,
-            photoUrl: stop.photoUrl,
-            address: stop.address,
-            customerName: stop.customerName,
-            notes: stop.notes,
-          });
-        } else if (data.status === 'failed') {
-          await logPointFailed({
-            userId: user.uid,
-            userName: user.email || route.driverInfo?.name || 'Motorista',
-            pointId: stop.id || stop.placeId,
-            pointCode: stop.pointCode,
-            routeId: routeId,
-            routeCode: route.code || 'Rota',
-            serviceId: route.serviceId,
-            serviceCode: route.serviceCode,
-            failureReason: stop.failureReason,
-            wentToLocation: stop.wentToLocation,
-            attemptPhotoUrl: stop.attemptPhotoUrl,
-            address: stop.address,
-            customerName: stop.customerName,
-          });
-        }
-      }
-
-      // Incrementar contador de entregas do motorista se for entrega bem-sucedida
-      if (data.status === 'completed' && route.driverId) {
-        try {
-          const driverRef = doc(db, 'users', route.driverId);
-          await updateDoc(driverRef, {
-            totalDeliveries: increment(1),
-          });
-        } catch (counterError) {
-          console.error('⚠️ Erro ao incrementar contador (não crítico):', counterError);
-        }
+      const updatedStop = result.updatedStop;
+      if (updatedStop.deliveryStatus === 'completed') {
+        await logPointCompleted({
+          userId: user.uid,
+          userName: user.email || route.driverInfo?.name || 'Motorista',
+          pointId: updatedStop.id || updatedStop.placeId,
+          pointCode: updatedStop.pointCode,
+          routeId: routeId,
+          routeCode: route.code || 'Rota',
+          serviceId: route.serviceId,
+          serviceCode: route.serviceCode,
+          photoUrl: updatedStop.photoUrl,
+          address: updatedStop.address,
+          customerName: updatedStop.customerName,
+          notes: updatedStop.notes,
+        });
+      } else if (updatedStop.deliveryStatus === 'failed') {
+        await logPointFailed({
+          userId: user.uid,
+          userName: user.email || route.driverInfo?.name || 'Motorista',
+          pointId: updatedStop.id || updatedStop.placeId,
+          pointCode: updatedStop.pointCode,
+          routeId: routeId,
+          routeCode: route.code || 'Rota',
+          serviceId: route.serviceId,
+          serviceCode: route.serviceCode,
+          failureReason: updatedStop.failureReason,
+          wentToLocation: updatedStop.wentToLocation,
+          attemptPhotoUrl: updatedStop.attemptPhotoUrl,
+          address: updatedStop.address,
+          customerName: updatedStop.customerName,
+        });
       }
 
       // Sincronizar status com pedidos do Lunna se a rota for importada
@@ -559,7 +497,7 @@ export default function RouteDetailsPage() {
           await syncLunnaOrderStatus(
             route,
             updatedStop,
-            data.status === 'completed' ? 'entregue' : 'falha'
+            updatedStop.deliveryStatus === 'completed' ? 'entregue' : 'falha',
           );
         } catch (syncError) {
           console.error('⚠️ Erro ao sincronizar com Lunna (não crítico):', syncError);
@@ -568,10 +506,11 @@ export default function RouteDetailsPage() {
       }
 
       // Notificar admin quando motorista editar uma entrega já concluída
-      if (isEdit) {
+      if (result.wasPreviouslyFinalized) {
         try {
           const driverName = route.driverInfo?.name || 'Motorista';
-          const stopName = currentStop.customerName || currentStop.address || `Ponto ${selectedStopIndex + 1}`;
+          const committedStopIndex = result.stops.indexOf(updatedStop);
+          const stopName = updatedStop.customerName || updatedStop.address || 'Ponto confirmado';
 
           await addDoc(collection(db, 'notifications'), {
             type: 'delivery_edited',
@@ -580,7 +519,7 @@ export default function RouteDetailsPage() {
             priority: 'normal',
             routeId: routeId,
             routeName: route.name,
-            stopIndex: selectedStopIndex,
+            stopIndex: committedStopIndex,
             driverId: route.driverId,
             driverName: driverName,
             read: false,
@@ -597,12 +536,12 @@ export default function RouteDetailsPage() {
       }
 
       toast({
-        title: isEdit
+        title: result.wasPreviouslyFinalized
           ? 'Informações atualizadas!'
-          : (data.status === 'completed' ? 'Entrega confirmada!' : 'Falha registrada'),
-        description: isEdit
+          : (updatedStop.deliveryStatus === 'completed' ? 'Entrega confirmada!' : 'Falha registrada'),
+        description: result.wasPreviouslyFinalized
           ? 'As informações da entrega foram atualizadas com sucesso.'
-          : (data.status === 'completed'
+          : (updatedStop.deliveryStatus === 'completed'
             ? 'A entrega foi registrada com sucesso.'
             : 'A falha na entrega foi registrada.'),
       });
@@ -610,6 +549,17 @@ export default function RouteDetailsPage() {
       setIsConfirmDialogOpen(false);
       setSelectedStopIndex(null);
     } catch (error) {
+      if (error instanceof RouteStopNotFoundError) {
+        setIsConfirmDialogOpen(false);
+        setSelectedStopIndex(null);
+        toast({
+          variant: 'destructive',
+          title: 'Esta parada mudou',
+          description: 'A parada foi removida ou movida enquanto você confirmava. A rota foi atualizada sem recriá-la.',
+        });
+        return;
+      }
+
       toast({
         variant: 'destructive',
         title: 'Erro ao confirmar',
