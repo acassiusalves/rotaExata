@@ -71,19 +71,45 @@ async function updateDriverDeliveries() {
       }
     });
 
+    // A população auditada é a dos usuários que o sistema reconhece como motoristas.
+    console.log('👥 Buscando todos os motoristas...');
+    const driversSnapshot = await db
+      .collection('users')
+      .where('role', '==', 'driver')
+      .get();
+    console.log(`✅ Encontrados ${driversSnapshot.size} motoristas\n`);
+
+    const driverDocs = new Map(driversSnapshot.docs.map((driverDoc) => [driverDoc.id, driverDoc]));
+    const routeDriverIds = Object.keys(deliveryCounts);
+    routeDriverIds
+      .filter((driverId) => !driverDocs.has(driverId))
+      .forEach((driverId) => {
+        const driverName = deliveryCounts[driverId].driverName;
+        console.log(
+          `  ⚠️  Rota referencia motorista ausente: ${driverName} (ID: ${driverId}); ignorando.`
+        );
+      });
+
     console.log('📊 Contagem de entregas por motorista:');
     console.log('─'.repeat(60));
 
-    const driverIds = Object.keys(deliveryCounts);
+    const driverIds = driversSnapshot.docs.map((driverDoc) => driverDoc.id);
 
     if (driverIds.length === 0) {
-      console.log('⚠️  Nenhum motorista com entregas encontrado.');
+      console.log('⚠️  Nenhum motorista encontrado.');
       return;
     }
 
     // Exibir contagem
     driverIds.forEach((driverId) => {
-      const { driverName, totalDeliveries } = deliveryCounts[driverId];
+      const driverData = driverDocs.get(driverId)?.data() || {};
+      const driverName =
+        driverData.displayName ||
+        driverData.name ||
+        deliveryCounts[driverId]?.driverName ||
+        driverData.email ||
+        'Motorista sem nome';
+      const totalDeliveries = deliveryCounts[driverId]?.totalDeliveries || 0;
       console.log(`👤 ${driverName} (${driverId}): ${totalDeliveries} entregas`);
     });
 
@@ -97,27 +123,28 @@ async function updateDriverDeliveries() {
     let updateCount = 0;
 
     for (const driverId of driverIds) {
-      const { driverName, totalDeliveries } = deliveryCounts[driverId];
-      const driverRef = db.collection('users').doc(driverId);
+      const driverDoc = driverDocs.get(driverId);
+      if (!driverDoc) continue;
 
-      // Verificar se o motorista existe
-      const driverDoc = await driverRef.get();
+      const driverData = driverDoc.data();
+      const driverName =
+        driverData.displayName ||
+        driverData.name ||
+        deliveryCounts[driverId]?.driverName ||
+        driverData.email ||
+        'Motorista sem nome';
+      const totalDeliveries = deliveryCounts[driverId]?.totalDeliveries || 0;
+      const currentTotal = driverData.totalDeliveries || 0;
 
-      if (driverDoc.exists) {
-        const currentTotal = driverDoc.data()?.totalDeliveries || 0;
+      if (currentTotal !== totalDeliveries) {
+        console.log(`  ${driverName}: ${currentTotal} -> ${totalDeliveries}`);
+        updateCount++;
 
-        if (currentTotal !== totalDeliveries) {
-          console.log(`  ${driverName}: ${currentTotal} -> ${totalDeliveries}`);
-          updateCount++;
-
-          if (shouldApply) {
-            batch.update(driverRef, { totalDeliveries });
-          }
-        } else {
-          console.log(`  ${driverName}: ${currentTotal} (sem alteração)`);
+        if (shouldApply) {
+          batch.update(driverDoc.ref, { totalDeliveries });
         }
       } else {
-        console.log(`  ⚠️  ${driverName}: Documento não encontrado (ID: ${driverId})`);
+        console.log(`  ${driverName}: ${currentTotal} (sem alteração)`);
       }
     }
 

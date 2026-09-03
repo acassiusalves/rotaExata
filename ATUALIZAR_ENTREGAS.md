@@ -25,6 +25,11 @@ npx tsx scripts/update-driver-deliveries.ts --apply
 ⚠️ `--apply` é a única opção que habilita escritas no Firestore. Nunca pule a
 simulação nem use essa flag sem revisar a auditoria.
 
+O script audita todos os documentos de `users` cujo `role` é `driver`, inclusive
+motoristas que não têm nenhuma rota atual (nesses casos, o valor recalculado é
+zero). Se uma rota apontar para um usuário ausente, a referência será reportada
+e ignorada; o script não cria usuários.
+
 ## 📋 Passo a Passo Completo
 
 ### 1️⃣ Baixar Credenciais do Firebase
