@@ -109,7 +109,12 @@ import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs,
 import { httpsCallable } from 'firebase/functions';
 import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
+import {
+  saveExistingRoutePlansAtomically,
+  type RouteMetrics,
+  type SavedRoutePlan,
+} from '@/lib/firebase/route-stop-mutations';
+import { RouteStructureConflictError } from '@/lib/route-stop-reconciliation';
 import {
   dedupeStops,
   findStopIndexByIdentity,
@@ -594,6 +599,13 @@ export default function RouteAcompanharPage() {
 
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
+  const persistedStopsRef = React.useRef<Record<string, PlaceValue[]>>({});
+  const rememberPersistedStops = React.useCallback((id: string, stops: PlaceValue[]) => {
+    persistedStopsRef.current[id] = stops;
+  }, []);
+  const getPersistedStops = React.useCallback((id: string, fallback: PlaceValue[]) => (
+    persistedStopsRef.current[id] || fallback
+  ), []);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
   const [routeNames, setRouteNames] = React.useState<Record<string, string>>({ A: 'Rota 1', B: 'Rota 2' });
   const [assignedDrivers, setAssignedDrivers] = React.useState<Record<string, string | null>>({ A: null, B: null });
@@ -1066,6 +1078,7 @@ export default function RouteAcompanharPage() {
             }
 
             const routeDoc = doc.data();
+            rememberPersistedStops(doc.id, routeDoc.stops || []);
 
             // Skip completed or finished routes
             if (routeDoc.status === 'completed' || routeDoc.status === 'completed_auto' || routeDoc.status === 'finished') {
@@ -1153,6 +1166,7 @@ export default function RouteAcompanharPage() {
           }
 
           const routeDoc = doc.data();
+          rememberPersistedStops(doc.id, routeDoc.stops || []);
 
           // Skip completed or finished routes
           if (routeDoc.status === 'completed' || routeDoc.status === 'completed_auto' || routeDoc.status === 'finished') {
@@ -1211,7 +1225,7 @@ export default function RouteAcompanharPage() {
     };
 
     loadAdditionalRoutes();
-  }, [routeData?.routeDate, routeData?.period, routeData?.serviceId]);
+  }, [routeData?.routeDate, routeData?.period, routeData?.serviceId, rememberPersistedStops]);
 
   // Subscribe to real-time location updates for existing route
   React.useEffect(() => {
@@ -1291,6 +1305,7 @@ export default function RouteAcompanharPage() {
         }
 
         const routeData = routeDoc.data();
+        rememberPersistedStops(routeId, routeData.stops || []);
         console.log('✅ [useEffect:loadRouteData] Rota carregada:', {
           id: routeId,
           name: routeData.name,
@@ -1352,6 +1367,7 @@ export default function RouteAcompanharPage() {
 
             if (routeSnap.exists()) {
               const routeData = routeSnap.data();
+              rememberPersistedStops(routeSnap.id, routeData.stops || []);
               console.log('✅ [useEffect:loadRouteData] Rota carregada do Firestore:', {
                 id: routeSnap.id,
                 name: routeData.name,
@@ -1408,6 +1424,7 @@ export default function RouteAcompanharPage() {
                         unassignedStops: cleanedUnassigned,
                         updatedAt: serverTimestamp(),
                       });
+                      rememberPersistedStops(parsedData.currentRouteId!, allStops);
                       routeData.unassignedStops = cleanedUnassigned;
                       console.log(`✅ [loadRouteData] Removidos ${origLen - allStops.length} stop(s) desvinculado(s) da rota`);
                     }
@@ -1566,6 +1583,7 @@ export default function RouteAcompanharPage() {
               console.log('🔍 [useEffect:loadRouteData] Encontradas rotas no Firestore:', snap.size);
               serviceExistingRoutes = snap.docs.map(d => {
                 const data = d.data();
+                rememberPersistedStops(d.id, data.stops || []);
                 return {
                   id: d.id,
                   code: data.code || '',
@@ -1618,6 +1636,7 @@ export default function RouteAcompanharPage() {
                           stops: sr.stops,
                           updatedAt: serverTimestamp(),
                         });
+                        rememberPersistedStops(sr.id, sr.stops);
                         console.log(`✅ [loadRouteData:service] Removidos ${origLen - sr.stops.length} stop(s) da rota ${sr.code}`);
                       }
                     }
@@ -2046,7 +2065,7 @@ export default function RouteAcompanharPage() {
     };
 
     loadRouteData();
-  }, [routeId, router, toast]);
+  }, [routeId, router, toast, rememberPersistedStops]);
 
   // Real-time listener: sincronizar nome da rota
   React.useEffect(() => {
@@ -2136,6 +2155,7 @@ export default function RouteAcompanharPage() {
               console.log('👂 [serviceListener] Novos stops detectados na rota', routeCode, ':', newCount, 'novo(s)');
 
               // Atualizar o state local da rota com os stops do Firestore
+              rememberPersistedStops(routeDoc.id, firestoreStops);
               setRoute(routeKey, prev => prev ? {
                 ...prev,
                 stops: firestoreStops,
@@ -2194,7 +2214,7 @@ export default function RouteAcompanharPage() {
       console.log('👂 [serviceListener] Limpando listener do serviço');
       unsubscribe();
     };
-  }, [routeData?.isService, routeData?.serviceId]);
+  }, [routeData?.isService, routeData?.serviceId, rememberPersistedStops]);
 
   // Real-time listener: detectar mudanças no serviço (novos stops adicionados ao allStops)
   React.useEffect(() => {
@@ -3398,6 +3418,29 @@ export default function RouteAcompanharPage() {
     }
   };
 
+  const applySavedRouteResult = (routeKey: string, result: SavedRoutePlan, metrics?: RouteMetrics) => {
+    rememberPersistedStops(result.routeId, result.stops);
+    setRoute(routeKey, (previous) => previous ? {
+      ...previous,
+      stops: result.stops,
+      ...(metrics || {}),
+    } : null);
+  };
+
+  const notifySavedRouteChanges = async (result: SavedRoutePlan) => {
+    if (
+      result.changes.length === 0 ||
+      !result.driverId ||
+      !['dispatched', 'in_progress'].includes(result.status)
+    ) return;
+    const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+    await notifyFn({
+      routeId: result.routeId,
+      driverId: result.driverId,
+      changes: result.changes,
+    });
+  };
+
   const hasPendingEdit = (routeKey: string) =>
     pendingEdits[routeKey] !== null && pendingEdits[routeKey] !== undefined;
 
@@ -3773,77 +3816,69 @@ export default function RouteAcompanharPage() {
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
-        const routeRef = doc(db, 'routes', currentRouteId);
-
-        // Buscar a rota atual do Firestore para comparar
-        const currentRouteDoc = await getDoc(routeRef);
-        if (!currentRouteDoc.exists()) {
-          throw new Error('Rota não encontrada no Firebase');
-        }
-
-        const currentRouteData = currentRouteDoc.data();
-        const oldStops = currentRouteData.stops || [];
-        const newStops = routeToUpdate.stops;
-
-        // Detectar mudanças
-        const changes = detectRouteChanges(oldStops, newStops);
-
-        // Marcar paradas modificadas
-        const stopsWithFlags = markModifiedStops(newStops, changes);
+        const metrics: RouteMetrics = {
+          encodedPolyline: routeToUpdate.encodedPolyline,
+          distanceMeters: routeToUpdate.distanceMeters,
+          duration: routeToUpdate.duration,
+        };
+        const [result] = await saveExistingRoutePlansAtomically([{
+          routeId: currentRouteId,
+          baseStops: getPersistedStops(currentRouteId, routeToUpdate.stops),
+          plannedStops: routeToUpdate.stops,
+          metrics,
+        }]);
+        applySavedRouteResult(routeKey, result, metrics);
 
         // Verificar se foi atribuído um motorista na aba Atribuir
         const driverId = assignedDrivers[routeKey];
         const driver = driverId ? availableDrivers.find(d => d.id === driverId) : null;
-
-        // Preparar dados para atualização
-        const updateData: Record<string, any> = {
-            stops: stopsWithFlags,
-            distanceMeters: routeToUpdate.distanceMeters,
-            duration: routeToUpdate.duration,
-            encodedPolyline: routeToUpdate.encodedPolyline,
-        };
-
-        // Incluir motorista se foi selecionado um novo
+        let driverAssignmentFailed = false;
         if (driverId && driver) {
-            updateData.driverId = driverId;
-            updateData.driverInfo = { name: driver.name, vehicle: driver.vehicle };
+          try {
+            await updateDoc(doc(db, 'routes', currentRouteId), {
+              driverId,
+              driverInfo: { name: driver.name, vehicle: driver.vehicle },
+              updatedAt: serverTimestamp(),
+            });
+          } catch (driverError) {
+            driverAssignmentFailed = true;
+            console.error('Error assigning driver after route update:', driverError);
+          }
         }
 
-        await updateDoc(routeRef, updateData);
-
-        // Se houver mudanças e a rota estiver em progresso, notificar o motorista
-        if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
+        let notificationFailed = false;
+        if (result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)) {
           try {
-            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-            await notifyFn({
-              routeId: currentRouteId,
-              driverId: currentRouteData.driverId,
-              changes,
-            });
-
-            toast({
-                title: 'Rota Atualizada!',
-                description: `A ${routeName} foi atualizada. O motorista será notificado das ${changes.length} alterações.`,
-            });
+            await notifySavedRouteChanges(result);
           } catch (notifyError) {
+            notificationFailed = true;
             console.error('Error notifying driver:', notifyError);
-            toast({
-                title: 'Rota Atualizada!',
-                description: `A ${routeName} foi atualizada, mas houve erro ao notificar o motorista.`,
-            });
           }
-        } else {
-          // Mensagem diferenciada se motorista foi atribuído
-          const driverMessage = driverId && driver
+        }
+
+        const notificationMessage = notificationFailed
+          ? ' Houve erro ao notificar o motorista.'
+          : result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)
+            ? ` O motorista será notificado das ${result.changes.length} alterações.`
+            : '';
+        const driverMessage = driverAssignmentFailed
+          ? ' A rota foi salva, mas não foi possível atribuir o motorista.'
+          : driverId && driver
             ? ` Motorista ${driver.name} atribuído.`
             : '';
-          toast({
-              title: 'Rota Atualizada!',
-              description: `A ${routeName} foi atualizada com sucesso.${driverMessage}`,
-          });
-        }
-
+        toast({
+          title: 'Rota Atualizada!',
+          description: `A ${routeName} foi atualizada com sucesso.${notificationMessage}${driverMessage}`,
+        });
     } catch (error) {
+        if (error instanceof RouteStructureConflictError) {
+          toast({
+            variant: 'destructive',
+            title: 'A rota mudou durante a edição',
+            description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+          });
+          return;
+        }
         console.error("Error updating route:", error);
         toast({
             variant: 'destructive',
@@ -3914,93 +3949,67 @@ export default function RouteAcompanharPage() {
     const updatedUnassignedStops = alreadyExists
       ? dedupeStops(unassignedStops)
       : upsertStopInCollection(unassignedStops, stopToMove);
-    setUnassignedStops(updatedUnassignedStops);
-
-    // Remove the stop from the route
-    const newStops = targetRoute.stops.filter(s => String(s.id ?? s.placeId) !== stopId);
+    const plannedStops = dedupeStops(removeStopWithSameIdentity(targetRoute.stops, stopToMove));
     const firestoreRouteId = getFirestoreRouteId(routeKey);
+    const routeInfo = plannedStops.length > 0
+      ? await computeRoute(routeData.origin, plannedStops)
+      : null;
+    const metrics: RouteMetrics | undefined = routeInfo ? {
+      encodedPolyline: routeInfo.encodedPolyline,
+      distanceMeters: routeInfo.distanceMeters,
+      duration: routeInfo.duration,
+    } : plannedStops.length === 0 ? {
+      encodedPolyline: '',
+      distanceMeters: 0,
+      duration: '0s',
+    } : undefined;
 
-    if (newStops.length === 0) {
-      // If no stops left, clear the route
-      setRoute(routeKey, () => ({
-        ...targetRoute,
-        stops: [],
-        encodedPolyline: '',
-        distanceMeters: 0,
-        duration: '0s'
-      }));
-
+    try {
       if (firestoreRouteId) {
+        const [result] = await saveExistingRoutePlansAtomically([{
+          routeId: firestoreRouteId,
+          baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
+          plannedStops,
+          ...(metrics ? { metrics } : {}),
+        }]);
+        applySavedRouteResult(routeKey, result, metrics);
         try {
-          const routeRef = doc(db, 'routes', firestoreRouteId);
-          await Promise.all([
-            updateDoc(routeRef, {
-              stops: [],
-              encodedPolyline: '',
-              distanceMeters: 0,
-              duration: '0s',
-              updatedAt: serverTimestamp(),
-            }),
-            syncUnassignedStopsInFirestore(updatedUnassignedStops),
-          ]);
-        } catch (error) {
-          console.error('❌ Erro ao atualizar Firestore:', error);
-          toast({
-            variant: 'destructive',
-            title: 'Erro ao salvar',
-            description: 'A parada foi removida localmente, mas não foi salva no servidor.',
-          });
+          await notifySavedRouteChanges(result);
+        } catch (notifyError) {
+          console.error('⚠️ [handleRemoveStop] Erro ao notificar motorista:', notifyError);
         }
       } else {
-        try {
-          await syncUnassignedStopsInFirestore(updatedUnassignedStops);
-        } catch (error) {
-          console.error('❌ Erro ao salvar unassignedStops:', error);
-        }
+        setRoute(routeKey, (previous) => previous ? {
+          ...previous,
+          stops: plannedStops,
+          ...(metrics || {}),
+        } : null);
+      }
+
+      setUnassignedStops(updatedUnassignedStops);
+      try {
+        await syncUnassignedStopsInFirestore(updatedUnassignedStops);
+      } catch (syncError) {
+        console.error('❌ Erro ao salvar unassignedStops:', syncError);
       }
 
       const routeName = routeKey === 'A' || routeKey === 'B' ? routeNames[routeKey] : `Rota ${routeKey}`;
       toast({ title: 'Parada movida!', description: `A parada foi movida da ${routeName} para serviços não alocados.${firestoreRouteId ? ' Motorista receberá atualização.' : ''}` });
-    } else {
-      // Recalculate route with remaining stops
-      setRoute(routeKey, prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
-      const newRouteInfo = await computeRoute(routeData.origin, newStops);
-      if (newRouteInfo) {
-        setRoute(routeKey, prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+    } catch (error) {
+      if (error instanceof RouteStructureConflictError) {
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+        });
+        return;
       }
-
-      if (firestoreRouteId) {
-        try {
-          const routeRef = doc(db, 'routes', firestoreRouteId);
-          await Promise.all([
-            updateDoc(routeRef, {
-              stops: newStops,
-              ...(newRouteInfo ? {
-                encodedPolyline: newRouteInfo.encodedPolyline,
-                distanceMeters: newRouteInfo.distanceMeters,
-                duration: newRouteInfo.duration,
-              } : {}),
-              updatedAt: serverTimestamp(),
-            }),
-            syncUnassignedStopsInFirestore(updatedUnassignedStops),
-          ]);
-        } catch (error) {
-          console.error('❌ Erro ao atualizar Firestore:', error);
-          toast({
-            variant: 'destructive',
-            title: 'Erro ao salvar',
-            description: 'A parada foi removida localmente, mas não foi salva no servidor.',
-          });
-        }
-      } else {
-        try {
-          await syncUnassignedStopsInFirestore(updatedUnassignedStops);
-        } catch (error) {
-          console.error('❌ Erro ao salvar unassignedStops:', error);
-        }
-      }
-      const routeName = routeKey === 'A' || routeKey === 'B' ? routeNames[routeKey] : `Rota ${routeKey}`;
-      toast({ title: 'Parada movida!', description: `A parada foi movida da ${routeName} para serviços não alocados.${firestoreRouteId ? ' Motorista receberá atualização.' : ''}` });
+      console.error('❌ Erro ao atualizar Firestore:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar',
+        description: 'A parada não foi removida. Tente novamente.',
+      });
     }
   };
 
@@ -4172,107 +4181,66 @@ export default function RouteAcompanharPage() {
     const targetRoute = getRoute(routeKey);
     if (!targetRoute) return;
 
-    // Usar pendingEdits se existirem (o index vem da timeline que mostra pendingEdits)
-    const currentStops = pendingEdits[routeKey] ?? targetRoute.stops;
-    const newStops = dedupeStops(currentStops.filter((_, i) => i !== index));
-    // Limpar metadata de pendingEdits antes de salvar
-    const cleanedNewStops = dedupeStops(
-      newStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...s }: any) => s as PlaceValue)
-    );
-
+    const draftStops = pendingEdits[routeKey] ?? targetRoute.stops;
+    const plannedStops = dedupeStops(removeStopWithSameIdentity(draftStops, stop));
     const updatedUnassignedStops = upsertStopInCollection(unassignedStops, stop);
-    setUnassignedStops(updatedUnassignedStops);
-    // Limpar pendingEdits desta rota (já vamos salvar direto)
-    setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
-
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     console.log('🔄 [handleRemoveFromRoute] Removendo stop da rota', routeKey, '→ Firestore ID:', firestoreRouteId, '| Stop:', stop.orderNumber || stop.customerName);
 
-    // Atualizar state local
-    let routeInfo: RouteInfo | null = null;
-    if (cleanedNewStops.length === 0) {
-      setRoute(routeKey, () => ({
-        ...targetRoute,
-        stops: [],
-        encodedPolyline: '',
-        distanceMeters: 0,
-        duration: '0s'
-      }));
-    } else {
-      setRoute(routeKey, prev => prev ? { ...prev, stops: cleanedNewStops, encodedPolyline: '' } : null);
-      routeInfo = await computeRoute(routeData.origin, cleanedNewStops);
-      if (routeInfo) {
-        setRoute(routeKey, prev => prev ? { ...prev, ...routeInfo!, stops: cleanedNewStops } : null);
-      }
-    }
+    const routeInfo = plannedStops.length > 0
+      ? await computeRoute(routeData.origin, plannedStops)
+      : null;
+    const metrics: RouteMetrics | undefined = routeInfo ? {
+      encodedPolyline: routeInfo.encodedPolyline,
+      distanceMeters: routeInfo.distanceMeters,
+      duration: routeInfo.duration,
+    } : plannedStops.length === 0 ? {
+      encodedPolyline: '',
+      distanceMeters: 0,
+      duration: '0s',
+    } : undefined;
 
-    // Persistir no Firestore
-    if (firestoreRouteId) {
-      try {
-        const routeRef = doc(db, 'routes', firestoreRouteId);
-
-        // Detectar mudanças para notificar motorista
-        let stopsToSave = cleanedNewStops;
-        let routeStatus = '';
-        let driverId = '';
-        let changes: any[] = [];
+    try {
+      if (firestoreRouteId) {
+        const [result] = await saveExistingRoutePlansAtomically([{
+          routeId: firestoreRouteId,
+          baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
+          plannedStops,
+          ...(metrics ? { metrics } : {}),
+        }]);
+        applySavedRouteResult(routeKey, result, metrics);
         try {
-          const currentDoc = await getDoc(routeRef);
-          if (currentDoc.exists()) {
-            const currentData = currentDoc.data();
-            routeStatus = currentData.status || '';
-            driverId = currentData.driverId || '';
-            const oldStops = currentData.stops || [];
-            changes = detectRouteChanges(oldStops, cleanedNewStops);
-            if (changes.length > 0) {
-              stopsToSave = markModifiedStops(cleanedNewStops, changes);
-              console.log('📋 [handleRemoveFromRoute] Mudanças detectadas:', changes.length);
-            }
-          }
-        } catch (changeErr) {
-          console.error('⚠️ [handleRemoveFromRoute] Erro ao detectar mudanças:', changeErr);
+          await notifySavedRouteChanges(result);
+        } catch (notifyErr) {
+          console.error('⚠️ [handleRemoveFromRoute] Erro ao notificar motorista:', notifyErr);
         }
-
-        if (stopsToSave.length === 0) {
-          await updateDoc(routeRef, {
-            stops: [],
-            encodedPolyline: '',
-            distanceMeters: 0,
-            duration: '0s',
-            updatedAt: serverTimestamp(),
-          });
-        } else if (routeInfo) {
-          await updateDoc(routeRef, {
-            stops: stopsToSave,
-            encodedPolyline: routeInfo.encodedPolyline,
-            distanceMeters: routeInfo.distanceMeters,
-            duration: routeInfo.duration,
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          // computeRoute failed - save stops only
-          await updateDoc(routeRef, {
-            stops: stopsToSave,
-            updatedAt: serverTimestamp(),
-          });
-        }
-        console.log('✅ [handleRemoveFromRoute] Firestore atualizado com', stopsToSave.length, 'stops');
-
-        // Notificar motorista se rota despachada/em progresso
-        if (changes.length > 0 && driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
-          try {
-            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-            await notifyFn({ routeId: firestoreRouteId, driverId, changes });
-            console.log('📢 [handleRemoveFromRoute] Motorista notificado:', changes.length, 'mudanças');
-          } catch (notifyErr) {
-            console.error('⚠️ [handleRemoveFromRoute] Erro ao notificar motorista:', notifyErr);
-          }
-        }
-      } catch (error) {
-        console.error('❌ [handleRemoveFromRoute] Erro ao atualizar Firestore:', error);
+      } else {
+        setRoute(routeKey, (previous) => previous ? {
+          ...previous,
+          stops: plannedStops,
+          ...(metrics || {}),
+        } : null);
+        console.warn('⚠️ [handleRemoveFromRoute] Sem Firestore ID para rota', routeKey, '- alteração apenas local.');
       }
-    } else {
-      console.warn('⚠️ [handleRemoveFromRoute] Sem Firestore ID para rota', routeKey, '- alteração NÃO persistida!');
+
+      setUnassignedStops(updatedUnassignedStops);
+      setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
+    } catch (error) {
+      if (error instanceof RouteStructureConflictError) {
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+        });
+        return;
+      }
+      console.error('❌ [handleRemoveFromRoute] Erro ao atualizar Firestore:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar',
+        description: 'A parada não foi removida. Tente novamente.',
+      });
+      return;
     }
 
     try {
@@ -4290,100 +4258,63 @@ export default function RouteAcompanharPage() {
     const targetRoute = getRoute(routeKey);
     if (!targetRoute) return;
 
-    // Usar pendingEdits se existirem (o index vem da timeline que mostra pendingEdits)
-    const currentStops = pendingEdits[routeKey] ?? targetRoute.stops;
-    const newStops = currentStops.filter((_, i) => i !== index);
-    const cleanedNewStops = newStops.map(({ _originalIndex, _wasMoved, _movedFromRoute, _originalRouteColor, ...s }: any) => s as PlaceValue);
-
-    // Limpar pendingEdits desta rota
-    setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
-
+    const draftStops = pendingEdits[routeKey] ?? targetRoute.stops;
+    const plannedStops = dedupeStops(removeStopWithSameIdentity(draftStops, stop));
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     console.log('🗑️ [handleDeleteStop] Excluindo stop da rota', routeKey, '→ Firestore ID:', firestoreRouteId, '| Stop:', stop.orderNumber || stop.customerName);
 
-    // Atualizar state local
-    let routeInfo: RouteInfo | null = null;
-    if (cleanedNewStops.length === 0) {
-      setRoute(routeKey, () => ({
-        ...targetRoute,
-        stops: [],
-        encodedPolyline: '',
-        distanceMeters: 0,
-        duration: '0s'
-      }));
-    } else {
-      setRoute(routeKey, prev => prev ? { ...prev, stops: cleanedNewStops, encodedPolyline: '' } : null);
-      routeInfo = await computeRoute(routeData.origin, cleanedNewStops);
-      if (routeInfo) {
-        setRoute(routeKey, prev => prev ? { ...prev, ...routeInfo!, stops: cleanedNewStops } : null);
-      }
-    }
+    const routeInfo = plannedStops.length > 0
+      ? await computeRoute(routeData.origin, plannedStops)
+      : null;
+    const metrics: RouteMetrics | undefined = routeInfo ? {
+      encodedPolyline: routeInfo.encodedPolyline,
+      distanceMeters: routeInfo.distanceMeters,
+      duration: routeInfo.duration,
+    } : plannedStops.length === 0 ? {
+      encodedPolyline: '',
+      distanceMeters: 0,
+      duration: '0s',
+    } : undefined;
 
-    // Persistir no Firestore
-    if (firestoreRouteId) {
-      try {
-        const routeRef = doc(db, 'routes', firestoreRouteId);
-
-        // Detectar mudanças para notificar motorista
-        let stopsToSave = cleanedNewStops;
-        let routeStatus = '';
-        let driverId = '';
-        let changes: any[] = [];
+    try {
+      if (firestoreRouteId) {
+        const [result] = await saveExistingRoutePlansAtomically([{
+          routeId: firestoreRouteId,
+          baseStops: getPersistedStops(firestoreRouteId, targetRoute.stops),
+          plannedStops,
+          ...(metrics ? { metrics } : {}),
+        }]);
+        applySavedRouteResult(routeKey, result, metrics);
         try {
-          const currentDoc = await getDoc(routeRef);
-          if (currentDoc.exists()) {
-            const currentData = currentDoc.data();
-            routeStatus = currentData.status || '';
-            driverId = currentData.driverId || '';
-            const oldStops = currentData.stops || [];
-            changes = detectRouteChanges(oldStops, cleanedNewStops);
-            if (changes.length > 0) {
-              stopsToSave = markModifiedStops(cleanedNewStops, changes);
-              console.log('📋 [handleDeleteStop] Mudanças detectadas:', changes.length);
-            }
-          }
-        } catch (changeErr) {
-          console.error('⚠️ [handleDeleteStop] Erro ao detectar mudanças:', changeErr);
+          await notifySavedRouteChanges(result);
+        } catch (notifyErr) {
+          console.error('⚠️ [handleDeleteStop] Erro ao notificar motorista:', notifyErr);
         }
-
-        if (stopsToSave.length === 0) {
-          await updateDoc(routeRef, {
-            stops: [],
-            encodedPolyline: '',
-            distanceMeters: 0,
-            duration: '0s',
-            updatedAt: serverTimestamp(),
-          });
-        } else if (routeInfo) {
-          await updateDoc(routeRef, {
-            stops: stopsToSave,
-            encodedPolyline: routeInfo.encodedPolyline,
-            distanceMeters: routeInfo.distanceMeters,
-            duration: routeInfo.duration,
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          // computeRoute failed - save stops only
-          await updateDoc(routeRef, {
-            stops: stopsToSave,
-            updatedAt: serverTimestamp(),
-          });
-        }
-        console.log('✅ [handleDeleteStop] Firestore rota atualizado com', stopsToSave.length, 'stops');
-
-        // Notificar motorista se rota despachada/em progresso
-        if (changes.length > 0 && driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
-          try {
-            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-            await notifyFn({ routeId: firestoreRouteId, driverId, changes });
-            console.log('📢 [handleDeleteStop] Motorista notificado:', changes.length, 'mudanças');
-          } catch (notifyErr) {
-            console.error('⚠️ [handleDeleteStop] Erro ao notificar motorista:', notifyErr);
-          }
-        }
-      } catch (error) {
-        console.error('❌ [handleDeleteStop] Erro ao atualizar Firestore:', error);
+      } else {
+        setRoute(routeKey, (previous) => previous ? {
+          ...previous,
+          stops: plannedStops,
+          ...(metrics || {}),
+        } : null);
       }
+
+      setPendingEdits(prev => ({ ...prev, [routeKey]: null }));
+    } catch (error) {
+      if (error instanceof RouteStructureConflictError) {
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+        });
+        return;
+      }
+      console.error('❌ [handleDeleteStop] Erro ao atualizar Firestore:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar',
+        description: 'O ponto não foi excluído. Tente novamente.',
+      });
+      return;
     }
 
     // Também remover do allStops do serviço (exclusão permanente)
@@ -4443,7 +4374,7 @@ export default function RouteAcompanharPage() {
   const executeTransferStop = async (targetRouteId: string) => {
     if (!transferData || !routeData) return;
 
-    const { stop, stopIndex, sourceRouteId } = transferData;
+    const { stop, sourceRouteId } = transferData;
 
     try {
       // Find source route
@@ -4491,114 +4422,63 @@ export default function RouteAcompanharPage() {
         return;
       }
 
-      // Update Firestore for both routes
-      const batch = [];
-
-      // Update source route
-      const sourceRouteRef = doc(db, 'routes', sourceRouteId);
-      if (newSourceStops.length === 0) {
-        batch.push(updateDoc(sourceRouteRef, {
-          stops: [],
-          encodedPolyline: '',
-          distanceMeters: 0,
-          duration: '0s',
-        }));
-      } else if (newSourceRouteInfo) {
-        batch.push(updateDoc(sourceRouteRef, {
-          stops: newSourceStops,
-          encodedPolyline: newSourceRouteInfo.encodedPolyline,
-          distanceMeters: newSourceRouteInfo.distanceMeters,
-          duration: newSourceRouteInfo.duration,
-        }));
-      }
-
-      // Update target route
-      const targetRouteRef = doc(db, 'routes', targetRouteId);
-      batch.push(updateDoc(targetRouteRef, {
-        stops: newTargetStops,
+      const sourceMetrics: RouteMetrics | undefined = newSourceRouteInfo ? {
+        encodedPolyline: newSourceRouteInfo.encodedPolyline,
+        distanceMeters: newSourceRouteInfo.distanceMeters,
+        duration: newSourceRouteInfo.duration,
+      } : newSourceStops.length === 0 ? {
+        encodedPolyline: '',
+        distanceMeters: 0,
+        duration: '0s',
+      } : undefined;
+      const targetMetrics: RouteMetrics = {
         encodedPolyline: newTargetRouteInfo.encodedPolyline,
         distanceMeters: newTargetRouteInfo.distanceMeters,
         duration: newTargetRouteInfo.duration,
-      }));
+      };
+      const [sourceResult, targetResult] = await saveExistingRoutePlansAtomically([
+        {
+          routeId: sourceRouteId,
+          baseStops: getPersistedStops(sourceRouteId, sourceRoute.data.stops),
+          plannedStops: newSourceStops,
+          ...(sourceMetrics ? { metrics: sourceMetrics } : {}),
+        },
+        {
+          routeId: targetRouteId,
+          baseStops: getPersistedStops(targetRouteId, targetRoute.data.stops),
+          plannedStops: newTargetStops,
+          metrics: targetMetrics,
+        },
+      ]);
 
-      await Promise.all(batch);
+      applySavedRouteResult(sourceRouteId, sourceResult, sourceMetrics);
+      applySavedRouteResult(targetRouteId, targetResult, targetMetrics);
 
-      // Send notifications to both drivers
-      const notificationPromises = [];
-
-      if (sourceRoute.driverId && sourceRoute.driverInfo) {
-        const sourceNotifRef = collection(db, 'notifications');
-        notificationPromises.push(
-          addDoc(sourceNotifRef, {
-            userId: sourceRoute.driverId,
-            title: 'Parada removida da sua rota',
-            message: `A parada "${stop.customerName || stop.address}" foi transferida para outra rota.`,
-            type: 'route_update',
-            routeId: sourceRouteId,
-            createdAt: serverTimestamp(),
-            read: false,
-          })
-        );
-      }
-
-      if (targetRoute.driverId && targetRoute.driverInfo) {
-        const targetNotifRef = collection(db, 'notifications');
-        notificationPromises.push(
-          addDoc(targetNotifRef, {
-            userId: targetRoute.driverId,
-            title: 'Nova parada adicionada à sua rota',
-            message: `A parada "${stop.customerName || stop.address}" foi adicionada à sua rota.`,
-            type: 'route_update',
-            routeId: targetRouteId,
-            createdAt: serverTimestamp(),
-            read: false,
-          })
-        );
-      }
-
-      await Promise.all(notificationPromises);
-
-      // Update local state
-      setAdditionalRoutes(prev => prev.map(route => {
-        if (route.id === sourceRouteId) {
-          return {
-            ...route,
-            data: newSourceRouteInfo ? {
-              ...newSourceRouteInfo,
-              stops: newSourceStops,
-              color: route.data.color,
-              visible: route.data.visible
-            } : {
-              ...route.data,
-              stops: [],
-              encodedPolyline: '',
-              distanceMeters: 0,
-              duration: '0s'
-            }
-          };
-        } else if (route.id === targetRouteId) {
-          return {
-            ...route,
-            data: {
-              ...newTargetRouteInfo,
-              stops: newTargetStops,
-              color: route.data.color,
-              visible: route.data.visible
-            }
-          };
+      for (const result of [sourceResult, targetResult]) {
+        try {
+          await notifySavedRouteChanges(result);
+        } catch (notifyError) {
+          console.error('⚠️ [executeTransferStop] Erro ao notificar motorista:', notifyError);
         }
-        return route;
-      }));
+      }
 
       toast({
         title: 'Parada transferida!',
-        description: `A parada foi movida com sucesso. Motoristas foram notificados.`
+        description: 'A parada foi movida com sucesso e as rotas foram atualizadas.'
       });
 
       setTransferDialogOpen(false);
       setTransferData(null);
 
     } catch (error) {
+      if (error instanceof RouteStructureConflictError) {
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+        });
+        return;
+      }
       console.error('Erro ao transferir parada:', error);
       toast({
         variant: 'destructive',
@@ -4789,17 +4669,6 @@ export default function RouteAcompanharPage() {
           routeInfo,
           isNew: false
         });
-
-        // Update local state
-        setRoute(key, (prev) => prev ? {
-          ...prev,
-          stops: cleanedStops,
-          encodedPolyline: routeInfo?.encodedPolyline || '',
-          distanceMeters: routeInfo?.distanceMeters || 0,
-          duration: routeInfo?.duration || '0s',
-          color: route.color,
-          visible: route.visible
-        } : null);
       }
     }
 
@@ -4808,13 +4677,8 @@ export default function RouteAcompanharPage() {
       routesToCreate: newRoutesToCreate.length
     });
 
-    // Track routes that need driver notifications
-    const routesWithChanges: Array<{ routeId: string; driverId: string; changes: any[] }> = [];
-
     try {
       // First, create new routes (dynamic routes C, D, E, etc.)
-      const createdRouteIds: Record<string, string> = {};
-
       for (const newRoute of newRoutesToCreate) {
         const routeDate = new Date(routeData.routeDate);
         const routeDocData: Record<string, any> = {
@@ -4840,8 +4704,7 @@ export default function RouteAcompanharPage() {
         }
 
         const newRouteDoc = await addDoc(collection(db, 'routes'), routeDocData);
-
-        createdRouteIds[newRoute.routeKey] = newRouteDoc.id;
+        rememberPersistedStops(newRouteDoc.id, newRoute.cleanedStops);
 
         addDebugLog('FIRESTORE_CREATE', `✅ Created new route ${newRoute.routeKey} in Firestore`, {
           routeKey: newRoute.routeKey,
@@ -4883,105 +4746,52 @@ export default function RouteAcompanharPage() {
         ));
       }
 
-      // Then, batch update existing routes
+      // Then, update all existing routes in one transaction
       if (routeUpdates.length > 0) {
-        const batch = writeBatch(db);
-
-        for (const update of routeUpdates) {
-          const routeRef = doc(db, 'routes', update.routeId);
-
-          // Buscar stops atuais do Firestore para detectar mudanças e notificar motorista
-          let stopsToSave = update.cleanedStops;
+        const existingPlans = routeUpdates.map((update) => ({
+          routeId: update.routeId,
+          baseStops: getPersistedStops(update.routeId, getRoute(update.routeKey)?.stops || []),
+          plannedStops: update.cleanedStops,
+          metrics: update.routeInfo ? {
+            encodedPolyline: update.routeInfo.encodedPolyline,
+            distanceMeters: update.routeInfo.distanceMeters,
+            duration: update.routeInfo.duration,
+          } : undefined,
+        }));
+        const savedResults = await saveExistingRoutePlansAtomically(existingPlans);
+        savedResults.forEach((result, index) => {
+          const update = routeUpdates[index];
+          const metrics = existingPlans[index].metrics;
+          applySavedRouteResult(update.routeKey, result, metrics);
+        });
+        for (const result of savedResults) {
           try {
-            const currentDoc = await getDoc(routeRef);
-            if (currentDoc.exists()) {
-              const currentData = currentDoc.data();
-              const oldStops = currentData.stops || [];
-              const changes = detectRouteChanges(oldStops, update.cleanedStops);
-
-              if (changes.length > 0) {
-                // Marcar stops modificados com flags visuais para o motorista
-                stopsToSave = markModifiedStops(update.cleanedStops, changes);
-                addDebugLog('CHANGE_TRACKING', `Route ${update.routeKey}: ${changes.length} changes detected`, { changes });
-
-                // Se rota já despachada/em progresso e tem motorista, preparar notificação
-                const routeStatus = currentData.status;
-                const driverId = currentData.driverId;
-                if (driverId && (routeStatus === 'dispatched' || routeStatus === 'in_progress')) {
-                  routesWithChanges.push({ routeId: update.routeId, driverId, changes });
-                }
-              }
-            }
-          } catch (changeErr) {
-            console.error('⚠️ [APPLY] Erro ao detectar mudanças para rota', update.routeKey, changeErr);
-            // Continuar sem flags - melhor salvar sem flag do que não salvar
-          }
-
-          if (update.routeInfo) {
-            batch.update(routeRef, {
-              stops: stopsToSave,
-              encodedPolyline: update.routeInfo.encodedPolyline,
-              distanceMeters: update.routeInfo.distanceMeters,
-              duration: update.routeInfo.duration,
-              updatedAt: serverTimestamp(),
-            });
-            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${stopsToSave.length} stops`);
-          } else if (update.cleanedStops.length === 0) {
-            // Truly empty route (all stops removed)
-            batch.update(routeRef, {
-              stops: [],
-              encodedPolyline: '',
-              distanceMeters: 0,
-              duration: '0s',
-              updatedAt: serverTimestamp(),
-            });
-            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch as empty`);
-          } else {
-            // computeRoute failed but route has stops - save stops without polyline
-            batch.update(routeRef, {
-              stops: stopsToSave,
-              updatedAt: serverTimestamp(),
-            });
-            addDebugLog('FIRESTORE_BATCH', `Added route ${update.routeKey} to batch with ${stopsToSave.length} stops (no polyline - computeRoute failed)`);
+            await notifySavedRouteChanges(result);
+          } catch (notifyErr) {
+            console.error('⚠️ [APPLY] Erro ao notificar motorista para rota', result.routeId, notifyErr);
           }
         }
 
-        // Log detalhado antes do commit
-        console.log('💾 [APPLY] Batch commit com', routeUpdates.length, 'rotas:', routeUpdates.map(u => ({
-          key: u.routeKey,
-          routeId: u.routeId,
-          stopsCount: u.cleanedStops.length,
-          stopOrders: u.cleanedStops.map((s: any) => s.orderNumber).filter(Boolean),
-          hasRouteInfo: !!u.routeInfo,
-        })));
-
-        // Commit all changes atomically
-        await batch.commit();
-
-        console.log('✅ [APPLY] Batch commit SUCESSO!');
-        addDebugLog('FIRESTORE_BATCH', '✅ ATOMIC batch commit successful', {
+        addDebugLog('FIRESTORE_TRANSACTION', '✅ Atomic transaction successful', {
           routesUpdated: routeUpdates.length
         });
-      }
-
-      // Notificar motoristas das rotas que tiveram mudanças (após commit bem-sucedido)
-      for (const { routeId, driverId, changes } of routesWithChanges) {
-        try {
-          const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-          await notifyFn({ routeId, driverId, changes });
-          console.log('📢 [APPLY] Motorista notificado para rota', routeId, ':', changes.length, 'mudanças');
-        } catch (notifyErr) {
-          console.error('⚠️ [APPLY] Erro ao notificar motorista para rota', routeId, notifyErr);
-        }
       }
 
     } catch (error) {
       console.error('❌ Erro ao salvar edições no Firestore:', error);
       addDebugLog('FIRESTORE_ERROR', 'Firestore operation FAILED', { error });
+      if (error instanceof RouteStructureConflictError) {
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a remoção para preservar as alterações mais recentes.',
+        });
+        return;
+      }
       toast({
         variant: 'destructive',
         title: 'Erro ao salvar',
-        description: 'As alterações foram aplicadas localmente, mas não foram salvas. Tente novamente.',
+        description: 'As alterações não foram salvas. Tente novamente.',
       });
       return;
     }
@@ -5001,12 +4811,11 @@ export default function RouteAcompanharPage() {
       createdRoutes: newRoutesToCreate.length
     });
 
-    const driversNotified = routesWithChanges.length;
     toast({
       title: 'Edições aplicadas!',
       description: totalRoutesAffected > 1
-        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${driversNotified > 0 ? ` ${driversNotified} motorista(s) notificado(s).` : ''}`
-        : `Rota atualizada com sucesso.${driversNotified > 0 ? ' Motorista notificado das alterações.' : ''}`,
+        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}`
+        : 'Rota atualizada com sucesso.',
     });
   };
 
