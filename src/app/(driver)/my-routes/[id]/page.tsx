@@ -92,7 +92,7 @@ export default function RouteDetailsPage() {
   const { user } = useAuth();
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [selectedStopIndex, setSelectedStopIndex] = React.useState<number | null>(null);
+  const [selectedStop, setSelectedStop] = React.useState<PlaceValue | null>(null);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
   const [notification, setNotification] = React.useState<RouteChangeNotification | null>(null);
   const [isAcknowledging, setIsAcknowledging] = React.useState(false);
@@ -369,12 +369,11 @@ export default function RouteDetailsPage() {
     payments?: Payment[];
     deliveredItemIds?: string[];
   }) => {
-    if (!route || selectedStopIndex === null || !user) {
+    if (!route || !selectedStop || !user) {
       console.error('Confirmação falhou: rota, parada ou motorista ausente.');
       return;
     }
 
-    const selectedStop = route.stops[selectedStopIndex];
     let resolvedPhotoUrl: string | null = selectedStop.photoUrl || null;
     let resolvedAttemptPhotoUrl: string | null = selectedStop.attemptPhotoUrl || null;
 
@@ -551,11 +550,11 @@ export default function RouteDetailsPage() {
       });
 
       setIsConfirmDialogOpen(false);
-      setSelectedStopIndex(null);
+      setSelectedStop(null);
     } catch (error) {
       if (error instanceof RouteStopNotFoundError) {
         setIsConfirmDialogOpen(false);
-        setSelectedStopIndex(null);
+        setSelectedStop(null);
         toast({
           variant: 'destructive',
           title: 'Esta parada mudou',
@@ -573,8 +572,8 @@ export default function RouteDetailsPage() {
     }
   };
 
-  const handleOpenConfirmDialog = (index: number) => {
-    setSelectedStopIndex(index);
+  const handleOpenConfirmDialog = (stop: PlaceValue) => {
+    setSelectedStop(stop);
     setIsConfirmDialogOpen(true);
   };
 
@@ -812,7 +811,7 @@ export default function RouteDetailsPage() {
                                         size="sm"
                                         variant="outline"
                                         className="ml-auto"
-                                        onClick={() => handleOpenConfirmDialog(index)}
+                                        onClick={() => handleOpenConfirmDialog(stop)}
                                     >
                                         <Info className="mr-2 h-4 w-4" />
                                         Ver Detalhes
@@ -824,7 +823,7 @@ export default function RouteDetailsPage() {
                                         size="sm"
                                         variant="default"
                                         className="ml-auto bg-green-600 hover:bg-green-700"
-                                        onClick={() => handleOpenConfirmDialog(index)}
+                                        onClick={() => handleOpenConfirmDialog(stop)}
                                         disabled={route.status === 'dispatched'}
                                         title={route.status === 'dispatched' ? 'Inicie a rota primeiro' : ''}
                                     >
@@ -838,7 +837,7 @@ export default function RouteDetailsPage() {
                                         size="sm"
                                         variant="outline"
                                         className="ml-auto"
-                                        onClick={() => handleOpenConfirmDialog(index)}
+                                        onClick={() => handleOpenConfirmDialog(stop)}
                                     >
                                         <Pencil className="mr-2 h-4 w-4" />
                                         Editar
@@ -853,23 +852,23 @@ export default function RouteDetailsPage() {
       </main>
 
       {/* Delivery Confirmation Dialog */}
-      {selectedStopIndex !== null && (
+      {selectedStop && (
         <DeliveryConfirmationDialog
           isOpen={isConfirmDialogOpen}
           onClose={() => {
             setIsConfirmDialogOpen(false);
-            setSelectedStopIndex(null);
+            setSelectedStop(null);
           }}
           onConfirm={handleConfirmDelivery}
-          customerName={route.stops[selectedStopIndex]?.customerName}
-          address={route.stops[selectedStopIndex]?.address}
-          complement={route.stops[selectedStopIndex]?.complemento}
+          customerName={selectedStop.customerName}
+          address={selectedStop.address}
+          complement={selectedStop.complemento}
           viewOnly={route.status === 'completed'}
           stopLocation={
-            route.stops[selectedStopIndex]?.lat && route.stops[selectedStopIndex]?.lng
+            selectedStop.lat && selectedStop.lng
               ? {
-                  lat: route.stops[selectedStopIndex].lat!,
-                  lng: route.stops[selectedStopIndex].lng!,
+                  lat: selectedStop.lat,
+                  lng: selectedStop.lng,
                 }
               : undefined
           }
@@ -877,26 +876,26 @@ export default function RouteDetailsPage() {
             location ? { lat: location.coords.latitude, lng: location.coords.longitude } : null
           }
           existingData={
-            route.stops[selectedStopIndex]?.deliveryStatus
+            selectedStop.deliveryStatus
               ? {
-                  photoUrl: route.stops[selectedStopIndex].photoUrl,
-                  notes: route.stops[selectedStopIndex].notes,
-                  deliveryStatus: route.stops[selectedStopIndex].deliveryStatus as 'completed' | 'failed' | undefined,
-                  failureReason: route.stops[selectedStopIndex].failureReason,
-                  wentToLocation: route.stops[selectedStopIndex].wentToLocation,
-                  attemptPhotoUrl: route.stops[selectedStopIndex].attemptPhotoUrl,
-                  payments: route.stops[selectedStopIndex].payments,
-                  deliveredItemIds: route.stops[selectedStopIndex].deliveredItemIds,
+                  photoUrl: selectedStop.photoUrl,
+                  notes: selectedStop.notes,
+                  deliveryStatus: selectedStop.deliveryStatus as 'completed' | 'failed' | undefined,
+                  failureReason: selectedStop.failureReason,
+                  wentToLocation: selectedStop.wentToLocation,
+                  attemptPhotoUrl: selectedStop.attemptPhotoUrl,
+                  payments: selectedStop.payments,
+                  deliveredItemIds: selectedStop.deliveredItemIds,
                 }
               : undefined
           }
           // Props Lunna
           isLunnaOrder={route.source === 'lunna'}
-          expectedValue={route.stops[selectedStopIndex]?.expectedValue}
-          orderNumber={route.stops[selectedStopIndex]?.orderNumber}
-          items={route.stops[selectedStopIndex]?.items}
-          hasExchangeItems={route.stops[selectedStopIndex]?.hasExchangeItems}
-          operationType={route.stops[selectedStopIndex]?.operationType}
+          expectedValue={selectedStop.expectedValue}
+          orderNumber={selectedStop.orderNumber}
+          items={selectedStop.items}
+          hasExchangeItems={selectedStop.hasExchangeItems}
+          operationType={selectedStop.operationType}
         />
       )}
 

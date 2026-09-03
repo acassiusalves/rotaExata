@@ -3015,18 +3015,11 @@ export default function RouteAcompanharPage() {
     // Find the stop being dragged
     const routeKey = active.data.current?.routeKey as string;
     const index = active.data.current?.index as number;
+    const stop = active.data.current?.stop as PlaceValue | undefined;
 
     setActiveRouteKey(routeKey);
     setActiveIndex(index);
-
-    if (routeKey && index !== undefined) {
-      const route = getRoute(routeKey);
-      if (route) {
-        // Get from pendingEdits if exists, otherwise from route
-        const stops = pendingEdits[routeKey] ?? route.stops;
-        setActiveStop(stops[index]);
-      }
-    }
+    setActiveStop(stop || null);
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -3213,10 +3206,7 @@ export default function RouteAcompanharPage() {
         return;
       }
 
-      const oldIndex = active.data.current?.index as number;
       const newIndex = over.data.current?.index as number;
-
-      addDebugLog('DRAG_SAME_ROUTE', 'Reordering stops', { oldIndex, newIndex, totalStops: currentRoute.stops.length });
 
       // Check if there's already a pending edit, if so use that, otherwise use current route
       const currentPending = pendingEdits[activeRouteKey];
@@ -3227,9 +3217,18 @@ export default function RouteAcompanharPage() {
             _originalIndex: idx // Store original index
           }));
 
+      const draggedStop = active.data.current?.stop as PlaceValue | undefined;
+      const oldIndex = findStopIndexByIdentity(stopsToReorder, draggedStop);
+      addDebugLog('DRAG_SAME_ROUTE', 'Reordering stops', { oldIndex, newIndex, totalStops: currentRoute.stops.length });
+
       // Validate indices before arrayMove
       if (oldIndex === undefined || newIndex === undefined || oldIndex < 0 || newIndex < 0 || oldIndex >= stopsToReorder.length) {
         addDebugLog('DRAG_SAME_ROUTE', 'ERROR: Invalid indices', { oldIndex, newIndex, stopsLength: stopsToReorder.length });
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a reordenação para preservar as alterações mais recentes.',
+        });
         return;
       }
 
@@ -3288,10 +3287,7 @@ export default function RouteAcompanharPage() {
         return;
       }
 
-      const activeIndex = active.data.current?.index as number;
       const overIndex = over.data.current?.index as number;
-
-      addDebugLog('DRAG_BETWEEN_ROUTES', 'Indices', { activeIndex, overIndex });
 
       // CRITICAL: Always use pending edits if they exist, otherwise create from CURRENT route state
       // This prevents issues where Firestore listener updates the state while we're editing
@@ -3320,19 +3316,28 @@ export default function RouteAcompanharPage() {
         targetStopsToEditCount: targetStopsToEdit.length
       });
 
-      // Get stop to move from the correct source (pending edits or original route)
-      const stopToMove = sourceStopsToEdit[activeIndex];
+      // Resolve the dragged stop by stable identity against the current source collection.
+      const draggedStop = active.data.current?.stop as PlaceValue | undefined;
+      const sourceIndex = findStopIndexByIdentity(sourceStopsToEdit, draggedStop);
+      const stopToMove = sourceIndex >= 0 ? sourceStopsToEdit[sourceIndex] : null;
 
       if (!stopToMove) {
-        addDebugLog('DRAG_BETWEEN_ROUTES', 'ERROR: Stop to move not found', { activeIndex, sourceStopsToEditCount: sourceStopsToEdit.length });
+        addDebugLog('DRAG_BETWEEN_ROUTES', 'ERROR: Stop to move not found', { sourceStopsToEditCount: sourceStopsToEdit.length });
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita o movimento para preservar as alterações mais recentes.',
+        });
         return;
       }
 
+      addDebugLog('DRAG_BETWEEN_ROUTES', 'Indices', { sourceIndex, overIndex });
+
       // Get the original index if it exists, otherwise use current index
-      const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? activeIndex;
+      const originalIndexOfMovedStop = (stopToMove as any)._originalIndex ?? sourceIndex;
 
       // Remove from source
-      const newSourceStops = dedupeStops(sourceStopsToEdit.filter((_, i) => i !== activeIndex));
+      const newSourceStops = dedupeStops(removeStopWithSameIdentity(sourceStopsToEdit, stopToMove));
 
       // Add to target at the position of the over item with marker for cross-route movement
       const movedStopId = String(stopToMove.id ?? stopToMove.placeId);
