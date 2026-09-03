@@ -25,9 +25,14 @@ class MemoryFirestore {
     return structuredClone(document);
   }
 
+  has(ref: Ref): boolean {
+    return this.documents.has(`${ref.collection}/${ref.id}`);
+  }
+
   async runTransaction<Result>(callback: (transaction: {
     get: (ref: Ref) => Promise<{ exists: () => boolean; data: () => StoredDocument }>;
     update: (ref: Ref, patch: StoredDocument) => void;
+    set: (ref: Ref, data: StoredDocument) => void;
   }) => Promise<Result>): Promise<Result> {
     let hasWritten = false;
 
@@ -55,6 +60,11 @@ class MemoryFirestore {
             : structuredClone(value);
         });
         this.documents.set(key, next);
+      },
+      set: (ref, data) => {
+        hasWritten = true;
+        this.operations.push(`set:${ref.collection}/${ref.id}`);
+        this.documents.set(`${ref.collection}/${ref.id}`, structuredClone(data));
       },
     });
   }
@@ -89,8 +99,9 @@ const gatewayFor = (store: MemoryFirestore) =>
     runTransaction: (database, callback) =>
       (database as MemoryFirestore).runTransaction(async (transaction) =>
         callback({
-          get: (reference) => transaction.get(reference as Ref),
-          update: (reference, patch) => transaction.update(reference as Ref, patch),
+          get: (reference: unknown) => transaction.get(reference as Ref),
+          update: (reference: unknown, patch: StoredDocument) => transaction.update(reference as Ref, patch),
+          set: (reference: unknown, data: StoredDocument) => transaction.set(reference as Ref, data),
         }),
       ),
     serverTimestamp: () => ({ kind: 'server-timestamp' }),
@@ -116,6 +127,134 @@ assert.deepEqual(saveStore.operations, [
   'write:routes/r1',
   'write:routes/r2',
 ]);
+
+const regressionFailures: string[] = [];
+
+try {
+  const staleMovedStop = stop('moved', { notes: 'Observação do planejador' });
+  const latestMovedStop = stop('moved', {
+    deliveryStatus: 'completed',
+    completedAt: new Date('2026-09-03T11:30:00Z'),
+    photoUrl: 'https://example.test/comprovante.jpg',
+    notes: 'Entrega confirmada pelo motorista',
+  });
+  const moveStore = new MemoryFirestore({
+    'routes/source': { status: 'in_progress', driverId: 'driver-1', stops: [latestMovedStop] },
+    'routes/target': { status: 'dispatched', driverId: 'driver-2', stops: [] },
+  });
+  const [sourceResult] = await gatewayFor(moveStore).saveExistingRoutePlansAtomically([
+    { routeId: 'source', baseStops: [staleMovedStop], plannedStops: [] },
+    { routeId: 'target', baseStops: [], plannedStops: [staleMovedStop] },
+  ]);
+  const persistedTargetStop = (moveStore.data(moveStore.ref('routes', 'target')).stops as PlaceValue[])[0];
+  assert.equal(persistedTargetStop.deliveryStatus, 'completed');
+  assert.equal(persistedTargetStop.photoUrl, 'https://example.test/comprovante.jpg');
+  assert.equal(persistedTargetStop.notes, 'Entrega confirmada pelo motorista');
+  assert.equal(sourceResult.removedStops[0].deliveryStatus, 'completed');
+  assert.equal(sourceResult.removedStops[0].photoUrl, 'https://example.test/comprovante.jpg');
+  assert.equal(sourceResult.removedStops[0].notes, 'Entrega confirmada pelo motorista');
+} catch (error) {
+  regressionFailures.push(`movimento latest: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+try {
+  const metadataStore = new MemoryFirestore({
+    'routes/draft': { status: 'draft', driverId: 'driver-old', stops: [stop('metadata')] },
+  });
+  const [metadataResult] = await gatewayFor(metadataStore).saveExistingRoutePlansAtomically([{
+    routeId: 'draft',
+    baseStops: [stop('metadata')],
+    plannedStops: [stop('metadata', { customerName: 'Cliente atualizado' })],
+    metadata: { status: 'dispatched', driverId: 'driver-new' },
+  }]);
+  const persistedMetadata = metadataStore.data(metadataStore.ref('routes', 'draft'));
+  assert.equal(metadataResult.status, 'dispatched');
+  assert.equal(metadataResult.driverId, 'driver-new');
+  assert.equal(persistedMetadata.status, 'dispatched');
+  assert.equal(persistedMetadata.driverId, 'driver-new');
+} catch (error) {
+  regressionFailures.push(`metadata atômica: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+try {
+  const latestForNewRoute = stop('A', {
+    deliveryStatus: 'failed',
+    failureReason: 'Cliente ausente',
+    attemptPhotoUrl: 'https://example.test/tentativa.jpg',
+  });
+  const successfulBatchStore = new MemoryFirestore({
+    'routes/source': { stops: [latestForNewRoute] },
+    'services/service-1': { routeIds: ['source'] },
+  });
+  const successfulBatchResult = await gatewayFor(successfulBatchStore).saveRoutePlanBatchAtomically({
+    existingPlans: [{
+      routeId: 'source',
+      baseStops: [stop('A')],
+      plannedStops: [],
+    }],
+    newRoutes: [{
+      routeId: 'new-route',
+      data: { status: 'draft' },
+      plannedStops: [stop('A')],
+    }],
+    serviceLink: { serviceId: 'service-1', routeIds: ['new-route'] },
+  });
+  const createdStop = (
+    successfulBatchStore.data(successfulBatchStore.ref('routes', 'new-route')).stops as PlaceValue[]
+  )[0];
+  assert.equal(createdStop.deliveryStatus, 'failed');
+  assert.equal(createdStop.failureReason, 'Cliente ausente');
+  assert.equal(createdStop.attemptPhotoUrl, 'https://example.test/tentativa.jpg');
+  assert.deepEqual(
+    successfulBatchStore.data(successfulBatchStore.ref('services', 'service-1')).routeIds,
+    ['source', 'new-route'],
+  );
+  assert.equal(successfulBatchResult.createdRoutes[0].stops[0].deliveryStatus, 'failed');
+  assert.deepEqual(successfulBatchStore.operations, [
+    'read:routes/source',
+    'read:routes/new-route',
+    'read:services/service-1',
+    'write:routes/source',
+    'set:routes/new-route',
+    'write:services/service-1',
+  ]);
+
+  const batchStore = new MemoryFirestore({
+    'routes/source': { stops: [stop('A'), stop('concurrent')] },
+    'services/service-1': { routeIds: ['source'] },
+  });
+  let rejection: unknown;
+  try {
+    await gatewayFor(batchStore).saveRoutePlanBatchAtomically({
+      existingPlans: [{
+        routeId: 'source',
+        baseStops: [stop('A')],
+        plannedStops: [],
+      }],
+      newRoutes: [{
+        routeId: 'new-route',
+        data: { status: 'draft' },
+        plannedStops: [stop('A')],
+      }],
+      serviceLink: { serviceId: 'service-1', routeIds: ['new-route'] },
+    });
+  } catch (error) {
+    rejection = error;
+  }
+  assert.equal((rejection as { code?: string } | undefined)?.code, 'route-structure-conflict');
+  assert.equal(batchStore.has(batchStore.ref('routes', 'new-route')), false);
+  assert.deepEqual(batchStore.data(batchStore.ref('services', 'service-1')).routeIds, ['source']);
+  assert.deepEqual(
+    batchStore.operations.filter(operation => (
+      operation.startsWith('write:') || operation.startsWith('set:')
+    )),
+    [],
+  );
+} catch (error) {
+  regressionFailures.push(`batch atômico: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+assert.deepEqual(regressionFailures, []);
 
 const confirmationStore = new MemoryFirestore({
   'routes/r1': { driverId: 'driver-1', stops: routeOneStops },
