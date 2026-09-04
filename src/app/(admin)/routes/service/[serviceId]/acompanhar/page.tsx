@@ -124,6 +124,7 @@ import {
   RouteStructureConflictError,
   rebasePlannedStops,
 } from '@/lib/route-stop-reconciliation';
+import { saveRoutePlanBatchWithConflictHandling } from '@/lib/route-plan-batch-conflict-handling';
 import {
   dedupeStops,
   findStopIndexByIdentity,
@@ -5188,40 +5189,56 @@ export default function ServiceAcompanharPage() {
       ...routeUpdates.map((update) => [update.routeKey, update.routeId] as const),
       ...preparedNewRoutes.map((route) => [route.routeKey, route.routeId] as const),
     ]);
-    const transferIntents = allRoutesWithPending.flatMap((targetRouteKey) => {
-      const targetRouteId = targetRouteIdsByKey.get(targetRouteKey);
-      if (!targetRouteId) return [];
-      return (pendingEdits[targetRouteKey] || []).flatMap((stop) => {
-        const sourceRouteKey = (stop as any)._movedFromRoute as string | undefined;
-        if (!sourceRouteKey) return [];
-        const sourceRouteId = existingRouteIdsByKey.get(sourceRouteKey);
-        if (!sourceRouteId || sourceRouteId === targetRouteId) return [];
-        const stopKey = getStopIdentityKey(stop);
-        if (!stopKey) {
-          throw new RouteStructureConflictError('Uma transferência pendente está sem identidade estável.');
-        }
-        return [{ sourceRouteId, targetRouteId, stopKey }];
-      });
-    });
-
     let driversNotified = 0;
 
     try {
-      const batchResult = await saveRoutePlanBatchAtomically({
-        existingPlans,
-        newRoutes: preparedNewRoutes.map(newRoute => ({
-          routeId: newRoute.routeId,
-          data: newRoute.data,
-          plannedStops: newRoute.cleanedStops,
-        })),
-        transferIntents,
-        ...(routeData.isService && routeData.serviceId && preparedNewRoutes.length > 0 ? {
-          serviceLink: {
-            serviceId: routeData.serviceId,
-            routeIds: preparedNewRoutes.map(newRoute => newRoute.routeId),
-          },
-        } : {}),
-      });
+    const saveOutcome = await saveRoutePlanBatchWithConflictHandling({
+      buildInput: () => {
+        const transferIntents = allRoutesWithPending.flatMap((targetRouteKey) => {
+          const targetRouteId = targetRouteIdsByKey.get(targetRouteKey);
+          if (!targetRouteId) return [];
+          return (pendingEdits[targetRouteKey] || []).flatMap((stop) => {
+            const sourceRouteKey = (stop as any)._movedFromRoute as string | undefined;
+            if (!sourceRouteKey) return [];
+            const sourceRouteId = existingRouteIdsByKey.get(sourceRouteKey);
+            if (!sourceRouteId || sourceRouteId === targetRouteId) return [];
+            const stopKey = getStopIdentityKey(stop);
+            if (!stopKey) {
+              throw new RouteStructureConflictError('Uma transferência pendente está sem identidade estável.');
+            }
+            return [{ sourceRouteId, targetRouteId, stopKey }];
+          });
+        });
+        return {
+          existingPlans,
+          newRoutes: preparedNewRoutes.map(newRoute => ({
+            routeId: newRoute.routeId,
+            data: newRoute.data,
+            plannedStops: newRoute.cleanedStops,
+          })),
+          transferIntents,
+          ...(routeData.isService && routeData.serviceId && preparedNewRoutes.length > 0 ? {
+            serviceLink: {
+              serviceId: routeData.serviceId,
+              routeIds: preparedNewRoutes.map(newRoute => newRoute.routeId),
+            },
+          } : {}),
+        };
+      },
+      save: saveRoutePlanBatchAtomically,
+      onConflict: (error) => {
+        console.error('❌ Erro ao salvar edições no Firestore:', error);
+        addDebugLog('FIRESTORE_ERROR', 'Firestore operation FAILED', { error });
+        toast({
+          variant: 'destructive',
+          title: 'A rota mudou durante a edição',
+          description: 'Recarregue a rota e repita a alteração para preservar os dados mais recentes.',
+        });
+      },
+    });
+    if (saveOutcome.status === 'conflict') return;
+
+      const batchResult = saveOutcome.result;
 
       batchResult.existingRoutes.forEach((result, index) => {
         const update = routeUpdates[index];

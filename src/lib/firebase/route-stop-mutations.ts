@@ -52,7 +52,7 @@ export type SavedRoutePlan = {
   stops: PlaceValue[];
   removedStops: PlaceValue[];
   changes: RouteChange[];
-  previousStatus?: string;
+  previousStatus: string;
   previousDriverId?: string;
   status: string;
   driverId?: string;
