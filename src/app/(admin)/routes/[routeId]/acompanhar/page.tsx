@@ -120,7 +120,10 @@ import {
   findSingleStopByIdentity,
   RouteStructureConflictError,
 } from '@/lib/route-stop-reconciliation';
-import { saveRoutePlanBatchWithConflictHandling } from '@/lib/route-plan-batch-conflict-handling';
+import {
+  buildRouteStopTransferIntents,
+  saveRoutePlanBatchWithConflictHandling,
+} from '@/lib/route-plan-batch-conflict-handling';
 import {
   dedupeStops,
   findStopIndexByIdentity,
@@ -4782,20 +4785,11 @@ export default function RouteAcompanharPage() {
     try {
     const saveOutcome = await saveRoutePlanBatchWithConflictHandling({
       buildInput: () => {
-        const transferIntents = allRoutesWithPending.flatMap((targetRouteKey) => {
-          const targetRouteId = targetRouteIdsByKey.get(targetRouteKey);
-          if (!targetRouteId) return [];
-          return (pendingEdits[targetRouteKey] || []).flatMap((stop) => {
-            const sourceRouteKey = (stop as any)._movedFromRoute as string | undefined;
-            if (!sourceRouteKey) return [];
-            const sourceRouteId = existingRouteIdsByKey.get(sourceRouteKey);
-            if (!sourceRouteId || sourceRouteId === targetRouteId) return [];
-            const stopKey = getStopIdentityKey(stop);
-            if (!stopKey) {
-              throw new RouteStructureConflictError('Uma transferência pendente está sem identidade estável.');
-            }
-            return [{ sourceRouteId, targetRouteId, stopKey }];
-          });
+        const transferIntents = buildRouteStopTransferIntents({
+          targetRouteKeys: allRoutesWithPending,
+          pendingEdits,
+          existingRouteIdsByKey,
+          targetRouteIdsByKey,
         });
         return {
           existingPlans,
