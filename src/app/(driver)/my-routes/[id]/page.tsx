@@ -245,8 +245,8 @@ export default function RouteDetailsPage() {
 
     // Monta a mensagem personalizada
     const message = firstName
-      ? `Olá ${firstName}, tudo bem?\n\nSou entregador da Sol de Maria Calçados e estou com o seu pedido. Poderia me enviar sua localização fixa?`
-      : `Olá, tudo bem?\n\nSou entregador da Sol de Maria Calçados e estou com o seu pedido. Poderia me enviar sua localização fixa?`;
+      ? `Olá ${firstName}! Sou entregador da Sol de Maria e seu pedido está em rota de entrega. 🛵\n\nPara facilitar, ENVIE SUA LOCALIZAÇÃO 📍 e tire o celular do silencioso, pois entrarei em contato quando chegar ao seu endereço.`
+      : `Olá! Sou entregador da Sol de Maria e seu pedido está em rota de entrega. 🛵\n\nPara facilitar, ENVIE SUA LOCALIZAÇÃO 📍 e tire o celular do silencioso, pois entrarei em contato quando chegar ao seu endereço.`;
 
     const sanitizedPhone = phone.replace(/\D/g, ''); // Remove non-digit characters
     const encodedMessage = encodeURIComponent(message);
