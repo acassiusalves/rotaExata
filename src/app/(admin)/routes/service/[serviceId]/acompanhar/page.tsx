@@ -151,6 +151,8 @@ interface RouteData {
   period?: 'Matutino' | 'Vespertino' | 'Noturno'; // Período para filtrar rotas
   routeName?: string; // Nome da rota para exibir
   existingRouteData?: {
+    status?: RouteInfo['status'];
+    code?: string;
     distanceMeters: number;
     duration: string;
     encodedPolyline: string;
@@ -1492,6 +1494,8 @@ export default function ServiceAcompanharPage() {
                     duration: recalculatedRoute.duration,
                     encodedPolyline: recalculatedRoute.encodedPolyline,
                     color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                    status: routeData.status,
+                    code: routeData.code,
                     visible: true,
                   });
                 } else {
@@ -1502,6 +1506,8 @@ export default function ServiceAcompanharPage() {
                     duration: routeData.duration,
                     encodedPolyline: routeData.encodedPolyline,
                     color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                    status: routeData.status,
+                    code: routeData.code,
                     visible: true,
                   });
                 }
@@ -1512,6 +1518,8 @@ export default function ServiceAcompanharPage() {
                   duration: routeData.duration,
                   encodedPolyline: routeData.encodedPolyline,
                   color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
+                  status: routeData.status,
+                  code: routeData.code,
                   visible: true,
                 });
               }
@@ -1557,6 +1565,8 @@ export default function ServiceAcompanharPage() {
                 duration: parsedData.existingRouteData!.duration,
                 encodedPolyline: parsedData.existingRouteData!.encodedPolyline,
                 color: parsedData.existingRouteData!.color,
+                status: parsedData.existingRouteData?.status,
+                code: parsedData.existingRouteData?.code,
                 visible: true,
               });
               setRouteB(null);
@@ -1574,6 +1584,8 @@ export default function ServiceAcompanharPage() {
               duration: parsedData.existingRouteData!.duration,
               encodedPolyline: parsedData.existingRouteData!.encodedPolyline,
               color: parsedData.existingRouteData!.color,
+              status: parsedData.existingRouteData?.status,
+              code: parsedData.existingRouteData?.code,
               visible: true,
             });
             setRouteB(null);
@@ -1779,6 +1791,7 @@ export default function ServiceAcompanharPage() {
               color: r.color || routeColors[0],
               visible: true,
               status: r.status as any,
+              code: r.code,
             });
             setServiceRouteIds(prev => ({ ...prev, A: r.id }));
             // Restaurar motorista atribuído do Firestore
@@ -1800,6 +1813,7 @@ export default function ServiceAcompanharPage() {
               color: r.color || routeColors[1],
               visible: true,
               status: r.status as any,
+              code: r.code,
             });
             setServiceRouteIds(prev => ({ ...prev, B: r.id }));
             // Restaurar motorista atribuído do Firestore
@@ -1826,6 +1840,7 @@ export default function ServiceAcompanharPage() {
                   color: r.color || routeColors[(idx + 2) % routeColors.length],
                   visible: true,
                   status: r.status as any,
+                  code: r.code,
                 } as RouteInfo,
                 color: r.color || routeColors[(idx + 2) % routeColors.length],
                 firestoreId: r.id,
@@ -2092,10 +2107,10 @@ export default function ServiceAcompanharPage() {
               : Promise.resolve(null),
           ]);
           if (computedRouteA) {
-            setRouteA({ ...computedRouteA, color: '#e60000', visible: true });
+            setRouteA({ ...computedRouteA, color: '#e60000', visible: true, status: 'draft' });
           }
           if (computedRouteB) {
-            setRouteB({ ...computedRouteB, color: '#1fd634', visible: true });
+            setRouteB({ ...computedRouteB, color: '#1fd634', visible: true, status: 'draft' });
           }
 
           // Para serviços: salvar rotas como draft no Firestore imediatamente
@@ -2112,8 +2127,14 @@ export default function ServiceAcompanharPage() {
                 // Usar IDs existentes
                 const existingDocs = existingCheck.docs;
                 const savedIds: { A: string | null; B: string | null } = { A: null, B: null };
-                if (existingDocs[0]) savedIds.A = existingDocs[0].id;
-                if (existingDocs[1]) savedIds.B = existingDocs[1].id;
+                if (existingDocs[0]) {
+                  savedIds.A = existingDocs[0].id;
+                  setRouteA(previous => previous ? { ...previous, status: existingDocs[0].data().status || 'draft', code: existingDocs[0].data().code } : null);
+                }
+                if (existingDocs[1]) {
+                  savedIds.B = existingDocs[1].id;
+                  setRouteB(previous => previous ? { ...previous, status: existingDocs[1].data().status || 'draft', code: existingDocs[1].data().code } : null);
+                }
                 setServiceRouteIds(savedIds);
               } else {
                 const routeDate = new Date(parsedData.routeDate);
@@ -3718,6 +3739,7 @@ export default function ServiceAcompanharPage() {
     setRoute(routeKey, (previous) => previous ? {
       ...previous,
       stops: result.stops,
+      status: result.status as RouteInfo['status'],
       ...(metrics || {}),
     } : null);
   };
@@ -3770,8 +3792,13 @@ export default function ServiceAcompanharPage() {
     return additionalRoute?.id || null;
   };
 
-  const shouldUpdateExistingRoute = (routeKey: string) =>
-    !!getExistingRouteId(routeKey);
+  const shouldUpdateExistingRoute = (routeKey: string) => {
+    if (!getExistingRouteId(routeKey)) return false;
+    // Rotas adicionais são editadas aqui e despachadas na própria tela.
+    if (additionalRoutes.some(route => route.id === routeKey)) return true;
+    // Ter um documento salvo não significa que o rascunho já foi despachado.
+    return getRoute(routeKey)?.status !== 'draft';
+  };
 
   // Function to add a new dynamic route
   const handleAddNewRoute = () => {
@@ -3979,13 +4006,7 @@ export default function ServiceAcompanharPage() {
           .filter((n): n is string => !!n);
 
         // Verificar se já existe um draft salvo para esta rota (evitar duplicatas)
-        let existingDraftId: string | null = null;
-        if (routeKey === 'A' || routeKey === 'B') {
-          existingDraftId = serviceRouteIds[routeKey as 'A' | 'B'];
-        } else {
-          const dynRoute = dynamicRoutes.find(r => r.key === routeKey);
-          if (dynRoute?.firestoreId) existingDraftId = dynRoute.firestoreId;
-        }
+        const existingDraftId = getExistingRouteId(routeKey);
 
         // Converter routeTime (morning/afternoon/evening) para hora HH:mm
         const timeMap: Record<string, string> = {
@@ -4016,8 +4037,8 @@ export default function ServiceAcompanharPage() {
             routeDocData.serviceId = routeData.serviceId;
             routeDocData.serviceCode = routeData.serviceCode;
             routeDocData.lunnaOrderIds = lunnaOrderIds;
-            // Gerar código da rota baseado na letra da rota (A, B)
-            routeDocData.code = `${routeData.serviceCode}-${routeKey}`;
+            // Preservar o código salvo: uma rota aberta pelo ID usa a chave local A.
+            routeDocData.code = routeToSave.code || `${routeData.serviceCode}-${routeKey}`;
         }
 
         let routeRefId: string;
@@ -4034,6 +4055,7 @@ export default function ServiceAcompanharPage() {
             delete routeMetadata.stops;
             const [result] = await saveExistingRoutePlansAtomically([{
               routeId: existingDraftId,
+              expectedStatus: 'draft',
               baseStops: getPersistedStops(existingDraftId, routeToSave.stops),
               plannedStops: routeToSave.stops,
               metrics,
@@ -5246,6 +5268,7 @@ export default function ServiceAcompanharPage() {
           setRoute(created.routeKey, previous => previous ? {
             ...previous,
             stops: result.stops,
+            status: 'draft',
             encodedPolyline: created.routeInfo?.encodedPolyline || '',
             distanceMeters: created.routeInfo?.distanceMeters || 0,
             duration: created.routeInfo?.duration || '0s',
@@ -5259,6 +5282,7 @@ export default function ServiceAcompanharPage() {
                   data: {
                     ...route.data,
                     stops: result.stops,
+                    status: 'draft',
                     encodedPolyline: created.routeInfo?.encodedPolyline || '',
                     distanceMeters: created.routeInfo?.distanceMeters || 0,
                     duration: created.routeInfo?.duration || '0s',

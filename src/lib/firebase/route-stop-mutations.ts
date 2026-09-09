@@ -41,6 +41,8 @@ export function resolveRoutePlanMetrics(
 
 export type ExistingRoutePlan = {
   routeId: string;
+  /** Checked inside the transaction before applying a status transition. */
+  expectedStatus?: string;
   baseStops: PlaceValue[];
   plannedStops: PlannedRouteStop[];
   metrics?: RouteMetrics;
@@ -292,6 +294,9 @@ export function createRouteStopMutationGateway(dependencies: RouteStopMutationDe
         const snapshot = existingSnapshots[index];
         if (!snapshot.exists()) throw new Error(`Rota ${plan.routeId} não encontrada.`);
         const data = snapshot.data();
+        if (plan.expectedStatus !== undefined && data.status !== plan.expectedStatus) {
+          throw new RouteStructureConflictError('O status da rota mudou. Recarregue antes de despachar.');
+        }
         const latestStops = (data.stops || []) as PlaceValue[];
         const rebased = rebasePlannedStops({
           baseStops: plan.baseStops,

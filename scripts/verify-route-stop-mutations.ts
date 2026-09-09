@@ -291,6 +291,7 @@ try {
   });
   const [metadataResult] = await gatewayFor(metadataStore).saveExistingRoutePlansAtomically([{
     routeId: 'draft',
+    expectedStatus: 'draft',
     baseStops: [stop('metadata')],
     plannedStops: [stop('metadata', { customerName: 'Cliente atualizado' })],
     metadata: { status: 'dispatched', driverId: 'driver-new' },
@@ -304,6 +305,32 @@ try {
   assert.equal(persistedMetadata.driverId, 'driver-new');
 } catch (error) {
   regressionFailures.push(`metadata atômica: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+for (const status of ['dispatched', 'in_progress', 'completed', 'completed_auto']) {
+  const latestRoute = {
+    status,
+    driverId: 'driver-current',
+    stops: [stop('dispatch-conflict', { deliveryStatus: 'completed' })],
+  };
+  const dispatchStore = new MemoryFirestore({ 'routes/stale-draft': latestRoute });
+  try {
+    await assert.rejects(
+      () => gatewayFor(dispatchStore).saveExistingRoutePlansAtomically([{
+        routeId: 'stale-draft',
+        expectedStatus: 'draft',
+        baseStops: [stop('dispatch-conflict')],
+        plannedStops: [stop('dispatch-conflict')],
+        metadata: { status: 'dispatched', driverId: 'driver-from-stale-tab' },
+      }]),
+      { name: 'RouteStructureConflictError' },
+      `despacho de aba desatualizada deve rejeitar rota ${status}`,
+    );
+    assert.deepEqual(dispatchStore.data(dispatchStore.ref('routes', 'stale-draft')), latestRoute);
+    assert.deepEqual(dispatchStore.operations, ['read:routes/stale-draft']);
+  } catch (error) {
+    regressionFailures.push(`conflito de despacho ${status}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 try {
