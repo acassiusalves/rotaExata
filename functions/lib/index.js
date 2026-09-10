@@ -41,6 +41,7 @@ const auth_1 = require("firebase-admin/auth");
 const firestore_1 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
+const invite_conflict_1 = require("./invite-conflict");
 (0, app_1.initializeApp)();
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
@@ -178,10 +179,12 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         const auth = (0, auth_1.getAuth)();
         const db = (0, firestore_1.getFirestore)();
         let user;
+        let authUserExists = true;
         try {
             user = await auth.getUserByEmail(email);
         }
         catch {
+            authUserExists = false;
             user = await auth.createUser({
                 email,
                 password: generateTemporaryPassword(),
@@ -189,12 +192,24 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
                 displayName: displayName || undefined,
             });
         }
+        const userRef = db.collection("users").doc(user.uid);
+        const existingUserDoc = await userRef.get();
+        // Convite so vale para e-mail livre. Se a conta ja existe, seguir daqui
+        // reescreveria o cadastro dela -- foi assim que um admin virou motorista
+        // e perdeu o acesso ao Rota e ao Luna de uma vez. Nada foi escrito ainda.
+        const conflitoDeConvite = (0, invite_conflict_1.checkInviteConflict)({
+            email,
+            requestedRole: role,
+            authUserExists,
+            existingRole: existingUserDoc.data()?.role,
+        });
+        if (conflitoDeConvite.blocked) {
+            throw new https_1.HttpsError("already-exists", conflitoDeConvite.message);
+        }
         // Update auth user if displayName is provided and different
         if (displayName && user.displayName !== displayName) {
             await auth.updateUser(user.uid, { displayName });
         }
-        const userRef = db.collection("users").doc(user.uid);
-        const existingUserDoc = await userRef.get();
         const userData = {
             email,
             role,
@@ -219,6 +234,9 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         return { ok: true, uid: user.uid, role };
     }
     catch (err) {
+        if (err instanceof https_1.HttpsError) {
+            throw err;
+        }
         const msg = err instanceof Error ? err.message : "Falha ao convidar";
         throw new https_1.HttpsError("internal", msg);
     }

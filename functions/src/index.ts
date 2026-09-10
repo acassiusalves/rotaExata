@@ -6,6 +6,7 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
+import {checkInviteConflict} from "./invite-conflict";
 
 initializeApp();
 
@@ -186,8 +187,10 @@ export const inviteUser = onCall(
       const auth=getAuth();
       const db=getFirestore();
       let user;
+      let authUserExists = true;
       try{user=await auth.getUserByEmail(email);}
       catch{
+        authUserExists = false;
         user=await auth.createUser({
           email,
           password: generateTemporaryPassword(),
@@ -196,13 +199,26 @@ export const inviteUser = onCall(
         });
       }
 
+      const userRef = db.collection("users").doc(user.uid);
+      const existingUserDoc = await userRef.get();
+
+      // Convite so vale para e-mail livre. Se a conta ja existe, seguir daqui
+      // reescreveria o cadastro dela -- foi assim que um admin virou motorista
+      // e perdeu o acesso ao Rota e ao Luna de uma vez. Nada foi escrito ainda.
+      const conflitoDeConvite = checkInviteConflict({
+        email,
+        requestedRole: role,
+        authUserExists,
+        existingRole: existingUserDoc.data()?.role,
+      });
+      if (conflitoDeConvite.blocked) {
+        throw new HttpsError("already-exists", conflitoDeConvite.message);
+      }
+
       // Update auth user if displayName is provided and different
       if (displayName && user.displayName !== displayName) {
         await auth.updateUser(user.uid, { displayName });
       }
-
-      const userRef = db.collection("users").doc(user.uid);
-      const existingUserDoc = await userRef.get();
 
       const userData: any = {
         email,
@@ -235,6 +251,9 @@ export const inviteUser = onCall(
       
       return {ok:true,uid:user.uid,role};
     }catch(err){
+      if (err instanceof HttpsError) {
+        throw err;
+      }
       const msg=err instanceof Error?err.message:"Falha ao convidar";
       throw new HttpsError("internal",msg);
     }
