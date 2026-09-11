@@ -43,6 +43,7 @@ const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
 const invite_conflict_1 = require("./invite-conflict");
 const sync_user_1 = require("./sync-user");
+const auto_completion_1 = require("./auto-completion");
 (0, app_1.initializeApp)();
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
@@ -1077,14 +1078,28 @@ exports.autoCompleteRoutes = functionsV1
         const affectedServiceIds = new Set();
         staleRoutes.docs.forEach((routeDoc) => {
             const routeData = routeDoc.data();
-            batch.update(routeDoc.ref, {
+            const update = {
                 status: "completed_auto",
                 autoCompletedAt: firestore_1.FieldValue.serverTimestamp(),
-            });
+            };
+            // Rota inteiramente percorrida = servico prestado, faltou so o clique de
+            // encerrar no app. Ela precisa de `completedAt` para entrar no pagamento,
+            // e a data certa e o fim REAL do trabalho (ultima parada resolvida) --
+            // nunca a hora do robo, que roda ate 48h depois e jogaria a rota no
+            // periodo de pagamento errado. Rota abandonada segue SEM `completedAt`
+            // e, portanto, fora do pagamento.
+            const desfecho = (0, auto_completion_1.resolveAutoCompletion)(routeData.stops ?? []);
+            if (desfecho.worked) {
+                update.completedAt = desfecho.finishedAt;
+            }
+            batch.update(routeDoc.ref, update);
             if (routeData.serviceId) {
                 affectedServiceIds.add(routeData.serviceId);
             }
-            console.log(`⏰ Auto-finalizando rota ${routeDoc.id}`);
+            console.log(`⏰ Auto-finalizando rota ${routeDoc.id} ` +
+                (desfecho.worked ?
+                    "(percorrida por inteiro: completedAt = fim do trabalho)" :
+                    `(nao prestada: ${desfecho.reason})`));
         });
         await batch.commit();
         console.log(`✅ ${staleRoutes.docs.length} rota(s) auto-finalizada(s)`);
