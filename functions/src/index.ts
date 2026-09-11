@@ -8,6 +8,7 @@ import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
 import {checkInviteConflict} from "./invite-conflict";
 import {buildSyncPatch} from "./sync-user";
+import {resolveAutoCompletion} from "./auto-completion";
 
 initializeApp();
 
@@ -1333,14 +1334,33 @@ export const autoCompleteRoutes = functionsV1
       const affectedServiceIds = new Set<string>();
       staleRoutes.docs.forEach((routeDoc) => {
         const routeData = routeDoc.data();
-        batch.update(routeDoc.ref, {
+
+        const update: Record<string, unknown> = {
           status: "completed_auto",
           autoCompletedAt: FieldValue.serverTimestamp(),
-        });
+        };
+
+        // Rota inteiramente percorrida = servico prestado, faltou so o clique de
+        // encerrar no app. Ela precisa de `completedAt` para entrar no pagamento,
+        // e a data certa e o fim REAL do trabalho (ultima parada resolvida) --
+        // nunca a hora do robo, que roda ate 48h depois e jogaria a rota no
+        // periodo de pagamento errado. Rota abandonada segue SEM `completedAt`
+        // e, portanto, fora do pagamento.
+        const desfecho = resolveAutoCompletion(routeData.stops ?? []);
+        if (desfecho.worked) {
+          update.completedAt = desfecho.finishedAt;
+        }
+
+        batch.update(routeDoc.ref, update);
         if (routeData.serviceId) {
           affectedServiceIds.add(routeData.serviceId);
         }
-        console.log(`⏰ Auto-finalizando rota ${routeDoc.id}`);
+        console.log(
+          `⏰ Auto-finalizando rota ${routeDoc.id} ` +
+            (desfecho.worked ?
+              "(percorrida por inteiro: completedAt = fim do trabalho)" :
+              `(nao prestada: ${desfecho.reason})`)
+        );
       });
       await batch.commit();
 
