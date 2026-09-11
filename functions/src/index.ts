@@ -7,6 +7,7 @@ import {getFirestore,FieldValue} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
 import {checkInviteConflict} from "./invite-conflict";
+import {buildSyncPatch} from "./sync-user";
 
 initializeApp();
 
@@ -1066,21 +1067,51 @@ export const syncAuthUsers=onCall(
     const db=getFirestore();
 
     try {
-      const userRecord = await auth.getUserByEmail(email);
-      const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
+      const callerUid = req.auth?.uid;
+      if (!callerUid) {
+        throw new HttpsError("unauthenticated", "Usuário não autenticado");
+      }
 
-      await db.collection("users").doc(userRecord.uid).set(
+      // O botao de sincronizar serve para a pessoa reparar o PROPRIO cadastro.
+      // Sincronizar o de outra pessoa e operacao administrativa.
+      const caller = await auth.getUser(callerUid);
+      if ((caller.email || "").toLowerCase() !== email) {
+        await assertAuthorizedRole(
+          callerUid,
+          "Apenas administradores, sócios e gestores podem sincronizar outro usuário"
+        );
+      }
+
+      const userRecord = await auth.getUserByEmail(email);
+      const userRef = db.collection("users").doc(userRecord.uid);
+      const existing = (await userRef.get()).data();
+
+      const patch = buildSyncPatch({
+        email,
+        currentRole: existing?.role,
+        currentDisplayName: existing?.displayName,
+        authDisplayName: userRecord.displayName,
+      });
+
+      await userRef.set(
         {
+          ...patch,
           email: userRecord.email,
-          role: role,
-          displayName: userRecord.displayName || '',
           updatedAt:FieldValue.serverTimestamp()
         },
         {merge:true}
       );
 
-      return {ok:true, synced: 1, uid: userRecord.uid, role: role};
+      return {
+        ok:true,
+        synced: 1,
+        uid: userRecord.uid,
+        role: existing?.role ?? patch.role,
+      };
     } catch (error: any) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
       console.error(`Failed to sync user ${email}:`, error);
       if (error.code === 'auth/user-not-found') {
         throw new HttpsError("not-found", `Usuário com email ${email} não encontrado.`);

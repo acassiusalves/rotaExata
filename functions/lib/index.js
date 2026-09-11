@@ -42,6 +42,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
 const invite_conflict_1 = require("./invite-conflict");
+const sync_user_1 = require("./sync-user");
 (0, app_1.initializeApp)();
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
@@ -867,17 +868,41 @@ exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, as
     const auth = (0, auth_1.getAuth)();
     const db = (0, firestore_1.getFirestore)();
     try {
+        const callerUid = req.auth?.uid;
+        if (!callerUid) {
+            throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
+        }
+        // O botao de sincronizar serve para a pessoa reparar o PROPRIO cadastro.
+        // Sincronizar o de outra pessoa e operacao administrativa.
+        const caller = await auth.getUser(callerUid);
+        if ((caller.email || "").toLowerCase() !== email) {
+            await assertAuthorizedRole(callerUid, "Apenas administradores, sócios e gestores podem sincronizar outro usuário");
+        }
         const userRecord = await auth.getUserByEmail(email);
-        const role = email === 'acassiusalves@gmail.com' ? 'admin' : 'vendedor';
-        await db.collection("users").doc(userRecord.uid).set({
+        const userRef = db.collection("users").doc(userRecord.uid);
+        const existing = (await userRef.get()).data();
+        const patch = (0, sync_user_1.buildSyncPatch)({
+            email,
+            currentRole: existing?.role,
+            currentDisplayName: existing?.displayName,
+            authDisplayName: userRecord.displayName,
+        });
+        await userRef.set({
+            ...patch,
             email: userRecord.email,
-            role: role,
-            displayName: userRecord.displayName || '',
             updatedAt: firestore_1.FieldValue.serverTimestamp()
         }, { merge: true });
-        return { ok: true, synced: 1, uid: userRecord.uid, role: role };
+        return {
+            ok: true,
+            synced: 1,
+            uid: userRecord.uid,
+            role: existing?.role ?? patch.role,
+        };
     }
     catch (error) {
+        if (error instanceof https_1.HttpsError) {
+            throw error;
+        }
         console.error(`Failed to sync user ${email}:`, error);
         if (error.code === 'auth/user-not-found') {
             throw new https_1.HttpsError("not-found", `Usuário com email ${email} não encontrado.`);
