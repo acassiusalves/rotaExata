@@ -10,7 +10,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "migrate:driver-deliveries": "tsx scripts/update-driver-deliveries.ts"
+    "migrate:driver-deliveries": "tsx scripts/update-driver-deliveries.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

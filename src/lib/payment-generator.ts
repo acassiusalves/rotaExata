@@ -10,6 +10,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { calculateRouteEarnings, type RouteForCalculation } from './earnings-calculator';
+import { resolveRouteDriverId } from './driver-identity';
 import type { EarningsRules, DriverPayment } from './types';
 
 export interface GeneratePaymentsResult {
@@ -88,11 +89,22 @@ export async function generatePendingPayments(
 
       const routeData = routeDoc.data();
 
-      // Valida se a rota tem informações necessárias
+      // Valida se a rota tem informações necessárias.
+      // `driverInfo` é a cópia de exibição ({name, vehicle}); o uid real mora em
+      // `route.driverId`. Sem um uid resolvível o pagamento nasceria sem dono e
+      // não seria filtrável por motorista — melhor recusar e reportar.
+      const driverId = resolveRouteDriverId(routeData);
       if (!routeData.driverInfo || !routeData.completedAt) {
         errors.push({
           routeId,
           error: 'Rota sem motorista ou data de conclusão',
+        });
+        continue;
+      }
+      if (!driverId) {
+        errors.push({
+          routeId,
+          error: 'Rota sem identificador do motorista (driverId)',
         });
         continue;
       }
@@ -114,7 +126,7 @@ export async function generatePendingPayments(
       // Prepara dados da rota para cálculo
       const routeForCalculation: RouteForCalculation = {
         ...routeData,
-        driverId: routeData.driverInfo.id,
+        driverId,
         driverName: routeData.driverInfo.name,
         completedAt: completedDate,
       };
@@ -127,7 +139,7 @@ export async function generatePendingPayments(
         const paymentData: Omit<DriverPayment, 'id'> = {
           routeId,
           routeCode: routeData.code || 'N/A',
-          driverId: routeData.driverInfo.id,
+          driverId,
           driverName: routeData.driverInfo.name,
           routeCompletedAt: routeData.completedAt,
           routePlannedDate: routeData.plannedDate || routeData.completedAt,
@@ -216,9 +228,15 @@ export async function generatePaymentForRoute(
       throw new Error('Rota não está completada');
     }
 
-    // Valida informações necessárias
+    // Valida informações necessárias. Ver comentário no caminho em lote:
+    // o uid real do motorista é `route.driverId`, não `driverInfo.id`.
     if (!routeData.driverInfo || !routeData.completedAt) {
       throw new Error('Rota sem motorista ou data de conclusão');
+    }
+
+    const driverId = resolveRouteDriverId(routeData);
+    if (!driverId) {
+      throw new Error('Rota sem identificador do motorista (driverId)');
     }
 
     // Busca regras ativas
@@ -238,7 +256,7 @@ export async function generatePaymentForRoute(
 
     const routeForCalculation: RouteForCalculation = {
       ...routeData,
-      driverId: routeData.driverInfo.id,
+      driverId,
       driverName: routeData.driverInfo.name,
       completedAt: completedDate,
     };
@@ -252,7 +270,7 @@ export async function generatePaymentForRoute(
       id: paymentRef.id,
       routeId,
       routeCode: routeData.code || 'N/A',
-      driverId: routeData.driverInfo.id,
+      driverId,
       driverName: routeData.driverInfo.name,
       routeCompletedAt: routeData.completedAt,
       routePlannedDate: routeData.plannedDate || routeData.completedAt,
