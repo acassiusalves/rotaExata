@@ -1,6 +1,7 @@
 import { db } from './firebase/client';
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { calculateRouteEarnings, type RouteForCalculation } from './earnings-calculator';
+import { resolveRouteDriverId } from './driver-identity';
 import type { EarningsRules, DriverPayment, PaymentMethod } from './types';
 import {
   logPaymentApproved,
@@ -329,7 +330,7 @@ export async function recalculatePayment(
 
     const routeForCalculation: RouteForCalculation = {
       ...routeData,
-      driverId: routeData.driverInfo.id,
+      driverId: resolveRouteDriverId(routeData) ?? '',
       driverName: routeData.driverInfo.name,
       completedAt: completedDate,
     };
@@ -436,8 +437,7 @@ export async function fixPaymentsWithoutDriver(): Promise<number> {
 
       const routeData = routeDoc.data();
 
-      // Pega driverId da rota (campo driverId ou driverInfo.id)
-      const driverId = routeData.driverId || routeData.driverInfo?.id;
+      const driverId = resolveRouteDriverId(routeData);
       const driverName = routeData.driverInfo?.name;
 
       if (!driverId || !driverName) {
