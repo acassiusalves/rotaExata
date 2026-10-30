@@ -19,6 +19,8 @@ interface RouteChangesNotificationProps {
   notification: RouteChangeNotification | null;
   onAcknowledge: () => Promise<void>;
   isAcknowledging: boolean;
+  isPreview?: boolean;
+  onDismissPreview?: () => void;
 }
 
 const getChangeIcon = (type: string) => {
@@ -74,6 +76,8 @@ export function RouteChangesNotification({
   notification,
   onAcknowledge,
   isAcknowledging,
+  isPreview = false,
+  onDismissPreview,
 }: RouteChangesNotificationProps) {
   if (!notification || notification.acknowledged) {
     return null;
@@ -88,7 +92,9 @@ export function RouteChangesNotification({
             <AlertDialogTitle>Alterações na Rota</AlertDialogTitle>
           </div>
           <AlertDialogDescription>
-            O administrador fez alterações em sua rota. Revise as mudanças abaixo e confirme o recebimento.
+            {isPreview
+              ? 'Visualização no modo teste. Fechar esta prévia não confirma o recebimento pelo entregador.'
+              : 'O administrador fez alterações em sua rota. Revise as mudanças abaixo e confirme o recebimento.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -153,11 +159,11 @@ export function RouteChangesNotification({
 
         <AlertDialogFooter>
           <AlertDialogAction
-            onClick={onAcknowledge}
+            onClick={isPreview ? onDismissPreview : onAcknowledge}
             disabled={isAcknowledging}
             className="w-full"
           >
-            {isAcknowledging ? 'Confirmando...' : 'Confirmar Recebimento'}
+            {isPreview ? 'Fechar prévia' : isAcknowledging ? 'Confirmando...' : 'Confirmar Recebimento'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

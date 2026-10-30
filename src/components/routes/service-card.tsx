@@ -30,6 +30,7 @@ import type { LunnaService, LunnaServiceStatus, RouteInfo, Driver } from '@/lib/
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
+import { summarizeServiceDispatch } from '@/lib/service-dispatch-summary';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -110,6 +111,7 @@ export function ServiceCard({
   const [openDropdownId, setOpenDropdownId] = React.useState<string | null>(null);
 
   const statusInfo = statusConfig[service.status];
+  const dispatchSummary = summarizeServiceDispatch(routes.map(route => route.data));
 
   // Verificar se o serviço tem mais de 48 horas desde a criação
   const canForceComplete = React.useMemo(() => {
@@ -246,6 +248,13 @@ export function ServiceCard({
             {format(plannedDate, "dd/MM/yyyy", { locale: ptBR })}
           </span>
         </CardDescription>
+
+        {routes.length > 0 && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {dispatchSummary.sent} de {routes.length} rotas atribuídas ao entregador
+            {dispatchSummary.drafts > 0 && ` · ${dispatchSummary.drafts} em rascunho`}
+          </p>
+        )}
 
         {/* Estatísticas */}
         {service.stats && (service.stats.completedDeliveries > 0 || service.stats.failedDeliveries > 0) && (

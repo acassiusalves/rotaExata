@@ -156,7 +156,7 @@ const notifySavedRoutePlansAndCount = (
         driverId?: string;
         status: string;
       }>,
-      notify: (result: { routeId: string }) => Promise<void>,
+      notify: (result: { routeId: string }) => Promise<unknown>,
       onError?: (result: { routeId: string }, error: unknown) => void,
     ) => Promise<number>;
   }
@@ -167,10 +167,12 @@ const notifiedCount = await notifySavedRoutePlansAndCount!(
   [
     { routeId: 'success', changes: [{}], driverId: 'driver-1', status: 'dispatched' },
     { routeId: 'failure', changes: [{}], driverId: 'driver-2', status: 'in_progress' },
+    { routeId: 'no-token', changes: [{}], driverId: 'driver-4', status: 'in_progress' },
     { routeId: 'not-eligible', changes: [], driverId: 'driver-3', status: 'dispatched' },
   ],
   async (result) => {
     if (result.routeId === 'failure') throw new Error('notification failed');
+    return { push: { outcome: result.routeId === 'no-token' ? 'skipped_no_token' : 'accepted' } };
   },
   (result: { routeId: string }) => notificationErrors.push(result.routeId),
 );

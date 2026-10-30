@@ -12,8 +12,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { useFCMToken } from '@/hooks/use-fcm-token';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
 
 interface NotificationPermissionPromptProps {
   userId: string;
@@ -24,22 +22,9 @@ export function NotificationPermissionPrompt({
   userId,
   userRole,
 }: NotificationPermissionPromptProps) {
-  const { token, notificationPermission, requestPermission } = useFCMToken();
+  const { registrationState, requestPermission } = useFCMToken(userRole === 'driver' ? userId : null);
   const [isDismissed, setIsDismissed] = React.useState(false);
   const [isRequesting, setIsRequesting] = React.useState(false);
-
-  // Salvar token no Firestore quando obtido
-  React.useEffect(() => {
-    if (token && userId) {
-      const userRef = doc(db, 'users', userId);
-      updateDoc(userRef, {
-        fcmToken: token,
-        fcmTokenUpdatedAt: new Date(),
-      }).catch(error => {
-        console.error('Erro ao salvar FCM token:', error);
-      });
-    }
-  }, [token, userId]);
 
   // Verificar se foi dispensado anteriormente
   React.useEffect(() => {
@@ -70,12 +55,12 @@ export function NotificationPermissionPrompt({
   }
 
   // Não mostrar se já tem permissão ou foi dispensado
-  if (notificationPermission === 'granted' || isDismissed) {
+  if (registrationState === 'enabled' || (isDismissed && registrationState !== 'error')) {
     return null;
   }
 
   // Não mostrar se foi negado permanentemente
-  if (notificationPermission === 'denied') {
+  if (['blocked', 'unsupported', 'impersonating', 'disabled'].includes(registrationState)) {
     return null;
   }
 
@@ -98,7 +83,7 @@ export function NotificationPermissionPrompt({
             <div>
               <CardTitle className="text-lg">Ativar Notificações</CardTitle>
               <CardDescription className="text-sm">
-                Receba atualizações instantâneas sobre suas rotas
+                {registrationState === 'error' ? 'Não foi possível ativar os avisos. Tente novamente.' : 'Receba atualizações sobre suas rotas'}
               </CardDescription>
             </div>
           </div>

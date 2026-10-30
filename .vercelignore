@@ -1,0 +1,13 @@
+.git
+.superpowers
+.codex
+.agents
+.aws
+.env*
+node_modules
+functions
+docs/investigations
+docs/superpowers
+firebase-debug.log
+firestore-debug.log
+serviceAccountKey.json

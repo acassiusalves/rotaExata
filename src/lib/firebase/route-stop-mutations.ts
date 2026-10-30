@@ -8,6 +8,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
+import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 import type { PlaceValue, RouteChangeNotification } from '@/lib/types';
 import { detectRouteChanges, markModifiedStops, type RouteChange } from '@/lib/route-change-tracker';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
@@ -94,7 +95,7 @@ export type SavedRoutePlanBatch = {
 
 export async function notifySavedRoutePlansAndCount(
   results: SavedRoutePlan[],
-  notify: (result: SavedRoutePlan) => Promise<void>,
+  notify: (result: SavedRoutePlan) => Promise<unknown>,
   onError?: (result: SavedRoutePlan, error: unknown) => void,
 ): Promise<number> {
   let notifiedCount = 0;
@@ -106,8 +107,8 @@ export async function notifySavedRoutePlansAndCount(
     if (!eligible) continue;
 
     try {
-      await notify(result);
-      notifiedCount++;
+      const response = await notify(result) as { push?: { outcome?: string } } | undefined;
+      if (response?.push?.outcome === 'accepted') notifiedCount++;
     } catch (error) {
       onError?.(result, error);
     }
@@ -604,6 +605,7 @@ export async function acknowledgeRouteChangesAtomically(
   routeId: string,
   expectedFingerprint?: string,
 ): Promise<void> {
+  if (isImpersonationSessionActive()) throw new Error('O modo teste não registra recebimento pelo entregador.');
   return defaultGateway.acknowledgeRouteChangesAtomically(routeId, expectedFingerprint);
 }
 
