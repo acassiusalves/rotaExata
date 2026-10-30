@@ -44,6 +44,7 @@ const node_crypto_1 = require("node:crypto");
 const invite_conflict_1 = require("./invite-conflict");
 const sync_user_1 = require("./sync-user");
 const auto_completion_1 = require("./auto-completion");
+const push_outcome_1 = require("./push-outcome");
 (0, app_1.initializeApp)();
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
@@ -601,7 +602,7 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
     try {
         const db = (0, firestore_1.getFirestore)();
         // Criar ou atualizar a notificação
-        await db.collection("routeChangeNotifications").doc(routeId).set({
+        const notificationWrite = await db.collection("routeChangeNotifications").doc(routeId).set({
             routeId,
             driverId,
             changes,
@@ -618,6 +619,7 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
         const driverDoc = await db.collection("users").doc(driverId).get();
         const driverData = driverDoc.data();
         const fcmToken = driverData?.fcmToken;
+        let push = { outcome: "skipped_no_token" };
         // Enviar push notification se o motorista tiver token FCM
         if (fcmToken) {
             const messaging = (0, messaging_1.getMessaging)();
@@ -669,16 +671,12 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
                     },
                 },
             };
-            try {
-                await messaging.send(message);
-                console.log(`✅ Push notification enviada para motorista ${driverId}`);
-            }
-            catch (notificationError) {
-                console.error('❌ Erro ao enviar push notification:', notificationError);
-                // Não falhar a função inteira se a notificação falhar
-            }
+            push = await (0, push_outcome_1.sendPushWithOutcome)(true, () => messaging.send(message));
+            console.log("Resultado do push de alteração de rota", { routeId, driverId, ...push });
         }
-        return { ok: true, message: "Notificação de mudanças criada com sucesso." };
+        await (0, push_outcome_1.persistPushOutcome)(() => db.collection("routeChangeNotifications").doc(routeId)
+            .update({ push }, { lastUpdateTime: notificationWrite.writeTime }));
+        return { ok: true, push, message: "Notificação de mudanças criada com sucesso." };
     }
     catch (error) {
         const msg = error.message || "Falha ao notificar mudanças.";

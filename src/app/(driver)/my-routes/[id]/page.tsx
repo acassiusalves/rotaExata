@@ -42,6 +42,7 @@ import { useGeolocationTracking } from '@/hooks/use-geolocation-tracking';
 import { useToast } from '@/hooks/use-toast';
 import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
 import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
+import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 import { StopChangeBadge } from '@/components/driver/stop-change-badge';
 import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
 import { logPointCompleted, logPointFailed } from '@/lib/firebase/activity-log';
@@ -190,6 +191,7 @@ export default function RouteDetailsPage() {
 
   const handleAcknowledgeChanges = async () => {
     if (!notification) return;
+    if (isImpersonationSessionActive()) return;
 
     setIsAcknowledging(true);
     try {
@@ -905,6 +907,8 @@ export default function RouteDetailsPage() {
 
       {/* Route Changes Notification */}
       <RouteChangesNotification
+        isPreview={isImpersonationSessionActive()}
+        onDismissPreview={() => setNotification(null)}
         notification={notification}
         onAcknowledge={handleAcknowledgeChanges}
         isAcknowledging={isAcknowledging}

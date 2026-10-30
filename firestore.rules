@@ -12,8 +12,24 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function canonicalRole() {
+      return !isAuthed()
+        ? null
+        : getUserData().role == 'manager'
+          ? 'gestor'
+          : getUserData().role == 'partner'
+            ? 'socio'
+            : getUserData().role == 'user'
+              ? 'usuario'
+              : getUserData().role;
+    }
+
+    function hasRole(roles) {
+      return isAuthed() && canonicalRole() in roles;
+    }
+
     function isAppAdmin() {
-      return isAuthed() && getUserData().role in ['admin', 'socio', 'gestor', 'manager'];
+      return hasRole(['admin', 'gestor', 'socio']);
     }
 
     function isAdmin() {
@@ -69,6 +85,14 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // ===== CONFIGURAÇÕES COLLECTION =====
+    match /configuracoes/{configId} {
+      // Leitura permitida para qualquer usuário autenticado (estoquistas precisam ler etiqueta)
+      allow read: if isAuthed();
+      // Escrita apenas para admin, gestor e socio (exceto etiqueta que permite estoquista)
+      allow write: if hasRole(['admin', 'gestor', 'socio', 'estoquista']);
+    }
+
     // ===== LOCATION UPDATE REQUESTS =====
     match /locationUpdateRequests/{driverId} {
       allow create, update: if isAppAdmin();
@@ -79,8 +103,13 @@ service cloud.firestore {
     match /products/{productId} {
       // Leitura pública para catálogos públicos
       allow read, list: if true;
-      // Escrita apenas autenticados
-      allow write: if isAuthed();
+      // Cadastro e edição seguem no client (a tela de produtos escreve direto).
+      allow create, update: if isAuthed();
+      // Exclusão NÃO. Ela precisa da guarda de vínculo, que roda no servidor:
+      // POST /api/produtos/excluir → exclusao-produto-engine (Admin SDK ignora regras).
+      // Antes disto, qualquer autenticado apagava qualquer produto — foi o que travou
+      // o P3435 em 28/08/2026.
+      allow delete: if false;
     }
 
     // ===== STOCK COLLECTION =====
@@ -143,12 +172,23 @@ service cloud.firestore {
       allow update, delete: if isAppAdmin();
     }
 
-    // ===== PRODUTOS COLLECTION =====
+    // ===== PRODUTOS COLLECTION (LEGADO — somente leitura) =====
+    // Auditada em 28/08/2026: 0 documentos em produção (`products` tinha 6.724).
+    // Ninguém escreve aqui — não existe create/update/delete para esta coleção em
+    // lugar nenhum do código, nem no client nem no servidor. O que restou são 6
+    // fallbacks de LEITURA, todos devolvendo vazio hoje:
+    //   catalogos/page.tsx:340,391 · catalogos/novo/page.tsx:375
+    //   catalogos/[id]/editar/page.tsx:483 · components/TagSelector.tsx:114
+    //   services/catalogo-service.ts:254 (Admin SDK, ignora estas regras)
     match /produtos/{produtoId} {
-      // Leitura pública para catálogos públicos
+      // Leitura mantida como estava: é só o que os fallbacks acima precisam.
       allow read, list: if true;
-      // Escrita apenas autenticados
-      allow write: if isAuthed();
+      // Escrita NEGADA por inteiro, e não só o delete. Numa coleção vazia o risco
+      // real é o CREATE: TagSelector lê `produtos` PRIMEIRO e só cai para `products`
+      // quando ela vem vazia. Um único doc criado aqui trocaria o catálogo inteiro
+      // por esse doc — e, como a leitura é pública, ele ficaria exposto sem auth.
+      // Se algum dia a coleção voltar a ser escrita, que seja pelo servidor.
+      allow write: if false;
     }
 
     // ===== FORNECEDORES COLLECTION =====
@@ -168,7 +208,35 @@ service cloud.firestore {
 
     // ===== ORDERS COLLECTION (English alias for pedidos) =====
     match /orders/{orderId} {
-      allow read, write: if isAuthed();
+      function temFinanceiroV2(data) {
+        return data.get('retornoFinanceiro', {}).get('versao', 0) == 2;
+      }
+      function preservaFinanceiroV2() {
+        return request.resource.data.get('retornoFinanceiro', {}) == resource.data.get('retornoFinanceiro', {})
+          && request.resource.data.get('items', []) == resource.data.get('items', [])
+          && request.resource.data.get('itens', []) == resource.data.get('itens', [])
+          && request.resource.data.get('itensDevolvidos', []) == resource.data.get('itensDevolvidos', [])
+          && request.resource.data.get('shipping', {}).get('deliveryValue', 0) == resource.data.get('shipping', {}).get('deliveryValue', 0)
+          && !request.resource.data.get('billing', {}).diff(resource.data.get('billing', {})).affectedKeys().hasAny([
+            'grossValue', 'subtotal', 'finalValue', 'discountValue', 'discounts', 'discount',
+            'additions', 'credit', 'delivery', 'custoFrete', 'experimentacaoTotal',
+            'valorRecebido', 'descontoFaturamentoValor', 'descontoFaturamentoAplicado', 'acaoAplicada'
+          ]);
+      }
+      allow read: if isAuthed();
+      allow create: if isAuthed() && !temFinanceiroV2(request.resource.data) && !request.resource.data.keys().hasAny(['retornoPosFaturamento']);
+      allow update: if isAuthed() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['retornoPosFaturamento'])
+        && ((!temFinanceiroV2(resource.data) && !temFinanceiroV2(request.resource.data)) || preservaFinanceiroV2());
+      allow delete: if isAuthed() && !temFinanceiroV2(resource.data);
+    }
+
+    // Immutable proofs and idempotent commands are written only through Admin transactions.
+    match /retorno_ajustes_financeiros/{id} {
+      allow read: if isAuthed();
+      allow write: if false;
+    }
+    match /faturamento_comandos/{id} {
+      allow read, write: if false;
     }
 
     // ===== CLIENTS COLLECTION (English alias for clientes) =====
@@ -246,36 +314,57 @@ service cloud.firestore {
 
     // ===== WORKFLOW - ESTADOS =====
     match /estados_workflow/{estadoId} {
-      // Qualquer usuário autenticado pode ler e escrever (TEMPORÁRIO PARA TESTE)
-      allow read, write: if isAuthed();
+      // Leitura liberada a qualquer autenticado (motor de transições, dropdowns).
+      allow read: if isAuthed();
+      // create autenticado por causa do fallback de cold-start em src/app/pedidos/novo/page.tsx (~2749), que cria o estado inicial 'Reserva para entrega' rodando como vendedor.
+      allow create: if isAuthed();
+      // Edição/remoção da config só por admin/gestor/socio (página /transicoes).
+      allow update, delete: if isAppAdmin();
     }
 
     // ===== WORKFLOW - TRANSIÇÕES =====
     match /transicoes_workflow/{transicaoId} {
-      // Qualquer usuário autenticado pode ler e escrever (TEMPORÁRIO PARA TESTE)
-      allow read, write: if isAuthed();
+      // Leitura a qualquer autenticado; escrita da config só por admin/gestor/socio.
+      allow read: if isAuthed();
+      allow write: if isAppAdmin();
     }
 
     // ===== WORKFLOW - SITUAÇÕES (NOVA COLEÇÃO) =====
     match /situacoes/{situacaoId} {
-      // Qualquer usuário autenticado pode ler e escrever
-      allow read, write: if isAuthed();
+      // Leitura a qualquer autenticado; escrita da config só por admin/gestor/socio.
+      allow read: if isAuthed();
+      allow write: if isAppAdmin();
+    }
+
+    // ===== HISTÓRICO DE PRODUTOS =====
+    match /historico_produtos/{historicoId} {
+      allow read, list: if isAuthed();
+      allow create: if false;
+      allow update, delete: if false;
     }
 
     // ===== HISTÓRICO DE ESTOQUE =====
     match /historico_estoque/{historicoId} {
-      // Qualquer usuário autenticado pode ler e criar
-      allow read, create: if isAuthed();
-      // Apenas admins podem atualizar ou deletar
-      allow update, delete: if isAppAdmin();
+      allow read: if isAuthed();
+      allow create: if false;
+      allow update, delete: if false;
     }
 
     // ===== HISTÓRICO DE MOVIMENTAÇÕES DE PEDIDOS =====
     match /historico_movimentacoes/{movimentacaoId} {
-      // Qualquer usuário autenticado pode ler e criar
-      allow read, create: if isAuthed();
-      // Apenas admins podem atualizar ou deletar
-      allow update, delete: if isAppAdmin();
+      allow read: if isAuthed();
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    // ===== HISTÓRICO DE CONFIGURAÇÕES =====
+    match /historico_configuracoes/{historicoId} {
+      // Apenas equipe interna pode consultar
+      allow read, list: if hasRole(['admin', 'gestor', 'socio']);
+      // Escrita apenas pelo servidor/Admin SDK
+      allow create: if false;
+      // Histórico é imutável
+      allow update, delete: if false;
     }
 
     // ===== PICKING REGISTROS =====
@@ -286,20 +375,47 @@ service cloud.firestore {
       allow update, delete: if isAppAdmin();
     }
 
-    // ===== RETORNO REGISTROS =====
+    // ===== LEDGERS E REGISTROS DE RETORNO (somente servidor) =====
+    match /retorno_operacoes/{operacaoId} {
+      allow read: if isAuthed();
+      allow create, update, delete: if false;
+    }
+
+    match /retorno_pos_faturamento_operacoes/{operacaoId} {
+      allow read, write: if false; // Somente a API autenticada; ledger imutável.
+    }
+
+    match /retorno_estornos/{estornoId} {
+      allow read: if isAuthed();
+      allow create, update, delete: if false;
+    }
+
     match /retorno_registros/{registroId} {
-      // Qualquer usuário autenticado pode ler e criar
-      allow read, create: if isAuthed();
-      // Apenas admins podem atualizar ou deletar
-      allow update, delete: if isAppAdmin();
+      allow read: if isAuthed();
+      allow create, update, delete: if false;
     }
 
     // ===== CRÉDITOS DE CLIENTES =====
     match /creditos_clientes/{creditoId} {
-      // Qualquer usuário autenticado pode ler, criar e atualizar
-      allow read, create, update: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
+      function origemSemFinanceiroV2(data) {
+        return data.get('pedidoOrigemId', '') == '' ||
+          get(/databases/$(database)/documents/orders/$(data.pedidoOrigemId)).data.get('retornoFinanceiro', {}).get('versao', 0) != 2;
+      }
+      allow read: if isAuthed();
+      allow create: if isAuthed() && origemSemFinanceiroV2(request.resource.data);
+      function consumoValido() {
+        let antes=resource.data;
+        let depois=request.resource.data;
+        return antes.status == 'ativo'
+          && depois.diff(antes).affectedKeys().hasOnly(['valor','valorUtilizado','status','dataUtilizacao','pedidoUtilizacaoId','pedidoUtilizacaoNumero','updatedAt'])
+          && depois.valor >= 0 && depois.valor < antes.valor
+          && depois.valorUtilizado > antes.get('valorUtilizado',0)
+          && math.abs((depois.valor + depois.valorUtilizado) - (antes.valor + antes.get('valorUtilizado',0))) < 0.000001
+          && depois.status == (depois.valor == 0 ? 'utilizado' : 'ativo')
+          && depois.pedidoUtilizacaoId is string && depois.pedidoUtilizacaoId != '';
+      }
+      allow update: if isAuthed() && ((origemSemFinanceiroV2(resource.data) && origemSemFinanceiroV2(request.resource.data)) || consumoValido());
+      allow delete: if isAppAdmin() && origemSemFinanceiroV2(resource.data);
     }
 
     // ===== PEDIDOS DE COMPRA =====
@@ -346,88 +462,6 @@ service cloud.firestore {
       allow delete: if isAuthed() && resource.data.usuarioId == request.auth.uid;
       // Permitir listar notificações do próprio usuário
       allow list: if isAuthed();
-    }
-
-    // ===== NOTIFICATIONS COLLECTION (alias em inglês usado pelo app de motoristas) =====
-    match /notifications/{notificationId} {
-      function canAccessNotification() {
-        return isAuthed() && (
-          isAppAdmin() ||
-          resource.data.driverId == request.auth.uid
-        );
-      }
-
-      function canCreateNotification() {
-        return isAuthed() && (
-          isAppAdmin() ||
-          request.resource.data.driverId == request.auth.uid
-        );
-      }
-
-      allow create: if canCreateNotification();
-      allow read, get, list: if canAccessNotification();
-      allow update: if canAccessNotification();
-      allow delete: if isAppAdmin();
-    }
-
-    // ===== ROUTE CHANGE NOTIFICATIONS =====
-    match /routeChangeNotifications/{routeId} {
-      function canAccessRouteChangeNotification() {
-        return isAuthed() && (
-          isAppAdmin() ||
-          resource.data.driverId == request.auth.uid
-        );
-      }
-
-      function canWriteRouteChangeNotification() {
-        return isAuthed() && (
-          isAppAdmin() ||
-          request.resource.data.driverId == request.auth.uid
-        );
-      }
-
-      allow create: if canWriteRouteChangeNotification();
-      allow read, get, list: if canAccessRouteChangeNotification();
-      allow update: if canWriteRouteChangeNotification();
-      allow delete: if isAppAdmin();
-    }
-
-    // ===== CRM - LEADS =====
-    match /crm_leads/{leadId} {
-      // Qualquer usuário autenticado pode ler e listar
-      allow read, list: if isAuthed();
-      // Qualquer usuário autenticado pode criar e atualizar
-      allow create, update: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
-    }
-
-    // ===== CRM - CONVERSATIONS =====
-    match /crm_conversations/{conversationId} {
-      // Qualquer usuário autenticado pode ler e listar
-      allow read, list: if isAuthed();
-      // Qualquer usuário autenticado pode criar e atualizar
-      allow create, update: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
-    }
-
-    // ===== CRM - MESSAGES =====
-    match /crm_messages/{messageId} {
-      // Qualquer usuário autenticado pode ler e listar
-      allow read, list: if isAuthed();
-      // Qualquer usuário autenticado pode criar
-      allow create: if isAuthed();
-      // Apenas admins podem atualizar e deletar
-      allow update, delete: if isAppAdmin();
-    }
-
-    // ===== CRM - SETTINGS =====
-    match /crm_settings/{settingId} {
-      // Qualquer usuário autenticado pode ler
-      allow read: if isAuthed();
-      // Apenas admins podem escrever
-      allow write: if isAppAdmin();
     }
 
     // ===== EVOLUTION WHATSAPP - INSTANCES =====
@@ -538,16 +572,6 @@ service cloud.firestore {
       allow delete: if isAppAdmin();
     }
 
-    // ===== LUNNA SERVICES COLLECTION (Serviços Lunna para tabela hierárquica) =====
-    match /lunnaServices/{serviceId} {
-      // Qualquer usuário autenticado pode ler e listar
-      allow read, list: if isAuthed();
-      // Qualquer usuário autenticado pode criar e atualizar
-      allow create, update: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
-    }
-
     // ===== IMPORT JOBS COLLECTION (Importação em segundo plano) =====
     match /import_jobs/{jobId} {
       // Qualquer usuário autenticado pode ler e listar jobs
@@ -624,6 +648,48 @@ service cloud.firestore {
       allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
     }
 
+    // ===== BALANÇO DE ESTOQUE =====
+    match /balancos/{balancoId} {
+      // Função para verificar se usuário tem acesso ao estoque
+      function hasEstoqueAccess() {
+        return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'estoquista'];
+      }
+
+      // Usuários com acesso ao estoque podem ler, listar, criar e atualizar
+      allow read, list, create, update: if hasEstoqueAccess();
+      // Apenas admin e socio podem deletar
+      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
+
+      // Subcollection de itens do balanço
+      match /itens/{itemId} {
+        allow read, list, create, update: if hasEstoqueAccess();
+        allow delete: if hasEstoqueAccess();
+      }
+    }
+
+    // ===== HISTÓRICO DE BALANÇO =====
+    match /historico_balancos/{historicoId} {
+      // Qualquer usuário com acesso ao estoque pode ler
+      allow read, list: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'estoquista'];
+      // Apenas admins/gestores podem criar (ao aplicar balanço)
+      allow create: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio'];
+      // Ninguém pode atualizar ou deletar histórico
+      allow update, delete: if false;
+    }
+
+    // ===== METAS DE VENDEDORES (Relatórios) =====
+    match /metas-vendedores/{periodoId} {
+      allow read, list: if isAuthed();
+      allow create, update: if isAppAdmin();
+      allow delete: if isAppAdmin();
+    }
+
+    // ===== CONFIGURAÇÕES DE COMISSÃO (Relatórios) =====
+    match /comissao-configuracoes/{configId} {
+      allow read, list: if isAuthed();
+      allow create, update, delete: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+    }
+
     // ===== FATURAMENTOS COLLECTION =====
     match /faturamentos/{faturamentoId} {
       // Função para verificar se usuário tem acesso financeiro
@@ -631,49 +697,60 @@ service cloud.firestore {
         return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
       }
 
+      function pedidoSemFinanceiroV2(data) {
+        return data.get('pedidoId', '') != ''
+          && get(/databases/$(database)/documents/orders/$(data.pedidoId)).data.get('retornoFinanceiro', {}).get('versao', 0) != 2;
+      }
       // Usuários com acesso financeiro podem ler e listar faturamentos
       allow read, list: if hasFinancialAccess();
       // Sistema pode criar faturamentos (qualquer usuário autenticado ao faturar pedido)
-      allow create: if isAuthed();
+      allow create: if isAuthed() && pedidoSemFinanceiroV2(request.resource.data);
       // Apenas usuários com permissão financeira podem atualizar (para edições)
-      allow update: if hasFinancialAccess();
+      allow update: if hasFinancialAccess() && pedidoSemFinanceiroV2(resource.data) && pedidoSemFinanceiroV2(request.resource.data);
       // Apenas admin e socio podem deletar
-      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
+      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'] && pedidoSemFinanceiroV2(resource.data);
     }
 
-    // ===== EARNINGS RULES COLLECTION (Regras de Ganhos) =====
-    match /earningsRules/{ruleId} {
-      // Qualquer usuário autenticado pode ler
-      allow read, list, get: if isAuthed();
-      // Admin e Socio podem escrever
-      allow write, create, update, delete: if isAuthed() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'socio'];
+    // RotaExata contracts added to the shared published baseline (2026-10-16).
+    // Before deploying, re-read the shared release and review concurrent changes.
+    match /notifications/{notificationId} {
+      function ownsNotification() {
+        return isAuthed() && resource.data.driverId == request.auth.uid;
+      }
+      allow read: if isAppAdmin() || ownsNotification();
+      allow create: if isAppAdmin() || (isAuthed() && request.resource.data.driverId == request.auth.uid);
+      allow update: if isAppAdmin() || (ownsNotification()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt', 'read']));
+      allow delete: if isAppAdmin();
     }
 
-    // ===== DRIVER PAYMENTS COLLECTION (Pagamentos aos Motoristas) =====
-    match /driverPayments/{paymentId} {
-      // Qualquer usuário autenticado pode ler e listar
-      allow read, list, get: if isAuthed();
-
-      // Qualquer usuário autenticado pode criar (a verificação de role é feita no código)
-      allow create: if isAuthed();
-
-      // Admin e gestores podem atualizar e deletar
-      allow update, delete: if isAppAdmin();
+    match /routeChangeNotifications/{routeId} {
+      function ownsRouteChange() {
+        return isAuthed() && resource.data.driverId == request.auth.uid
+          && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
+      }
+      allow read: if isAppAdmin() || ownsRouteChange();
+      allow create, delete: if isAppAdmin();
+      allow update: if isAppAdmin() || (ownsRouteChange()
+        && request.resource.data.acknowledged == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledged', 'acknowledgedAt']));
     }
 
-    // ===== ACTIVITY LOG COLLECTION (Histórico de Atividades) =====
+    match /users/{userId}/settings/preferences {
+      allow read: if isOwner(userId) || isAppAdmin();
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['notifications', 'darkMode', 'autoNavigation', 'keepScreenOn', 'pushRevision'])
+        && request.resource.data.get('pushRevision', 0) is int
+        && request.resource.data.get('pushRevision', 0) >= 0
+        && request.resource.data.get('notifications', false) is bool
+        && request.resource.data.get('darkMode', false) is bool
+        && request.resource.data.get('autoNavigation', false) is bool
+        && request.resource.data.get('keepScreenOn', true) is bool;
+    }
+
     match /activity_log/{logId} {
-      // Qualquer usuário autenticado pode ler, listar e obter
-      allow read: if isAuthed();
-      allow list: if isAuthed();
-      allow get: if isAuthed();
-      // Qualquer usuário autenticado pode criar (logging automático)
-      allow create: if isAuthed();
-      // Ninguém pode atualizar ou deletar (logs são imutáveis)
-      allow update: if false;
-      allow delete: if false;
+      allow read, create: if isAuthed();
+      allow update, delete: if false;
     }
   }
 }

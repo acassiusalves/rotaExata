@@ -1,113 +1,102 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { app } from '@/lib/firebase/client';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { auth } from '@/lib/firebase/client';
 import { useToast } from '@/hooks/use-toast';
+import { createPushRegistrar, type PushRegistrationResult } from '@/lib/push-registration';
+import { isPushSupported, requestPushPermission, saveDriverToken, onForegroundNotification, getDriverPushPreference, disableDriverPush } from '@/lib/firebase/messaging';
+import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 
-export function useFCMToken() {
-  const [token, setToken] = useState<string | null>(null);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+const permission = (): NotificationPermission => typeof Notification === 'undefined' ? 'default' : Notification.permission;
+const registrar = createPushRegistrar({
+  isSupported: isPushSupported,
+  getPermission: permission,
+  requestPermission: () => Notification.requestPermission(),
+  getCurrentUid: () => auth.currentUser?.uid ?? null,
+  isImpersonating: isImpersonationSessionActive,
+  getPreference: getDriverPushPreference,
+  getToken: () => requestPushPermission(process.env.NEXT_PUBLIC_VAPID_KEY || ''),
+  saveToken: saveDriverToken,
+  disableToken: disableDriverPush,
+});
+const EVENT = 'rotaexata:push-registration';
+
+export function useFCMToken(userId: string | null, receiveForeground = true) {
+  const [result, setResult] = useState<PushRegistrationResult>({ state: 'needs_permission', permission: 'default' });
+  const [isRegistering, setIsRegistering] = useState(false);
+  const currentUid = useRef(userId);
+  currentUid.current = userId;
   const { toast } = useToast();
 
+  const run = useCallback(async (ask: boolean) => {
+    if (!userId) return false;
+    setIsRegistering(true);
+    const outcome = await registrar.register(userId, ask);
+    if (currentUid.current !== userId) return false;
+    setResult(outcome);
+    setIsRegistering(false);
+    window.dispatchEvent(new CustomEvent(EVENT, { detail: { userId, result: outcome } }));
+    return outcome.state === 'enabled';
+  }, [userId]);
+
   useEffect(() => {
-    // Verificar se está no navegador e suporta notificações
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      return;
-    }
-
-    setNotificationPermission(Notification.permission);
-
-    // Se já tem permissão, obter token
-    if (Notification.permission === 'granted') {
-      retrieveToken();
-    }
-
-    // Listener para mensagens em foreground - importação dinâmica
-    let unsubscribe: (() => void) | undefined;
-
-    if ('serviceWorker' in navigator) {
-      import('firebase/messaging').then(({ getMessaging, onMessage }) => {
-        try {
-          const messaging = getMessaging(app);
-          unsubscribe = onMessage(messaging, (payload) => {
-            // Mostrar toast para notificação em foreground
-            toast({
-              title: payload.notification?.title || 'Nova Notificação',
-              description: payload.notification?.body || 'Você tem uma nova mensagem',
-              duration: 5000,
-            });
-
-            // Também mostrar notificação nativa se possível
-            if (Notification.permission === 'granted') {
-              new Notification(payload.notification?.title || 'Nova Notificação', {
-                body: payload.notification?.body,
-                icon: '/icons/pwa-192.png',
-                tag: payload.data?.routeId || 'notification',
-              });
-            }
-          });
-        } catch (error) {
-          console.error('Erro ao configurar Firebase Messaging:', error);
-        }
-      }).catch(error => {
-        console.error('Erro ao importar Firebase Messaging:', error);
-      });
-    }
-
-    return () => {
-      if (unsubscribe) unsubscribe();
+    if (!userId) return;
+    currentUid.current = userId;
+    const changed = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId: string; result: PushRegistrationResult }>).detail;
+      if (detail.userId === userId) setResult(detail.result);
     };
-  }, [toast]);
+    const resync = () => { void run(false); };
+    window.addEventListener(EVENT, changed);
+    window.addEventListener('focus', resync);
+    void run(false);
+    return () => {
+      if (currentUid.current === userId) currentUid.current = null;
+      window.removeEventListener(EVENT, changed); window.removeEventListener('focus', resync);
+    };
+  }, [userId, run]);
 
-  const retrieveToken = async () => {
-    try {
-      if (!('serviceWorker' in navigator)) {
-        return null;
+  useEffect(() => {
+    if (!userId || !receiveForeground || isImpersonationSessionActive()) return;
+    let alive = true;
+    let unsubscribe: (() => void) | undefined;
+    void onForegroundNotification(async payload => {
+      if (!alive || currentUid.current !== userId) return;
+      const title = payload.data?.title || payload.notification?.title || 'Nova Notificação';
+      const body = payload.data?.body || payload.notification?.body || 'Você tem uma nova mensagem';
+      toast({ title, description: body, duration: 5000 });
+      if (permission() === 'granted') {
+        try {
+          const registration = await navigator.serviceWorker.getRegistration('/firebase-cloud-messaging-push-scope');
+          if (alive && currentUid.current === userId) {
+            await registration?.showNotification(title, { body, icon: '/icons/pwa-192.png', tag: payload.data?.routeId || 'notification', data: payload.data });
+          }
+        } catch { console.warn('Não foi possível mostrar o aviso de sistema. O aviso continua disponível no app.'); }
       }
-
-      const { getMessaging, getToken } = await import('firebase/messaging');
-      const messaging = getMessaging(app);
-
-      const currentToken = await getToken(messaging, {
-        vapidKey: 'BIFyl9lKmf8W1Z1O7Pytq5fTI5NffCctMFpyECtfEezhN0vJUugnTKy-ArGfkb6xksBFGiQSp7GHA7JdswTN-30',
-      });
-
-      if (currentToken) {
-        setToken(currentToken);
-        return currentToken;
-      } else {
-        return null;
-      }
-    } catch (error) {
-      console.error('Erro ao obter token FCM:', error);
-      return null;
-    }
-  };
-
-  const requestPermission = async () => {
-    try {
-      if (typeof window === 'undefined' || !('Notification' in window)) {
-        return null;
-      }
-
-      const permission = await Notification.requestPermission();
-      setNotificationPermission(permission);
-
-      if (permission === 'granted') {
-        const token = await retrieveToken();
-        return token;
-      } else {
-        return null;
-      }
-    } catch (error) {
-      console.error('Erro ao solicitar permissão:', error);
-      return null;
-    }
-  };
+    }).then(cleanup => { if (alive) unsubscribe = cleanup; else cleanup(); });
+    return () => { alive = false; unsubscribe?.(); };
+  }, [userId, toast, receiveForeground]);
 
   return {
-    token,
-    notificationPermission,
-    requestPermission,
+    notificationPermission: result.permission,
+    registrationState: result.state,
+    registrationError: result.errorCode,
+    isRegistering,
+    requestPermission: () => run(true),
+    disable: async () => {
+      if (!userId) return false;
+      setIsRegistering(true);
+      try {
+        await registrar.disable(userId);
+        const outcome: PushRegistrationResult = { state: 'disabled', permission: permission() };
+        if (currentUid.current === userId) {
+          setResult(outcome);
+          window.dispatchEvent(new CustomEvent(EVENT, { detail: { userId, result: outcome } }));
+        }
+        return true;
+      } finally {
+        if (currentUid.current === userId) setIsRegistering(false);
+      }
+    },
   };
 }

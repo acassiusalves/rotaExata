@@ -3751,11 +3751,12 @@ export default function ServiceAcompanharPage() {
       !['dispatched', 'in_progress'].includes(result.status)
     ) return;
     const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-    await notifyFn({
+    const response = await notifyFn({
       routeId: result.routeId,
       driverId: result.driverId,
       changes: result.changes,
     });
+    return response.data;
   };
 
   const hasPendingEdit = (routeKey: string) =>
@@ -4301,20 +4302,24 @@ export default function ServiceAcompanharPage() {
         }
 
         let notificationFailed = false;
+        let pushOutcome: string | undefined;
         if (result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)) {
           try {
-            await notifySavedRouteChanges(result);
+            const response = await notifySavedRouteChanges(result);
+            pushOutcome = (response as { push?: { outcome?: string } })?.push?.outcome;
           } catch (notifyError) {
             notificationFailed = true;
             console.error('Error notifying driver:', notifyError);
           }
         }
 
-        const notificationMessage = notificationFailed
-          ? ' Houve erro ao notificar o motorista.'
-          : result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)
-            ? ` O motorista será notificado das ${result.changes.length} alterações.`
-            : '';
+        const notificationMessage = notificationFailed || pushOutcome === 'failed'
+          ? ' O aviso não pôde ser enviado; as alterações estão salvas.'
+          : pushOutcome === 'skipped_no_token'
+            ? ' O aviso não foi enviado. O entregador precisa ativar as notificações no app.'
+            : pushOutcome === 'accepted'
+              ? ' Aviso encaminhado para envio; leitura ainda não confirmada.'
+              : '';
         const driverMessage = driverId && driver
           ? ` Motorista ${driver.name} atribuído.`
           : '';
@@ -5350,8 +5355,8 @@ export default function ServiceAcompanharPage() {
     toast({
       title: 'Edições aplicadas!',
       description: totalRoutesAffected > 1
-        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${driversNotified > 0 ? ` ${driversNotified} motorista(s) notificado(s).` : ''}`
-        : `Rota atualizada com sucesso.${driversNotified > 0 ? ' Motorista notificado das alterações.' : ''}`,
+        ? `${totalRoutesAffected} rotas foram atualizadas/criadas.${newRoutesToCreate.length > 0 ? ` ${newRoutesToCreate.length} nova(s) rota(s) criada(s).` : ''}${driversNotified > 0 ? ` ${driversNotified} aviso(s) encaminhado(s) para envio.` : ''}`
+        : `Rota atualizada com sucesso.${driversNotified > 0 ? ' Aviso das alterações encaminhado para envio.' : ''}`,
     });
   };
 

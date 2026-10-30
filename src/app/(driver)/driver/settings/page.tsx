@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useFCMToken } from '@/hooks/use-fcm-token';
 
 interface DriverSettings {
   notifications: boolean;
@@ -18,16 +19,23 @@ interface DriverSettings {
 }
 
 export default function DriverSettingsPage() {
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
+  const { registrationState, requestPermission, isRegistering, disable: disablePush } = useFCMToken(userRole === 'driver' ? user?.uid ?? null : null, false);
   const { toast } = useToast();
   const [settings, setSettings] = React.useState<DriverSettings>({
-    notifications: true,
+    notifications: false,
     darkMode: false,
     autoNavigation: false,
     keepScreenOn: true,
   });
   const [isLoading, setIsLoading] = React.useState(true);
   const wakeLockRef = React.useRef<WakeLockSentinel | null>(null);
+
+  React.useEffect(() => {
+    if (registrationState === 'enabled' || registrationState === 'disabled') {
+      setSettings(previous => ({ ...previous, notifications: registrationState === 'enabled' }));
+    }
+  }, [registrationState]);
 
   // Carregar configurações salvas
   React.useEffect(() => {
@@ -62,11 +70,14 @@ export default function DriverSettingsPage() {
 
   // Salvar configurações no Firestore
   const saveSettings = async (newSettings: DriverSettings) => {
-    if (!user) return;
+    if (!user) return false;
 
     try {
-      await setDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), newSettings);
+      await setDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), {
+        darkMode: newSettings.darkMode, autoNavigation: newSettings.autoNavigation, keepScreenOn: newSettings.keepScreenOn,
+      }, { merge: true });
       setSettings(newSettings);
+      return true;
     } catch (error) {
       console.error('Erro ao salvar configurações:', error);
       toast({
@@ -74,6 +85,7 @@ export default function DriverSettingsPage() {
         title: 'Erro ao salvar',
         description: 'Não foi possível salvar as configurações.',
       });
+      return false;
     }
   };
 
@@ -97,20 +109,20 @@ export default function DriverSettingsPage() {
 
   // Handlers para cada configuração
   const handleNotificationsChange = async (checked: boolean) => {
-    const newSettings = { ...settings, notifications: checked };
-    await saveSettings(newSettings);
-
-    if (checked) {
-      // Solicitar permissão de notificação
-      if ('Notification' in window && Notification.permission === 'default') {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          toast({
-            title: 'Notificações ativadas',
-            description: 'Você receberá alertas de novas rotas.',
-          });
-        }
+    if (!checked) {
+      try { await disablePush(); }
+      catch {
+        toast({ variant: 'destructive', title: 'Não foi possível desativar os avisos', description: 'Tente novamente.' });
+        return;
       }
+    }
+    if (checked && !await requestPermission()) {
+      toast({ variant: 'destructive', title: 'Notificações não ativadas', description: 'Verifique a permissão de notificações do site e tente novamente. Se continuar, entre em contato com a equipe.' });
+      return;
+    }
+    setSettings(previous => ({ ...previous, notifications: checked }));
+    if (checked) {
+      toast({ title: 'Notificações ativadas', description: 'Este dispositivo foi cadastrado para receber os avisos.' });
     }
   };
 
@@ -204,10 +216,19 @@ export default function DriverSettingsPage() {
             </div>
             <Switch
               id="notifications"
-              checked={settings.notifications}
+              checked={registrationState === 'enabled'}
+              disabled={isRegistering}
               onCheckedChange={handleNotificationsChange}
             />
           </div>
+          {['error', 'blocked', 'unsupported', 'impersonating'].includes(registrationState) && (
+            <p className="text-sm text-muted-foreground" role="status">
+              {registrationState === 'blocked' ? 'Notificações bloqueadas nas permissões do site.'
+                : registrationState === 'impersonating' ? 'O modo teste não cadastra notificações para o entregador.'
+                  : registrationState === 'unsupported' ? 'Este navegador não oferece suporte a notificações push.'
+                    : 'O cadastro de notificações falhou. Tente ativar novamente.'}
+            </p>
+          )}
         </CardContent>
       </Card>
 

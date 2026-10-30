@@ -9,6 +9,7 @@ import {randomBytes} from "node:crypto";
 import {checkInviteConflict} from "./invite-conflict";
 import {buildSyncPatch} from "./sync-user";
 import {resolveAutoCompletion} from "./auto-completion";
+import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
 
 initializeApp();
 
@@ -757,7 +758,7 @@ export const notifyRouteChanges = onCall(
       const db = getFirestore();
 
       // Criar ou atualizar a notificação
-      await db.collection("routeChangeNotifications").doc(routeId).set({
+      const notificationWrite = await db.collection("routeChangeNotifications").doc(routeId).set({
         routeId,
         driverId,
         changes,
@@ -776,6 +777,7 @@ export const notifyRouteChanges = onCall(
       const driverDoc = await db.collection("users").doc(driverId).get();
       const driverData = driverDoc.data();
       const fcmToken = driverData?.fcmToken;
+      let push: PushOutcome = {outcome: "skipped_no_token"};
 
       // Enviar push notification se o motorista tiver token FCM
       if (fcmToken) {
@@ -829,16 +831,13 @@ export const notifyRouteChanges = onCall(
           },
         };
 
-        try {
-          await messaging.send(message);
-          console.log(`✅ Push notification enviada para motorista ${driverId}`);
-        } catch (notificationError: any) {
-          console.error('❌ Erro ao enviar push notification:', notificationError);
-          // Não falhar a função inteira se a notificação falhar
-        }
+        push = await sendPushWithOutcome(true, () => messaging.send(message));
+        console.log("Resultado do push de alteração de rota", {routeId, driverId, ...push});
       }
 
-      return { ok: true, message: "Notificação de mudanças criada com sucesso." };
+      await persistPushOutcome(() => db.collection("routeChangeNotifications").doc(routeId)
+        .update({push}, {lastUpdateTime: notificationWrite.writeTime}));
+      return { ok: true, push, message: "Notificação de mudanças criada com sucesso." };
     } catch (error: any) {
       const msg = error.message || "Falha ao notificar mudanças.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);

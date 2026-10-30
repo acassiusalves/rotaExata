@@ -12,20 +12,9 @@ import {
   Weight,
 } from 'lucide-react';
 import { MyRoutesPageSkeleton } from '@/components/skeletons/route-card-skeleton';
-import { db } from '@/lib/firebase/client';
-import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/use-auth';
-import { useToast } from '@/hooks/use-toast';
-import Image from 'next/image';
-
-type RouteDocument = {
-  id: string;
-  name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
-  plannedDate: Timestamp;
-  stops: any[];
-  distanceMeters: number;
-};
+import { useDriverRoutes } from '@/hooks/use-driver-routes';
+import { RouteSyncStatus } from '@/components/driver/route-sync-status';
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(0);
 
@@ -143,60 +132,7 @@ const getTotalWeight = (stops: any[]) => {
 
 export default function MyRoutesPage() {
   const { user } = useAuth();
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const { toast } = useToast();
-
-  React.useEffect(() => {
-    if (!user) {
-      setIsLoading(false);
-      return;
-    }
-
-    console.log('🔍 [MyRoutes] Buscando rotas para driverId:', user.uid);
-
-    const q = query(
-      collection(db, 'routes'),
-      where('driverId', '==', user.uid),
-      where('status', 'in', ['dispatched', 'in_progress'])
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        console.log('📋 [MyRoutes] Rotas encontradas:', querySnapshot.size);
-        const routesData: RouteDocument[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          console.log('📍 [MyRoutes] Rota:', doc.id, '- Nome:', data.name, '- Status:', data.status, '- DriverId:', data.driverId);
-          routesData.push({
-            id: doc.id,
-            ...data,
-          } as RouteDocument);
-        });
-
-        // Ordenar: in_progress > dispatched
-        routesData.sort((a, b) => {
-          const order = { in_progress: 0, dispatched: 1 };
-          return order[a.status] - order[b.status];
-        });
-
-        setRoutes(routesData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('❌ [MyRoutes] Error fetching routes:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao buscar rotas',
-          description: 'Ocorreu um erro ao carregar suas rotas.',
-        });
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user, toast]);
+  const { routes, state, lastServerSyncAt, isRefreshing, refresh } = useDriverRoutes(user?.uid ?? null);
 
   const stats = React.useMemo(() => {
     return {
@@ -206,24 +142,37 @@ export default function MyRoutesPage() {
     };
   }, [routes]);
 
-  if (isLoading) {
-    return <MyRoutesPageSkeleton />;
+  const syncStatus = (
+    <RouteSyncStatus state={state} lastServerSyncAt={lastServerSyncAt} isRefreshing={isRefreshing} onRefresh={() => { void refresh(); }} />
+  );
+
+  if (routes.length === 0 && state !== 'empty') {
+    return (
+      <div aria-busy={isRefreshing}>
+        {syncStatus}
+        {state === 'loading' && <MyRoutesPageSkeleton />}
+      </div>
+    );
   }
 
-  if (routes.length === 0) {
+  if (state === 'empty') {
     return (
-      <div className="flex flex-col items-center justify-center text-center p-12 h-[calc(100vh-10rem)]">
-        <RouteIcon className="h-16 w-16 text-muted-foreground" />
-        <h3 className="mt-4 text-lg font-semibold">Nenhuma rota disponível</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Quando uma rota for atribuída a você, ela aparecerá aqui.
-        </p>
+      <div>
+        {syncStatus}
+        <div className="flex flex-col items-center justify-center text-center p-12 h-[calc(100vh-10rem)]">
+          <RouteIcon className="h-16 w-16 text-muted-foreground" />
+          <h3 className="mt-4 text-lg font-semibold">Nenhuma rota disponível</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Quando uma rota for atribuída a você, ela aparecerá aqui.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col min-h-screen">
+      {syncStatus}
       {/* Headline */}
       <h2 className="text-2xl font-bold px-4 pb-3 pt-5">Seu resumo de hoje</h2>
 

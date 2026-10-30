@@ -34,6 +34,7 @@ import {
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/hooks/use-auth';
+import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 import { Button } from '@/components/ui/button';
 
 interface Notification {
@@ -88,7 +89,7 @@ export default function DriverNotificationsPage() {
 
   // Marcar notificação como aberta quando visualizada
   const handleMarkAsOpened = async (notificationId: string, alreadyOpened: boolean) => {
-    if (alreadyOpened) {
+    if (alreadyOpened || isImpersonationSessionActive()) {
       return;
     }
 

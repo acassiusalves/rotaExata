@@ -3499,11 +3499,12 @@ export default function RouteAcompanharPage() {
       !['dispatched', 'in_progress'].includes(result.status)
     ) return;
     const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
-    await notifyFn({
+    const response = await notifyFn({
       routeId: result.routeId,
       driverId: result.driverId,
       changes: result.changes,
     });
+    return response.data;
   };
 
   const hasPendingEdit = (routeKey: string) =>
@@ -3937,20 +3938,24 @@ export default function RouteAcompanharPage() {
         applySavedRouteResult(routeKey, result, metrics);
 
         let notificationFailed = false;
+        let pushOutcome: string | undefined;
         if (result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)) {
           try {
-            await notifySavedRouteChanges(result);
+            const response = await notifySavedRouteChanges(result);
+            pushOutcome = (response as { push?: { outcome?: string } })?.push?.outcome;
           } catch (notifyError) {
             notificationFailed = true;
             console.error('Error notifying driver:', notifyError);
           }
         }
 
-        const notificationMessage = notificationFailed
-          ? ' Houve erro ao notificar o motorista.'
-          : result.changes.length > 0 && result.driverId && ['dispatched', 'in_progress'].includes(result.status)
-            ? ` O motorista será notificado das ${result.changes.length} alterações.`
-            : '';
+        const notificationMessage = notificationFailed || pushOutcome === 'failed'
+          ? ' O aviso não pôde ser enviado; as alterações estão salvas.'
+          : pushOutcome === 'skipped_no_token'
+            ? ' O aviso não foi enviado. O entregador precisa ativar as notificações no app.'
+            : pushOutcome === 'accepted'
+              ? ' Aviso encaminhado para envio; leitura ainda não confirmada.'
+              : '';
         const driverMessage = driverId && driver
             ? ` Motorista ${driver.name} atribuído.`
             : '';

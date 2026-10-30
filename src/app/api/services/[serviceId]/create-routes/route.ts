@@ -3,6 +3,7 @@ import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { PlaceValue, RouteInfo, LunnaService } from '@/lib/types';
 import { logRouteCreatedAdmin, logPointsCreatedAdmin, logRouteDispatchedAdmin } from '@/lib/firebase/activity-log-admin';
+import { InvalidDispatchDriverError, resolveDispatchDriver } from '@/lib/dispatch-driver';
 
 // Função para gerar código de rota dentro de um serviço (LN-XXXX-A, LN-XXXX-B, etc.)
 function generateRouteCodeForService(serviceCode: string, routeIndex: number): string {
@@ -64,6 +65,19 @@ export async function POST(
     }
 
     // Criar mapa de stops por ID para acesso rápido
+    // Validate every recipient before writing any route, using the same UID source as the app.
+    const database = adminDb;
+    const dispatchDrivers = new Map<string, Awaited<ReturnType<typeof resolveDispatchDriver>>>();
+    for (const routeConfig of routes) {
+      if (routeConfig.driverId) {
+        const driver = await resolveDispatchDriver(routeConfig.driverId, async uid => {
+          const snapshot = await database.collection('users').doc(uid).get();
+          return snapshot.exists ? snapshot.data()! : null;
+        });
+        dispatchDrivers.set(routeConfig.driverId, driver);
+      }
+    }
+
     const stopsMap = new Map<string, PlaceValue>();
     for (const stop of serviceData.allStops) {
       stopsMap.set(stop.id, stop);
@@ -131,15 +145,9 @@ export async function POST(
 
       // Adicionar motorista se fornecido
       if (routeConfig.driverId) {
-        const driverDoc = await adminDb.collection('drivers').doc(routeConfig.driverId).get();
-        if (driverDoc.exists) {
-          const driverData = driverDoc.data();
-          (routeData as any).driverId = routeConfig.driverId;
-          (routeData as any).driverInfo = {
-            name: driverData?.name || 'Motorista',
-            vehicle: driverData?.vehicle || { type: 'Carro', plate: '' },
-          };
-        }
+        const driver = dispatchDrivers.get(routeConfig.driverId)!;
+        (routeData as any).driverId = driver.id;
+        (routeData as any).driverInfo = { name: driver.name, vehicle: driver.vehicle };
       }
 
       const routeRef = await adminDb.collection('routes').add(routeData);
@@ -155,8 +163,7 @@ export async function POST(
       try {
         if (routeConfig.driverId) {
           // Se tem motorista, registrar como dispatch
-          const driverDoc = await adminDb.collection('drivers').doc(routeConfig.driverId).get();
-          const driverData = driverDoc.exists ? driverDoc.data() : null;
+          const driver = dispatchDrivers.get(routeConfig.driverId)!;
 
           await logRouteDispatchedAdmin({
             userId: userId,
@@ -165,8 +172,8 @@ export async function POST(
             routeCode: routeCode,
             serviceId: serviceId,
             serviceCode: serviceData.code,
-            driverName: driverData?.name || 'Motorista',
-            driverId: routeConfig.driverId,
+            driverName: driver.name,
+            driverId: driver.id,
             totalPoints: stopsWithCodes.length,
           });
         } else {
@@ -239,6 +246,9 @@ export async function POST(
       serviceStatus: allRoutesDispatched ? 'dispatched' : 'organizing',
     });
   } catch (error) {
+    if (error instanceof InvalidDispatchDriverError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Erro ao criar rotas do serviço:', error);
     return NextResponse.json(
       {
