@@ -66,7 +66,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import Link from 'next/link';
 import { CreateNotificationDialog } from '@/components/notifications/create-notification-dialog';
+import { CENTRAL_CHAMADOS_URL } from '@/components/erros/ReportPanel';
 
 interface Notification {
   id: string;
@@ -77,6 +79,7 @@ interface Notification {
   opened?: boolean;
   openedAt?: Timestamp | null;
   routeId?: string;
+  reportId?: string;
   routeName?: string;
   driverId?: string;
   driverName?: string;
@@ -472,6 +475,12 @@ export default function NotificationsPage() {
                         <p className="text-sm text-muted-foreground mt-1">
                           {notification.message}
                         </p>
+                        {notification.reportId && (
+                          <Link className="mt-2 inline-block text-sm font-medium underline"
+                            href={`${CENTRAL_CHAMADOS_URL}?report=${encodeURIComponent(notification.reportId)}`}>
+                            Abrir na central de chamados
+                          </Link>
+                        )}
                       </div>
                       {getPriorityBadge(notification.priority)}
                     </div>

@@ -16,6 +16,7 @@ import {
   User,
   Settings,
   HelpCircle,
+  MessageSquare,
   LogOut,
   Menu,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ const navigationItems: NavigationItem[] = [
   { href: '/my-routes/history', icon: History, label: 'Histórico de Entregas' },
   { href: '/driver/profile', icon: User, label: 'Perfil do Motorista' },
   { href: '/driver/settings', icon: Settings, label: 'Configurações' },
+  { href: '/driver/chamados', icon: MessageSquare, label: 'Meus chamados' },
   { href: '/driver/help', icon: HelpCircle, label: 'Ajuda & Suporte' },
 ];
 
