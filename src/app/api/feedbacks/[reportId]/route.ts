@@ -5,7 +5,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ repo
   try {
     const { db, actor } = await reportRequestContext(request);
     const { reportId } = await params;
-    return Response.json({ report: await readReportDetail(db, actor, reportId) });
+    const ownOnly = new URL(request.url).searchParams.get('scope') === 'mine';
+    return Response.json({ report: await readReportDetail(db, actor, reportId, ownOnly) });
   } catch (error) {
     return reportErrorResponse(error);
   }

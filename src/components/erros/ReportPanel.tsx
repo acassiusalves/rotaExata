@@ -11,40 +11,41 @@ import { Textarea } from '@/components/ui/textarea';
 import { ReportClassification, ReportImprovement } from './ReportClassification';
 import { ReportFilters } from './ReportFilters';
 import { useReportList } from './useReportList';
-import { reportStatusLabels, serializeReportDate, type ReportSummary } from '@/lib/reporting/report-contract';
+import { reportStatusLabels, serializeReportDate, type ReportStatus, type ReportSummary } from '@/lib/reporting/report-contract';
 
 type Detail = ReportSummary & {
-  capabilities: { reopen: boolean };
+  capabilities: { manage: boolean; reopen: boolean };
   reopenHistory?: Array<{ details: string; reopenedAt: unknown }>;
   statusHistory?: Array<{ next: keyof typeof reportStatusLabels; at: unknown }>;
   context?: { url?: string; resolution?: string; userAgent?: string };
   logs?: unknown[];
 };
 
-export const CENTRAL_CHAMADOS_URL = 'https://luna-sooty.vercel.app/configuracoes/sistema/erros';
+type PanelMode = 'admin' | 'mine';
+type ReportCommand = { action: 'reopen'; details: string } | { status: Exclude<ReportStatus, 'pending'> };
 
 function displayDate(value: unknown) {
   const date = serializeReportDate(value);
   return date ? new Date(date).toLocaleString('pt-BR') : 'Data indisponível';
 }
 
-export function ReportPanel({ centralLink = false }: { centralLink?: boolean }) {
+export function ReportPanel({ mode }: { mode: PanelMode }) {
   const { user } = useAuth();
   return (
     <Suspense fallback={<div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>}>
-      <AuthenticatedReports key={user?.uid ?? 'anonymous'} centralLink={centralLink} />
+      <AuthenticatedReports key={user?.uid ?? 'anonymous'} mode={mode} />
     </Suspense>
   );
 }
 
-function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
+function AuthenticatedReports({ mode }: { mode: PanelMode }) {
   const { user, loading: authLoading } = useAuth();
   const reportIdFromUrl = useSearchParams().get('report');
-  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user, true);
+  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user, mode === 'mine');
   const [selected, setSelected] = useState<Detail | null>(null);
   const [problem, setProblem] = useState('');
   const [details, setDetails] = useState('');
-  const [reopening, setReopening] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const detailRequest = useRef<AbortController | null>(null);
   const command = useRef<{ key: string; id: string } | null>(null);
 
@@ -56,7 +57,7 @@ function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
     setProblem('');
     try {
       const token = await user.getIdToken();
-      const response = await fetch(`/api/feedbacks/${encodeURIComponent(id)}`, {
+      const response = await fetch(`/api/feedbacks/${encodeURIComponent(id)}${mode === 'mine' ? '?scope=mine' : ''}`, {
         headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
       });
       const data = await response.json();
@@ -68,7 +69,7 @@ function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
     } catch (error) {
       if (!controller.signal.aborted) setProblem(error instanceof Error ? error.message : 'Chamado indisponível.');
     }
-  }, [user]);
+  }, [mode, user]);
 
   useEffect(() => {
     setSelected(null);
@@ -77,42 +78,47 @@ function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
     return () => detailRequest.current?.abort();
   }, [openReport, reportIdFromUrl]);
 
-  async function reopen() {
-    if (!user || !selected || !details.trim() || reopening) return;
-    setReopening(true);
+  async function updateReport(update: ReportCommand) {
+    if (!user || !selected || updating) return;
+    setUpdating(true);
     setProblem('');
-    const key = `${selected.id}:${details.trim()}`;
+    const key = JSON.stringify([selected.id, update]);
     if (command.current?.key !== key) command.current = { key, id: crypto.randomUUID() };
+    const requestId = command.current.id;
     try {
       const token = await user.getIdToken();
       const response = await fetch('/api/feedbacks/admin', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reportId: selected.id, action: 'reopen', details, requestId: command.current.id }),
+        body: JSON.stringify({ reportId: selected.id, ...update, requestId }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível reabrir o chamado.');
-      command.current = null;
+      if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o chamado.');
+      if (command.current?.id === requestId) command.current = null;
       setSelected((current) => current?.id === selected.id ? data.report : current);
       setDetails('');
       void load();
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : 'Não foi possível reabrir o chamado.');
+      setProblem(error instanceof Error ? error.message : 'Não foi possível atualizar o chamado.');
     } finally {
-      setReopening(false);
+      setUpdating(false);
     }
   }
 
   if (authLoading) return <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>;
   if (!user) return <div className="p-6"><Link className="underline" href="/login">Entre para acompanhar seus chamados</Link></div>;
 
+  const manage = mode === 'admin' && selected?.capabilities.manage;
+  const reopen = selected?.status === 'resolved' && selected.capabilities.reopen;
+
   return (
     <main className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Meus chamados</h1>
-          <p className="text-sm text-muted-foreground">Acompanhe os erros e as melhorias que você enviou.</p>
+          <h1 className="text-2xl font-bold">{mode === 'admin' ? 'Chamados' : 'Meus chamados'}</h1>
+          <p className="text-sm text-muted-foreground">
+            {mode === 'admin' ? 'Acompanhe os chamados disponíveis para o seu perfil.' : 'Acompanhe os erros e as melhorias que você enviou.'}
+          </p>
         </div>
-        {centralLink && <Button asChild><Link href={CENTRAL_CHAMADOS_URL}>Abrir central de chamados no Luna</Link></Button>}
       </header>
       <ReportFilters values={filters} onChange={updateFilters} counts={counts} />
       {!selected && problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
@@ -129,7 +135,9 @@ function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
                   <span className="text-xs font-semibold">{reportStatusLabels[report.status]}</span>
                 </span>
                 <span className="line-clamp-2 break-words text-sm">{report.improvement?.goal ?? report.description}</span>
-                <span className="text-xs text-muted-foreground">{displayDate(report.createdAt)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {mode === 'admin' && report.user.name ? `${report.user.name} · ` : ''}{displayDate(report.createdAt)}
+                </span>
               </button>
             </li>
           ))}
@@ -181,16 +189,25 @@ function AuthenticatedReports({ centralLink }: { centralLink: boolean }) {
                 </pre>
               </details>
             )}
-            {selected.capabilities.reopen && selected.status === 'resolved' && (
+            {reopen && (
               <label className="grid gap-1 text-sm font-medium">
                 O que ainda precisa ser resolvido?
-                <Textarea value={details} maxLength={5000} onChange={(event) => setDetails(event.target.value)} disabled={reopening} />
+                <Textarea value={details} maxLength={5000} onChange={(event) => setDetails(event.target.value)} disabled={updating} />
               </label>
             )}
             {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
             <DialogFooter>
-              {selected.capabilities.reopen && selected.status === 'resolved' && (
-                <Button onClick={() => void reopen()} disabled={reopening || !details.trim()}>Reabrir chamado</Button>
+              {manage && selected.status !== 'in_progress' && (
+                <Button variant="secondary" disabled={updating} onClick={() => void updateReport({ status: 'in_progress' })}>
+                  {selected.status === 'resolved' ? 'Voltar para análise' : 'Marcar em análise'}
+                </Button>
+              )}
+              {manage && selected.status !== 'resolved' && (
+                <Button disabled={updating} onClick={() => void updateReport({ status: 'resolved' })}>Resolver chamado</Button>
+              )}
+              {reopen && (
+                <Button onClick={() => void updateReport({ action: 'reopen', details: details.trim() })}
+                  disabled={updating || !details.trim()}>Reabrir chamado</Button>
               )}
               <Button variant="outline" onClick={() => setSelected(null)}>Fechar</Button>
             </DialogFooter>
