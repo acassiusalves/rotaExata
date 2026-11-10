@@ -110,7 +110,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const canManagePermissions = userRole === 'admin' || userRole === 'socio';
 
   const settingsItems = [
-    { href: '/admin/erros', icon: AlertCircle, label: 'Reportes de Erro' },
+    { href: '/admin/erros', icon: AlertCircle, label: 'Chamados' },
     { href: '/settings', icon: Settings, label: 'Configurações' },
     ...(canManagePermissions ? [{ href: '/permissions', icon: Shield, label: 'Permissões' }] : []),
     { href: '/api', icon: Code, label: 'API' },

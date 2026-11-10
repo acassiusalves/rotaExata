@@ -12,14 +12,23 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
+import { emptyReportDraft, ReportForm } from '@/components/erros/ReportForm';
+import { REPORT_CREATED_EVENT, readSubmission } from '@/lib/reporting/report-contract';
 import { MessageSquareWarning, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export function FloatingFeedbackButton() {
+  const { user } = useAuth();
+  return <FeedbackButton key={user?.uid ?? 'anonymous'} />;
+}
+
+function FeedbackButton() {
   const { user, loading } = useAuth();
   const [open, setOpen] = useState(false);
-  const [description, setDescription] = useState('');
+  const [draft, setDraft] = useState(emptyReportDraft);
+  const requestId = useRef<string | undefined>(undefined);
+  const inFlight = useRef<AbortController | null>(null);
+  useEffect(() => () => inFlight.current?.abort(), []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [capturedLogs, setCapturedLogs] = useState<any[]>([]);
   const { toast } = useToast();
@@ -56,30 +65,25 @@ export function FloatingFeedbackButton() {
     return null;
   }
 
+  const submission = readSubmission(draft);
   const handleSubmit = async () => {
-    if (!description.trim()) {
-      toast({
-        title: 'Erro',
-        description: 'Descreva o problema antes de enviar.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
+    if (!user || !submission || inFlight.current) return;
+    const controller = new AbortController();
+    inFlight.current = controller;
+    requestId.current ??= crypto.randomUUID();
     setIsSubmitting(true);
     try {
+      const token = await user.getIdToken();
       const response = await fetch('/api/feedbacks', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          description,
-          user: {
-            uid: user.uid,
-            email: user.email,
-            name: user.displayName || user.email,
-          },
+          ...submission,
+          submissionId: requestId.current,
           url: window.location.href,
           userAgent: navigator.userAgent,
           resolution: `${window.innerWidth}x${window.innerHeight}`,
@@ -87,38 +91,41 @@ export function FloatingFeedbackButton() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Falha ao enviar reporte');
-      }
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Falha ao enviar chamado.');
 
-      toast({
-        title: 'Reporte Enviado',
-        description: 'Obrigado por avisar! Nossa equipe investigará o problema.',
-      });
+      if (controller.signal.aborted) return;
+      window.dispatchEvent(new Event(REPORT_CREATED_EVENT));
+      toast({ title: 'Chamado enviado', description: 'Acompanhe o andamento na tela Chamados.' });
 
       setOpen(false);
-      setDescription('');
+      setDraft(emptyReportDraft);
+      requestId.current = undefined;
       setCapturedLogs([]);
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error(error);
       toast({
         title: 'Erro de conexão',
-        description: 'Não foi possível enviar seu reporte agora. Tente mais tarde.',
+        description: error instanceof Error ? error.message : 'Não foi possível enviar seu chamado agora. Tente novamente.',
         variant: 'destructive',
       });
     } finally {
-      setIsSubmitting(false);
+      if (inFlight.current === controller) {
+        inFlight.current = null;
+        setIsSubmitting(false);
+      }
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button className="floating-feedback-btn fixed bottom-6 right-6 z-[100]">
+        <button aria-label="Abrir chamado" className="floating-feedback-btn fixed bottom-6 right-6 z-[100]">
           <div className="floating-feedback-sign">
             <MessageSquareWarning />
           </div>
-          <div className="floating-feedback-text">Problemas?</div>
+          <div className="floating-feedback-text">Abrir chamado</div>
         </button>
       </DialogTrigger>
 
@@ -201,23 +208,17 @@ export function FloatingFeedbackButton() {
         }
       `}</style>
 
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Encontrou algum problema?</DialogTitle>
-          <DialogDescription>
-            Descreva detalhadamente o que você estava tentando fazer e o que aconteceu.
-            Isso nos ajudará a corrigir o erro o mais rápido possível!
-          </DialogDescription>
+          <DialogTitle>Abrir chamado</DialogTitle>
+          <DialogDescription>Relate um erro ou sugira uma melhoria.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <Textarea
-            placeholder="Ex: Tentei salvar as alterações na rota mas a tela ficou em branco..."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="min-h-[120px]"
-            disabled={isSubmitting}
-          />
+          <ReportForm draft={draft} disabled={isSubmitting} onChange={(next) => {
+            requestId.current = undefined;
+            setDraft(next);
+          }} />
           <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-md border border-border">
             <p>Ao enviar, incluiremos também:</p>
             <ul className="list-disc pl-4 mt-1">
@@ -232,9 +233,9 @@ export function FloatingFeedbackButton() {
           <Button variant="outline" onClick={() => setOpen(false)} disabled={isSubmitting}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting || !description.trim()}>
+          <Button onClick={handleSubmit} disabled={isSubmitting || !submission}>
             {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Enviar Reporte
+            Enviar chamado
           </Button>
         </DialogFooter>
       </DialogContent>

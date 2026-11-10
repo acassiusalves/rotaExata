@@ -36,6 +36,7 @@ import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/hooks/use-auth';
 import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 interface Notification {
   id: string;
@@ -46,6 +47,7 @@ interface Notification {
   opened?: boolean;
   openedAt?: Timestamp | null;
   routeId?: string;
+  reportId?: string;
   routeName?: string;
   driverId?: string;
   driverName?: string;
@@ -215,6 +217,12 @@ export default function DriverNotificationsPage() {
                     <CardDescription className="text-sm">
                       {notification.message}
                     </CardDescription>
+                    {notification.reportId && (
+                      <Link className="mt-2 inline-block text-sm font-medium underline"
+                        href={`/driver/chamados?report=${encodeURIComponent(notification.reportId)}`}>
+                        Acompanhar chamado
+                      </Link>
+                    )}
                   </div>
                 </div>
               </CardHeader>
