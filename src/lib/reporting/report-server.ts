@@ -81,10 +81,10 @@ export function exposeReport(id: string, data: FirestoreData, actor: Actor) {
   return { ...data, ...summary, capabilities };
 }
 
-export async function readReportDetail(db: Database, actor: Actor, id: string) {
+export async function readReportDetail(db: Database, actor: Actor, id: string, ownOnly = false) {
   if (!validReportId(id)) throw new ReportRequestError('Chamado não encontrado.', 404);
   const data = (await db.collection('error_reports').doc(id).get()).data();
-  if (!data) throw new ReportRequestError('Chamado não encontrado.', 404);
+  if (!data || (ownOnly && data.user?.uid !== actor.uid)) throw new ReportRequestError('Chamado não encontrado.', 404);
   return exposeReport(id, data, actor);
 }
 

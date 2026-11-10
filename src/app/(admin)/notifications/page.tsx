@@ -68,7 +68,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import Link from 'next/link';
 import { CreateNotificationDialog } from '@/components/notifications/create-notification-dialog';
-import { CENTRAL_CHAMADOS_URL } from '@/components/erros/ReportPanel';
 
 interface Notification {
   id: string;
@@ -477,8 +476,8 @@ export default function NotificationsPage() {
                         </p>
                         {notification.reportId && (
                           <Link className="mt-2 inline-block text-sm font-medium underline"
-                            href={`${CENTRAL_CHAMADOS_URL}?report=${encodeURIComponent(notification.reportId)}`}>
-                            Abrir na central de chamados
+                            href={`/admin/erros?report=${encodeURIComponent(notification.reportId)}`}>
+                            Abrir chamado
                           </Link>
                         )}
                       </div>
