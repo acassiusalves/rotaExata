@@ -8,7 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { nativeEarningsEnabled } from '@/lib/earnings/client';
-import { useAuth } from '@/hooks/use-auth';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 import {
@@ -42,7 +42,7 @@ const navigationItems: NavigationItem[] = [
 export function DriverNavigationDrawer() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { profile:user,signOut }=useDriverRuntime();
   const [isOpen, setIsOpen] = React.useState(false);
 
   const getInitials = (name: string | null | undefined) => {

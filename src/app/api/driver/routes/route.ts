@@ -1,7 +1,7 @@
 import { FieldPath } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { adminDb } from '@/lib/firebase/admin';
-import { requireEarningsActor } from '@/lib/server/earnings/actor';
+import { driverAuthority } from '@/lib/server/driver/authority';
 import { performDriverRouteAction } from '@/lib/server/earnings/firestore-route-actions';
 import { privateJson } from '@/lib/server/earnings/store';
 import { EarningsError, earningsErrorResponse } from '@/lib/server/earnings/transport';
@@ -26,7 +26,7 @@ function projectRoute(doc: FirebaseFirestore.DocumentSnapshot) {
 
 export async function GET(request: Request) {
   try {
-    const actor = await requireEarningsActor(request,'route:operate');
+    const actor = await driverAuthority(request,'native');
     if (!adminDb) throw new EarningsError(503,'route_unavailable');
     const selection = selectors.safeParse(Object.fromEntries(new URL(request.url).searchParams));
     if (!selection.success) throw new EarningsError(422,'route_invalid_query');
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const actor = await requireEarningsActor(request,'route:operate');
-    return await performDriverRouteAction(request,actor.sourceUid!);
+    const actor = await driverAuthority(request,'native');
+    return await performDriverRouteAction(request,actor.sourceUid!,{canonical:true,bindMedia:true});
   } catch (error) { return earningsErrorResponse(error); }
 }

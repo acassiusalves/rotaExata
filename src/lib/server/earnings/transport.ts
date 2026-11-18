@@ -21,10 +21,10 @@ export function earningsSupabaseUrl() {
   return url.origin;
 }
 
-async function request(path: string, headers: Record<string, string>, body?: Record<string, unknown>) {
+async function request(path: string, headers: Record<string, string>, body?: Record<string, unknown>, method = body ? 'POST' : 'GET') {
   try {
     return await fetch(earningsSupabaseUrl() + path, {
-      method: body ? 'POST' : 'GET',
+      method,
       headers: { ...headers, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       cache: 'no-store',
@@ -43,6 +43,24 @@ export async function verifySupabaseUser(token: string) {
   if ([400, 401, 403].includes(response.status)) throw new EarningsError(401, 'earnings_unauthorized');
   if (!response.ok) throw new EarningsError(503, 'earnings_unavailable');
   return await response.json();
+}
+
+export async function updateSupabasePassword(token: string, userId: string, password: string) {
+  const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!key) throw new EarningsError(503,'earnings_unavailable');
+  const response=await request('/auth/v1/user',{apikey:key,authorization:'Bearer '+token},{password},'PUT');
+  if (!response.ok) {
+    const payload=await response.json().catch(()=>null);
+    const code=payload?.error_code ?? payload?.code;
+    if (code==='reauthentication_needed') throw new EarningsError(422,'driver_password_reauthentication');
+    if (code==='same_password') throw new EarningsError(422,'driver_password_unchanged');
+    if (code==='weak_password') throw new EarningsError(422,'driver_password_weak');
+    if ([401,403].includes(response.status)) throw new EarningsError(401,'earnings_unauthorized');
+    if (response.status===429) throw new EarningsError(429,'driver_password_rate_limited');
+    throw new EarningsError(503,'earnings_unavailable');
+  }
+  const user=await response.json().catch(()=>null);
+  if (user?.id!==userId) throw new EarningsError(503,'earnings_unavailable');
 }
 
 export async function earningsRpc<Result = unknown>(name: string, params: Record<string, unknown>): Promise<Result> {

@@ -33,6 +33,7 @@ if (localDemo) {
           privateKey: formattedKey,
         }),
         projectId: projectId,
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
         databaseURL: `https://${projectId}.firebaseio.com`
       });
     } else {
@@ -200,4 +201,4 @@ export function hasAllowedRole(userRole: string | undefined, allowedRoles: strin
   return userRole ? allowedRoles.includes(userRole) : false;
 }
 
-export { adminDb, adminAuth };
+export { adminDb, adminAuth, adminApp };

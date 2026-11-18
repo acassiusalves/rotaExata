@@ -12,7 +12,7 @@ import {
   Weight,
 } from 'lucide-react';
 import { MyRoutesPageSkeleton } from '@/components/skeletons/route-card-skeleton';
-import { useAuth } from '@/hooks/use-auth';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { useDriverRoutes } from '@/hooks/use-driver-routes';
 import { RouteSyncStatus } from '@/components/driver/route-sync-status';
 
@@ -131,7 +131,7 @@ const getTotalWeight = (stops: any[]) => {
 };
 
 export default function MyRoutesPage() {
-  const { user } = useAuth();
+  const { profile:user } = useDriverRuntime();
   const { routes, state, lastServerSyncAt, isRefreshing, refresh } = useDriverRoutes(user?.uid ?? null);
 
   const stats = React.useMemo(() => {

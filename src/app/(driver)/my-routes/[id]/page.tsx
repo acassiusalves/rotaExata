@@ -30,43 +30,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { db, storage } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { useDriverResource } from '@/hooks/use-driver-resource';
+import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import type { DriverRoute,DriverNotice,DriverDeliveryValidation } from '@/lib/driver/runtime-contract';
+import { EarningsRequestError } from '@/components/earnings/earnings-shell';
+import type { PlaceValue, Payment } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Link from 'next/link';
 import WhatsAppIcon from '@/components/icons/whatsapp-icon';
-import { notFound } from 'next/navigation';
 import { useGeolocationTracking } from '@/hooks/use-geolocation-tracking';
 import { useToast } from '@/hooks/use-toast';
 import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
 import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
-import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 import { StopChangeBadge } from '@/components/driver/stop-change-badge';
-import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
-import { logPointCompleted, logPointFailed } from '@/lib/firebase/activity-log';
-import { useAuth } from '@/hooks/use-auth';
-import {
-  getRouteChangeNotificationFingerprint,
-  RouteStopNotFoundError,
-} from '@/lib/firebase/route-stop-mutations';
-
-type RouteDocument = RouteInfo & {
-  id: string;
-  name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
-  driverId?: string;
-  driverInfo: {
-    name: string;
-    vehicle: string;
-    plate: string;
-  } | null;
-  plannedDate: Timestamp;
-  origin: PlaceValue;
-  source?: string;
-};
-
 
 const getInitials = (name: string) => {
     const names = name.split(' ');
@@ -89,66 +66,39 @@ const formatDuration = (durationString: string = '0s') => {
 export default function RouteDetailsPage() {
   const params = useParams();
   const routeId = params?.id as string;
-  const { user } = useAuth();
+  const { profile:user,request,endpoint,readOnly }=useDriverRuntime();
+  const detail=useDriverResource<{route:DriverRoute;notice:DriverNotice|null;deliveryValidation:DriverDeliveryValidation}>(driverQuery(endpoint,'routes',{id:routeId}),6000);
+  const route=detail.data?.route;
+  const [dismissed, setDismissed] = React.useState<string>();
+  const notification=detail.data?.notice?.fingerprint!==dismissed ? detail.data?.notice?.notification ?? null : null;
+  const isLoading=detail.loading;
 
-  async function routeAction<Result = unknown>(action: string, details: Record<string, unknown> = {}): Promise<Result> {
-    if (!user || isImpersonationSessionActive()) throw new Error('Ação disponível na conta do entregador.');
-    const response = await fetch('/api/driver/route-actions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await user.getIdToken() },
-      body: JSON.stringify({ action, routeId, ...details }),
-    });
-    const result = await response.json();
-    if (result.code === 'route_stop_changed') throw new RouteStopNotFoundError();
-    if (!response.ok) throw new Error('Não foi possível atualizar a rota.');
-    return result as Result;
+  async function routeAction<Result=unknown>(action:string,details:Record<string,unknown>={}):Promise<Result> {
+    const result=await driverCommand<Result>(request,endpoint,{kind:'route',command:{action,routeId,...details}});
+    detail.refresh();
+    return result;
   }
-  const [route, setRoute] = React.useState<RouteDocument | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
+
   const [selectedStop, setSelectedStop] = React.useState<PlaceValue | null>(null);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
-  const [notification, setNotification] = React.useState<RouteChangeNotification | null>(null);
   const [isAcknowledging, setIsAcknowledging] = React.useState(false);
   const { toast } = useToast();
 
   // GPS Tracking
   const { location, isTracking, trackingHealth, startTracking, stopTracking, error } = useGeolocationTracking({
     routeId,
+    enabled:!readOnly && (route?.status==='dispatched' || route?.status==='in_progress'),
     enableHighAccuracy: true,
     updateInterval: 5000, // 5 segundos
     distanceFilter: 10, // 10 metros
   });
-
-  React.useEffect(() => {
-    if (!routeId) return;
-    const docRef = doc(db, 'routes', routeId);
-    const unsubscribe = onSnapshot(
-      docRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          setRoute({ id: docSnap.id, ...docSnap.data() } as RouteDocument);
-        } else {
-          console.error('No such document!');
-          notFound();
-        }
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching route:', error);
-        setIsLoading(false);
-        notFound();
-      }
-    );
-
-    return () => unsubscribe();
-  }, [routeId]);
 
   // Auto-restart tracking if route is in_progress and tracking is not active
   React.useEffect(() => {
     if (!route) return;
 
     // Se a rota está em progresso mas o tracking não está ativo, reinicia automaticamente
-    if (route.status === 'in_progress' && !isTracking) {
+    if (route.status === 'in_progress' && !isTracking && !readOnly) {
       console.log('🔄 [Auto-restart] Rota em progresso detectada, reiniciando tracking...');
       startTracking();
     }
@@ -156,7 +106,7 @@ export default function RouteDetailsPage() {
 
   // Monitor tracking health and show alerts
   React.useEffect(() => {
-    if (!isTracking) return;
+    if (!isTracking || route?.status!=='in_progress') return;
 
     if (trackingHealth === 'error') {
       toast({
@@ -171,49 +121,22 @@ export default function RouteDetailsPage() {
         description: 'Sinal de GPS fraco. A localização pode não estar sendo atualizada.',
       });
     }
-  }, [trackingHealth, isTracking, toast]);
-
-  // Listen for route change notifications
-  React.useEffect(() => {
-    if (!routeId) return;
-
-    const notificationRef = doc(db, 'routeChangeNotifications', routeId);
-    const unsubscribe = onSnapshot(
-      notificationRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data() as RouteChangeNotification;
-          if (!data.acknowledged) {
-            setNotification({ ...data, id: docSnap.id });
-          } else {
-            setNotification(null);
-          }
-        } else {
-          setNotification(null);
-        }
-      },
-      (error) => {
-        console.error('Error fetching notification:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [routeId]);
+  }, [trackingHealth, isTracking, route?.status, toast]);
 
   const handleAcknowledgeChanges = async () => {
     if (!notification) return;
-    if (isImpersonationSessionActive()) return;
+    if (readOnly) return;
 
     setIsAcknowledging(true);
     try {
-      await routeAction('acknowledge', { fingerprint: getRouteChangeNotificationFingerprint(notification) });
+      await routeAction('acknowledge', { fingerprint: detail.data?.notice?.fingerprint });
 
       toast({
         title: 'Alterações confirmadas',
         description: 'Você confirmou o recebimento das alterações.',
       });
 
-      setNotification(null);
+      detail.refresh();
     } catch (error) {
       console.error('Error acknowledging changes:', error);
       toast({
@@ -298,7 +221,7 @@ export default function RouteDetailsPage() {
   };
 
   const handleStartRoute = async () => {
-    if (!route) return;
+    if (!route || readOnly) return;
 
     try {
       await routeAction('start');
@@ -373,73 +296,24 @@ export default function RouteDetailsPage() {
     payments?: Payment[];
     deliveredItemIds?: string[];
   }) => {
-    if (!route || !selectedStop || !user) {
+    if (!route || !selectedStop || !user || readOnly) {
       console.error('Confirmação falhou: rota, parada ou motorista ausente.');
       return;
     }
 
-    let resolvedPhotoUrl: string | null = selectedStop.photoUrl || null;
-    let resolvedAttemptPhotoUrl: string | null = selectedStop.attemptPhotoUrl || null;
-
+    const targetStop={id:selectedStop.id,pointCode:selectedStop.pointCode,placeId:selectedStop.placeId,orderNumber:selectedStop.orderNumber};
+    const media:{delivery?:string;attempt?:string}={};
+    async function resolvePhoto(value:string|undefined,previous:string|undefined,kind:'delivery'|'attempt') {
+      if (!value) return null;
+      if (value===previous) return previous;
+      if (!value.startsWith('data:')) throw new Error('Foto inválida.');
+      const uploaded=await driverCommand<{id:string;url:string}>(request,endpoint,{kind:'upload',routeId,targetStop,mediaKind:kind,data:value});
+      media[kind]=uploaded.id;
+      return uploaded.url;
+    }
     try {
-      // Upload da foto para o Storage se houver nova foto (base64)
-      if (data.photo?.startsWith('data:')) {
-        try {
-          // Cria referência única para a foto
-          const photoRef = ref(
-            storage,
-            `delivery-photos/${routeId}/${selectedStop.id || selectedStop.placeId}-${Date.now()}.jpg`,
-          );
-
-          // Faz upload da foto em base64
-          await uploadString(photoRef, data.photo, 'data_url');
-
-          // Obtém a URL de download
-          const photoURL = await getDownloadURL(photoRef);
-
-          // Salva apenas a URL no documento
-          resolvedPhotoUrl = photoURL;
-        } catch (photoError) {
-          console.error('❌ Erro ao fazer upload da foto:', photoError);
-          // Se falhar o upload, mantém a foto anterior
-          toast({
-            variant: 'destructive',
-            title: 'Aviso',
-            description: 'Não foi possível salvar a foto, mas a entrega foi registrada.',
-          });
-        }
-      } else if (data.photo?.startsWith('http')) {
-        // Manter URL existente (não foi alterada)
-        resolvedPhotoUrl = data.photo;
-      } else if (!data.photo) {
-        resolvedPhotoUrl = null;
-      }
-
-      // Upload da foto da tentativa de entrega se houver nova foto (base64)
-      if (data.attemptPhoto?.startsWith('data:')) {
-        try {
-          const attemptPhotoRef = ref(
-            storage,
-            `delivery-attempt-photos/${routeId}/${selectedStop.id || selectedStop.placeId}-${Date.now()}.jpg`,
-          );
-          await uploadString(attemptPhotoRef, data.attemptPhoto, 'data_url');
-          const attemptPhotoURL = await getDownloadURL(attemptPhotoRef);
-          resolvedAttemptPhotoUrl = attemptPhotoURL;
-        } catch (photoError) {
-          console.error('❌ Erro ao fazer upload da foto de tentativa:', photoError);
-          toast({
-            variant: 'destructive',
-            title: 'Aviso',
-            description: 'Não foi possível salvar a foto de tentativa, mas a entrega foi registrada.',
-          });
-        }
-      } else if (data.attemptPhoto?.startsWith('http')) {
-        // Manter URL existente
-        resolvedAttemptPhotoUrl = data.attemptPhoto;
-      } else if (!data.attemptPhoto) {
-        resolvedAttemptPhotoUrl = null;
-      }
-
+      const resolvedPhotoUrl=await resolvePhoto(data.photo,selectedStop.photoUrl,'delivery');
+      const resolvedAttemptPhotoUrl=await resolvePhoto(data.attemptPhoto,selectedStop.attemptPhotoUrl,'attempt');
       const deliveryPatch: Record<string, unknown> = {
         deliveryStatus: data.status,
         notes: data.notes || null,
@@ -452,93 +326,10 @@ export default function RouteDetailsPage() {
       };
 
       const result = await routeAction<{ updatedStop: PlaceValue; stopIndex: number; wasPreviouslyFinalized: boolean }>('confirm', {
-        targetStop: { id: selectedStop.id, pointCode: selectedStop.pointCode, placeId: selectedStop.placeId, orderNumber: selectedStop.orderNumber },
-        patch: deliveryPatch,
+        targetStop,media,patch:deliveryPatch,
       });
 
-      // Registrar no activity log
-      const updatedStop = result.updatedStop;
-      try {
-        if (updatedStop.deliveryStatus === 'completed') {
-          await logPointCompleted({
-            userId: user.uid,
-            userName: user.email || route.driverInfo?.name || 'Motorista',
-            pointId: updatedStop.id || updatedStop.placeId,
-            pointCode: updatedStop.pointCode,
-            routeId: routeId,
-            routeCode: route.code || 'Rota',
-            serviceId: route.serviceId,
-            serviceCode: route.serviceCode,
-            photoUrl: updatedStop.photoUrl,
-            address: updatedStop.address,
-            customerName: updatedStop.customerName,
-            notes: updatedStop.notes,
-          });
-        } else if (updatedStop.deliveryStatus === 'failed') {
-          await logPointFailed({
-            userId: user.uid,
-            userName: user.email || route.driverInfo?.name || 'Motorista',
-            pointId: updatedStop.id || updatedStop.placeId,
-            pointCode: updatedStop.pointCode,
-            routeId: routeId,
-            routeCode: route.code || 'Rota',
-            serviceId: route.serviceId,
-            serviceCode: route.serviceCode,
-            failureReason: updatedStop.failureReason,
-            wentToLocation: updatedStop.wentToLocation,
-            attemptPhotoUrl: updatedStop.attemptPhotoUrl,
-            address: updatedStop.address,
-            customerName: updatedStop.customerName,
-          });
-        }
-      } catch (logError) {
-        console.error('⚠️ Erro ao registrar activity log (não crítico):', logError);
-      }
-
-      // Sincronizar status com pedidos do Lunna se a rota for importada
-      if (route.source === 'lunna') {
-        try {
-          await syncLunnaOrderStatus(
-            route,
-            updatedStop,
-            updatedStop.deliveryStatus === 'completed' ? 'entregue' : 'falha',
-          );
-        } catch (syncError) {
-          console.error('⚠️ Erro ao sincronizar com Lunna (não crítico):', syncError);
-          // Não bloqueia a operação se a sincronização falhar
-        }
-      }
-
-      // Notificar admin quando motorista editar uma entrega já concluída
-      if (result.wasPreviouslyFinalized) {
-        try {
-          const driverName = route.driverInfo?.name || 'Motorista';
-          const committedStopIndex = result.stopIndex;
-          const stopName = updatedStop.customerName || updatedStop.address || 'Ponto confirmado';
-
-          await addDoc(collection(db, 'notifications'), {
-            type: 'delivery_edited',
-            title: 'Entrega editada pelo motorista',
-            message: `${driverName} editou as informações do ponto "${stopName}" na rota "${route.name}".`,
-            priority: 'normal',
-            routeId: routeId,
-            routeName: route.name,
-            stopIndex: committedStopIndex,
-            driverId: route.driverId,
-            driverName: driverName,
-            read: false,
-            opened: false,
-            openedAt: null,
-            timestamp: serverTimestamp(),
-            // Para admins verem (não tem driverId específico, então todos admins veem)
-            forAdmin: true,
-          });
-          console.log('✅ Notificação de edição enviada para admin');
-        } catch (notifError) {
-          console.error('⚠️ Erro ao criar notificação (não crítico):', notifError);
-        }
-      }
-
+      const updatedStop=result.updatedStop;
       toast({
         title: result.wasPreviouslyFinalized
           ? 'Informações atualizadas!'
@@ -553,7 +344,7 @@ export default function RouteDetailsPage() {
       setIsConfirmDialogOpen(false);
       setSelectedStop(null);
     } catch (error) {
-      if (error instanceof RouteStopNotFoundError) {
+      if (error instanceof EarningsRequestError && error.code==='route_stop_changed') {
         setIsConfirmDialogOpen(false);
         setSelectedStop(null);
         toast({
@@ -600,7 +391,7 @@ export default function RouteDetailsPage() {
             </Button>
             <div className="flex-1">
                 <h1 className="text-lg font-semibold">{route.name}</h1>
-                {isTracking && (
+                {isTracking && route.status==='in_progress' && (
                     <Badge
                         variant={trackingHealth === 'error' ? 'destructive' : trackingHealth === 'warning' ? 'secondary' : 'default'}
                         className="flex items-center gap-1 w-fit"
@@ -853,8 +644,9 @@ export default function RouteDetailsPage() {
       </main>
 
       {/* Delivery Confirmation Dialog */}
-      {selectedStop && (
+      {selectedStop && detail.data && (
         <DeliveryConfirmationDialog
+          validationSettings={detail.data!.deliveryValidation}
           isOpen={isConfirmDialogOpen}
           onClose={() => {
             setIsConfirmDialogOpen(false);
@@ -902,8 +694,8 @@ export default function RouteDetailsPage() {
 
       {/* Route Changes Notification */}
       <RouteChangesNotification
-        isPreview={isImpersonationSessionActive()}
-        onDismissPreview={() => setNotification(null)}
+        isPreview={readOnly}
+        onDismissPreview={() => setDismissed(detail.data?.notice?.fingerprint)}
         notification={notification}
         onAcknowledge={handleAcknowledgeChanges}
         isAcknowledging={isAcknowledging}

@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase/client';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { driverCommand } from '@/lib/driver/runtime-client';
 import { isImpersonationSessionActive } from '@/lib/impersonation-session';
 
 export interface DeviceInfo {
@@ -168,6 +168,7 @@ export async function collectDeviceInfo(): Promise<DeviceInfo> {
 
 // Hook to collect and update device info
 export function useDeviceInfo(enabled: boolean = true) {
+  const {request,endpoint}=useDriverRuntime();
   const lastUpdateRef = useRef<number>(0);
   const UPDATE_INTERVAL = 60000; // 1 minuto
 
@@ -176,28 +177,18 @@ export function useDeviceInfo(enabled: boolean = true) {
     const isImpersonating = isImpersonationSessionActive();
     if (!enabled || isImpersonating) return;
 
-    const currentUser = auth.currentUser;
-    if (!currentUser) return;
-
     const now = Date.now();
     // Evita atualizacoes muito frequentes
     if (now - lastUpdateRef.current < UPDATE_INTERVAL) return;
     lastUpdateRef.current = now;
 
     try {
-      const deviceInfo = await collectDeviceInfo();
-
-      const userRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userRef, {
-        deviceInfo: {
-          ...deviceInfo,
-          lastUpdated: serverTimestamp(),
-        },
-      });
+      const {lastUpdated,...device}=await collectDeviceInfo();
+      await driverCommand(request,endpoint,{kind:'presence',online:navigator.onLine,device});
     } catch (error) {
       console.error('Erro ao atualizar info do dispositivo:', error);
     }
-  }, [enabled]);
+  }, [enabled,request,endpoint]);
 
   useEffect(() => {
     if (!enabled) return;

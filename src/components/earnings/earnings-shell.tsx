@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EarningsMfa } from './earnings-mfa';
 import { requiredEarningsFactors, type EarningsFactor } from '@/lib/earnings/mfa';
-import { earningsBrowserClient } from '@/lib/earnings/client';
+import { earningsBrowserClient,nativeEarningsEnabled } from '@/lib/earnings/client';
 
 export class EarningsRequestError extends Error {
   constructor(readonly status: number, readonly code: string, readonly issues: { code: string; stopId?: string }[] = []) {
@@ -41,6 +41,8 @@ export function earningsMessage(error: unknown) {
 type FinanceContext = {
   client: SupabaseClient;
   userId: string;
+  email?: string;
+  signOut: () => Promise<void>;
   request: <T>(path: string, init?: RequestInit) => Promise<T>;
 };
 const Context = createContext<FinanceContext | null>(null);
@@ -50,32 +52,49 @@ export function useEarnings() {
   return value;
 }
 
-function SignIn({ client }: { client: SupabaseClient }) {
+function SignIn({ client,portal }: { client: SupabaseClient;portal:boolean }) {
   const [busy,setBusy] = useState(false);
   const [notice,setNotice] = useState('');
+  const [unverified,setUnverified] = useState('');
   async function enter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    setBusy(true); setNotice('');
+    const email=String(data.get('email'));
+    setBusy(true); setNotice(''); setUnverified('');
     try {
-      const result = await client.auth.signInWithPassword({ email: String(data.get('email')), password: String(data.get('password')) });
+      const result = await client.auth.signInWithPassword({ email, password: String(data.get('password')) });
       if (result.error) {
+        if (result.error.code==='email_not_confirmed') setUnverified(email);
         setNotice(result.error.code === 'email_not_confirmed' ? 'Confirme seu e-mail da conta Lunna para entrar.' : 'Confira o e-mail e a senha da conta Lunna.');
       }
     } catch {
       setNotice('A conexão falhou. Tente entrar novamente.');
     } finally { setBusy(false); }
   }
+  async function resend() {
+    setBusy(true);
+    try {
+      const {error}=await client.auth.resend({type:'signup',email:unverified,
+        options:{emailRedirectTo:window.location.origin+'/driver/conta'}});
+      setNotice(error ? 'O reenvio está indisponível. Aguarde um momento e tente de novo.' :
+        'Se o e-mail estiver pendente de confirmação, procure o link na sua caixa de entrada.');
+      if (!error) setUnverified('');
+    } catch { setNotice('O reenvio está indisponível. Tente de novo.'); }
+    finally { setBusy(false); }
+  }
   return <form onSubmit={enter} className="mx-auto max-w-sm space-y-4 rounded-xl border bg-card p-6">
-    <div><h1 className="text-xl font-semibold">Entrar no financeiro</h1><p className="mt-1 text-sm text-muted-foreground">Use sua conta Lunna.</p></div>
+    <div><h1 className="text-xl font-semibold">{portal?'Entrar no RotaExata':'Entrar no financeiro'}</h1><p className="mt-1 text-sm text-muted-foreground">Use sua conta Lunna.</p></div>
     <div className="space-y-1"><Label htmlFor="earnings-email">E-mail</Label><Input id="earnings-email" name="email" type="email" autoComplete="username" required /></div>
     <div className="space-y-1"><Label htmlFor="earnings-password">Senha</Label><Input id="earnings-password" name="password" type="password" autoComplete="current-password" required /></div>
     {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
     <Button className="w-full" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</Button>
+    {portal && unverified && <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={()=>void resend()}>Reenviar confirmação</Button>}
+    {portal && <Link href="/driver/conta" className="block text-center text-sm text-muted-foreground underline">Esqueci minha senha</Link>}
+    {portal && <Link href="/login?admin=1" className="block text-center text-sm text-muted-foreground underline">Acesso administrativo</Link>}
   </form>;
 }
 
-export function EarningsShell({ children, driver = false }: { children: ReactNode; driver?: boolean }) {
+export function EarningsShell({ children, driver = false, portal=false }: { children: ReactNode; driver?: boolean;portal?:boolean }) {
   const [client,setClient] = useState<SupabaseClient>();
   const [session,setSession] = useState<Session | null>(null);
   const [loading,setLoading] = useState(true);
@@ -92,20 +111,20 @@ export function EarningsShell({ children, driver = false }: { children: ReactNod
     return () => {current=false;};
   },[client,token]);
   useEffect(() => {
-    const browser = earningsBrowserClient();
+    const browser = portal || nativeEarningsEnabled ? earningsBrowserClient():undefined;
     if (!browser) { setLoading(false); return; }
     setClient(browser);
     const { data } = browser.auth.onAuthStateChange((_event,next) => {
       setSession(next); setLoading(false);
     });
     return () => data.subscription.unsubscribe();
-  }, []);
+  }, [portal]);
   const userId = session?.user.id;
-  async function leave() {
+  const leave=useCallback(async ()=>{
     setSession(null);
     setAssurance(undefined);
     await client?.auth.signOut({scope:'local'});
-  }
+  },[client]);
   const request = useCallback(async <T,>(path: string,init?: RequestInit): Promise<T> => {
     const auth = await client?.auth.getSession();
     const active = auth?.data.session;
@@ -115,27 +134,31 @@ export function EarningsShell({ children, driver = false }: { children: ReactNod
     if (init?.body) headers.set('Content-Type','application/json');
     const response = await fetch(path,{ ...init, headers, cache: 'no-store' });
     const body = await response.json().catch(() => null);
-    if (!response.ok || !body) throw new EarningsRequestError(response.status,body?.code,body?.issues);
+    if (!response.ok || !body) throw new EarningsRequestError(response.status,body?.code ?? body?.error,body?.issues);
     return body as T;
   },[client,userId]);
 
+  if (portal && userId && client && assurance && assurance.token===token && !assurance.error && !assurance.factors.length) {
+    return <Context.Provider key={userId} value={{client,userId,email:session?.user.email,request,signOut:leave}}>{children}</Context.Provider>;
+  }
+
   return <div className="min-h-screen bg-background">
-    <header className="sticky top-0 z-10 border-b bg-background">
+    {!portal && <header className="sticky top-0 z-10 border-b bg-background">
       <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center justify-between gap-2 px-4">
         <Link href={driver ? '/my-routes' : '/dashboard'} className="inline-flex items-center gap-2 text-sm font-medium"><ArrowLeft aria-hidden="true" className="size-4" />{driver ? 'Minhas rotas' : 'Painel RotaExata'}</Link>
         {userId && <Button variant="ghost" size="sm" onClick={() => void leave()}><LogOut aria-hidden="true" className="mr-2 size-4" />Sair do financeiro</Button>}
       </div>
-    </header>
+    </header>}
     <main className="mx-auto max-w-6xl px-4 py-6">
-      {loading ? <p role="status">Carregando sessão…</p> : !client ? <p role="status">Financeiro indisponível neste ambiente.</p> :
-        !userId ? <SignIn client={client} /> :
+      {loading ? <p role="status">Carregando sessão…</p> : !client ? <p role="status">{portal?'RotaExata indisponível neste ambiente.':'Financeiro indisponível neste ambiente.'}</p> :
+        !userId ? <SignIn client={client} portal={portal} /> :
         !assurance || assurance.token!==token ? <p role="status">Verificando sessão…</p> :
         assurance.error ? <div role="alert" className="space-y-2 text-sm">
           <p>A verificação da sessão está indisponível.</p>
           <Button variant="outline" onClick={() => void leave()}>Entrar novamente</Button>
         </div> :
         assurance.factors.length ? <EarningsMfa key={token} client={client} factors={assurance.factors} onCancel={() => void leave()} /> :
-          <Context.Provider key={userId} value={{ client,userId,request }}>
+          <Context.Provider key={userId} value={{ client,userId,email:session?.user.email,request,signOut:leave }}>
             {!driver && <nav aria-label="Financeiro" className="mb-5 flex gap-2 border-b pb-3">
               <Button asChild variant="ghost" size="sm"><Link href="/financeiro/pagamentos">Pagamentos</Link></Button>
               <Button asChild variant="ghost" size="sm"><Link href="/financeiro/regras">Regras de ganhos</Link></Button>

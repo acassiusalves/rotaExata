@@ -65,3 +65,13 @@ O ensaio em navegador cobre as telas de regras, pagamentos e ganhos conforme o r
 ## Registro da migração em 18/11/2026
 
 Foram preservados no staging privado os 374 pagamentos do snapshot de `2026-11-18T18:30:13.973649Z`. O escopo é `e82fdc1f-e12a-42ea-9429-82a1bfec172e` e o ID da execução é `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. O manifesto conferido tem SHA-256 `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`. Os quatro controles de operação estão desligados e o estágio ainda aguarda promoção. Consulte a [evidência de homologação](homologacao-remuneracao-2026-11-18.md).
+
+## Corte do PWA e contas canônicas
+
+A candidata do PWA utiliza `NEXT_PUBLIC_ROTA_DRIVER_AUTH=supabase` para selecionar o login de motoristas. A operação financeira continua com os próprios controles de ativação. Todos os endpoints do runtime do motorista verificam a fase. A aplicação precisa do projeto e do bucket Firebase de origem na configuração Admin SDK, das credenciais Supabase de servidor e do escopo financeiro correspondente. O login depende também do e-mail verificado no Auth e do vínculo de identidade do diretório. Confira o fechamento do cadastro público e permita o callback `https://rota-exata.vercel.app/driver/conta` no projeto de Auth.
+
+A migração adicional da Luna `20261118232957_rota_driver_account_controls.sql` define o painel e o fluxo de troca de senha do motorista. SHA-256 revisável `e57729fcf772d4ae21cac8c86871ee5205cb01b77e256d4692340d9c72b27caa`. A versão deve acompanhar o identificador registrado pelo provedor na aplicação. O painel vive em `/driver/admin/accounts`. O acesso operacional legado do administrador continua disponível em `/login?admin=1`.
+
+Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. O retorno para o modo legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Verifique as Rules ativas do Storage antes de fechar o acesso direto nas pastas de comprovantes.
+
+Antes de abrir captura, emissão, comandos e extrato, valide as três funções de ponte, a identidade de execução e a aceitação persistente pelo destino. Os pagamentos legados aguardam promoção auditada. A gestão de aparelhos e o push instalado dependem de homologação no dispositivo alvo.

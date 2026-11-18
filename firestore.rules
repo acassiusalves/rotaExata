@@ -4,8 +4,16 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ===== FUNÇÕES DE AUTENTICAÇÃO =====
+    function isRetiredFirebaseDriver() {
+      let transition = /databases/$(database)/documents/rotaAuthTransition/driver;
+      let actor = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(transition) && get(transition).data.get('mode', 'firebase') == 'supabase'
+        && (request.auth.uid in get(transition).data.get('driverUids', [])
+          || (exists(actor) && get(actor).data.get('role', '') == 'driver'));
+    }
+
     function isAuthed() {
-      return request.auth != null;
+      return request.auth != null && !isRetiredFirebaseDriver();
     }
 
     function getUserData() {
@@ -71,7 +79,7 @@ service cloud.firestore {
       allow create, delete, read, list: if hasRoutesAccess();
       allow update: if hasRoutesAccess() &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['earningsSourceStart','earningsSourceCompletion']);
-      // O motorista publica a posição. Confirmações e estados da rota passam pelo servidor.
+      // Clientes legados podem transmitir a posição. A PWA canônica usa a API.
       allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
       allow update: if isAuthed() && resource.data.driverId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentLocation','lastUpdated','actualPath']);
@@ -218,6 +226,8 @@ service cloud.firestore {
       }
       function preservaFinanceiroV2() {
         return request.resource.data.get('retornoFinanceiro', {}) == resource.data.get('retornoFinanceiro', {})
+          // Custo, comissão e taxa do cartão congelados: em pedido V2 só o servidor grava.
+          && request.resource.data.get('resultadoFaturamento', null) == resource.data.get('resultadoFaturamento', null)
           && request.resource.data.get('items', []) == resource.data.get('items', [])
           && request.resource.data.get('itens', []) == resource.data.get('itens', [])
           && request.resource.data.get('itensDevolvidos', []) == resource.data.get('itensDevolvidos', [])
@@ -676,8 +686,17 @@ service cloud.firestore {
     match /historico_balancos/{historicoId} {
       // Qualquer usuário com acesso ao estoque pode ler
       allow read, list: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'estoquista'];
-      // Apenas admins/gestores podem criar (ao aplicar balanço)
-      allow create: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio'];
+      // Apenas admins/gestores podem criar (ao aplicar balanço), sempre em nome próprio.
+      // As linhas por produto vão em partes (tipoRegistro 'parte_alteracoes_balanco') gravadas
+      // ANTES do resumo; depois que o resumo existe, ninguém anexa partes a ele.
+      allow create: if isAuthed()
+        && getUserData().role in ['admin', 'gestor', 'socio']
+        && request.resource.data.get('aplicadoPor', '') == request.auth.uid
+        && (request.resource.data.get('tipoRegistro', '') != 'parte_alteracoes_balanco'
+          || (request.resource.data.get('historicoId', '') is string
+            && request.resource.data.historicoId.size() > 0
+            && request.resource.data.historicoId != historicoId
+            && !exists(/databases/$(database)/documents/historico_balancos/$(request.resource.data.historicoId))));
       // Ninguém pode atualizar ou deletar histórico
       allow update, delete: if false;
     }
@@ -691,6 +710,12 @@ service cloud.firestore {
 
     // ===== CONFIGURAÇÕES DE COMISSÃO (Relatórios) =====
     match /comissao-configuracoes/{configId} {
+      allow read, list: if isAuthed();
+      allow create, update, delete: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
+    }
+
+    // Taxas do cartão (Resultado em /faturamento): lidas no faturamento e na prévia da tela.
+    match /taxas-cartao-configuracoes/{configId} {
       allow read, list: if isAuthed();
       allow create, update, delete: if isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'financeiro'];
     }

@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 import {
   Lock,
   Users,
@@ -205,7 +207,7 @@ export default function PermissionsPage() {
   const handleSaveUsers = async () => {
     setIsSavingUsers(true);
     try {
-      const validUsers = users.filter((user) => user.role && user.role.trim() !== '');
+      const validUsers = users.filter((user) => user.role && user.role.trim() !== '' && (!nativeDriverEnabled || user.role!=='driver'));
 
       if (validUsers.length === 0) {
         toast({
@@ -448,13 +450,14 @@ export default function PermissionsPage() {
                       <TableCell>
                         <Select
                           value={user.role || ''}
+                          disabled={nativeDriverEnabled && user.role==='driver'}
                           onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
                         >
                           <SelectTrigger className={!user.role ? 'border-destructive' : ''}>
                             <SelectValue placeholder="Selecione..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {availableRoles.map((role) => (
+                            {availableRoles.filter(role=>!nativeDriverEnabled || role.key!=='driver' || user.role==='driver').map((role) => (
                               <SelectItem key={role.key} value={role.key}>
                                 {role.name}
                               </SelectItem>
@@ -463,7 +466,9 @@ export default function PermissionsPage() {
                         </Select>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
+                        {nativeDriverEnabled && user.role==='driver' ? <Button asChild variant="outline" size="sm">
+                          <Link href="/driver/admin/accounts">Conta Lunna</Link>
+                        </Button> : <Button
                           variant="outline"
                           size="sm"
                           onClick={() => setUserToResetPassword(user)}
@@ -471,7 +476,7 @@ export default function PermissionsPage() {
                         >
                           <KeyRound className="mr-2 h-4 w-4" />
                           Resetar
-                        </Button>
+                        </Button>}
                       </TableCell>
                     </TableRow>
                   ))

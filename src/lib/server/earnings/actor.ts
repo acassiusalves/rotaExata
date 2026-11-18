@@ -40,11 +40,9 @@ export type ActorAuthority = {
 };
 
 function defaultAuthority(): ActorAuthority {
-  const scopeId = uuid.safeParse(process.env.ROTA_EARNINGS_SCOPE_ID);
-  if (!scopeId.success) throw new EarningsError(503, 'earnings_unavailable');
   return {
     issuer: earningsSupabaseUrl() + '/auth/v1',
-    scopeId: scopeId.data,
+    scopeId: earningsScopeId(),
     verify: verifySupabaseUser,
     resolve: ({ userId, sessionId, scopeId, application, action }) => earningsRpc('rota_earnings_resolve_actor', {
       p_user_id: userId, p_session_id: sessionId, p_scope_id: scopeId, p_application: application, p_action: action,
@@ -52,10 +50,10 @@ function defaultAuthority(): ActorAuthority {
   };
 }
 
-export async function requireEarningsActor(request: Request, action: EarningsAction, authority?: ActorAuthority): Promise<EarningsActor> {
+export async function verifyNativeSession(request: Request, authority?: Pick<ActorAuthority,'issuer'|'now'|'verify'>) {
   const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
   if (!token || token.length > 16384) throw new EarningsError(401, 'earnings_unauthorized');
-  const auth = authority ?? defaultAuthority();
+  const auth:Pick<ActorAuthority,'issuer'|'now'|'verify'> = authority ?? { issuer: earningsSupabaseUrl() + '/auth/v1', verify: verifySupabaseUser };
   const user = await auth.verify(token);
   let claims: z.infer<typeof claimsSchema>;
   let delegated: boolean;
@@ -78,19 +76,32 @@ export async function requireEarningsActor(request: Request, action: EarningsAct
     throw new EarningsError(403, 'earnings_access_denied');
   }
 
+  return { userId: claims.sub, sessionId: claims.session_id, token };
+}
+
+export function earningsScopeId() {
+  const scopeId=uuid.safeParse(process.env.ROTA_EARNINGS_SCOPE_ID);
+  if (!scopeId.success) throw new EarningsError(503,'earnings_unavailable');
+  return scopeId.data;
+}
+
+export async function requireEarningsActor(request: Request, action: EarningsAction, authority?: ActorAuthority): Promise<EarningsActor> {
+  const identity=await verifyNativeSession(request,authority);
+  const auth=authority ?? defaultAuthority();
   const application = action === 'statement' || action === 'route:operate' ? 'driver' : 'lunna';
   const result = await auth.resolve({
-    userId: claims.sub, sessionId: claims.session_id, scopeId: auth.scopeId, application, action,
+    userId: identity.userId, sessionId: identity.sessionId, scopeId: auth.scopeId, application, action,
   });
   const code = (result as { errorCode?: unknown } | null)?.errorCode;
   if (code === 'platform_session_revoked') throw new EarningsError(401, 'earnings_unauthorized');
   if (code === 'platform_directory_unavailable') throw new EarningsError(503, 'earnings_unavailable');
+  if (code === 'platform_password_change_required' && action === 'route:operate') throw new EarningsError(403,code);
   if (code) throw new EarningsError(403, 'earnings_access_denied');
   const parsed = actorSchema.safeParse(result);
   if (!parsed.success) throw new EarningsError(503, 'earnings_unavailable');
   const actor = parsed.data;
   const allowedRoles: readonly string[] = actions[action];
-  if (actor.userId !== claims.sub || actor.sessionId !== claims.session_id || actor.scopeId !== auth.scopeId ||
+  if (actor.userId !== identity.userId || actor.sessionId !== identity.sessionId || actor.scopeId !== auth.scopeId ||
       actor.application !== application || !allowedRoles.includes(actor.role) || (action === 'route:operate' && !actor.sourceUid)) {
     throw new EarningsError(403, 'earnings_access_denied');
   }

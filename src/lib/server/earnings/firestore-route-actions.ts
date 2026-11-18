@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminDb } from '@/lib/firebase/admin';
 import { plannedFingerprint, protectCompletion, sourceStopKey, timestampIso } from '../../../../functions/src/earnings-source-adapter';
 import { getRouteChangeNotificationFingerprint } from '@/lib/route-change-fingerprint';
+import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { clearRouteChangeFlags, updateStopByIdentity } from '@/lib/route-stop-reconciliation';
 import type { PlaceValue, RouteChangeNotification } from '@/lib/types';
 import { earningsErrorResponse, readJsonBody } from './transport';
@@ -13,7 +14,7 @@ const stopIdentity = z.object({
   placeId: z.string().max(150).optional(), orderNumber: z.string().max(150).optional(),
 });
 const nullableText = (size: number) => z.string().max(size).nullable();
-const photoUrl = z.string().url().max(4096).startsWith('https://').nullable();
+const photoUrl = z.string().url().max(4096).regex(/^https:\/\/|^http:\/\/127\.0\.0\.1:9198\//).nullable();
 const patch = z.object({
   deliveryStatus: z.enum(['completed','failed']),
   notes: nullableText(4000),
@@ -30,11 +31,11 @@ const patch = z.object({
 const actions = z.discriminatedUnion('action', [
   z.object({ action: z.literal('start'), routeId }).strict(),
   z.object({ action: z.literal('finish'), routeId }).strict(),
-  z.object({ action: z.literal('confirm'), routeId, targetStop: stopIdentity, patch }).strict(),
+  z.object({ action: z.literal('confirm'), routeId, targetStop: stopIdentity, patch, media:z.object({delivery:z.string().uuid().optional(),attempt:z.string().uuid().optional()}).optional() }).strict(),
   z.object({ action: z.literal('acknowledge'), routeId, fingerprint: z.string().min(1).max(60000) }).strict(),
 ]);
 
-export async function performDriverRouteAction(request: Request, uid: string) {
+export async function performDriverRouteAction(request: Request, uid: string, authority: {canonical?:boolean;bindMedia?:boolean} = {}) {
   if (!adminDb) return Response.json({ code: 'route_unavailable' }, { status: 503 });
   let input: z.infer<typeof actions>;
   try {
@@ -52,7 +53,8 @@ export async function performDriverRouteAction(request: Request, uid: string) {
       const [routeSnap, profile, proof] = await tx.getAll(routeRef,userRef,evidenceRef);
       const data = routeSnap.data();
       const user = profile.data();
-      if (!data || data.driverId !== uid || user?.role !== 'driver' || user.active === false || user.disabled === true || user.mustChangePassword) {
+      if (!data || data.driverId !== uid || !user ||
+          (!authority.canonical && (user.role !== 'driver' || user.active === false || user.disabled === true || user.mustChangePassword))) {
         return { status: 403, body: { code: 'route_access_denied' } };
       }
       const stops = (Array.isArray(data.stops) ? data.stops : []) as PlaceValue[];
@@ -93,6 +95,27 @@ export async function performDriverRouteAction(request: Request, uid: string) {
       const visited = input.patch.deliveryStatus === 'failed' ? input.patch.wentToLocation : null;
       const driverPatch = { ...input.patch, wentToLocation: visited, completedAt: now } as unknown as Partial<PlaceValue>;
       const mutation = updateStopByIdentity(stops,input.targetStop,driverPatch);
+      if (authority.bindMedia) {
+        const stopKey=getStopIdentityKey(mutation.previousStop);
+        for (const [kind,field] of [['delivery','photoUrl'],['attempt','attemptPhotoUrl']] as const) {
+          const url=input.patch[field];
+          if (!url || url===mutation.previousStop[field]) continue;
+          const id=input.media?.[kind];
+          const media=id ? (await tx.get(db.collection('driverDeliveryMedia').doc(id))).data() : null;
+          if (!media || media.uid!==uid || media.routeId!==input.routeId || media.stopKey!==stopKey || media.kind!==kind || media.url!==url) {
+            return { status:422,body:{code:'route_invalid_media'} };
+          }
+          if (url.startsWith('http:') && process.env.FIREBASE_STORAGE_EMULATOR_HOST!=='127.0.0.1:9198') {
+            return { status:422,body:{code:'route_invalid_media'} };
+          }
+        }
+      } else if (input.patch.photoUrl?.startsWith('http:') || input.patch.attemptPhotoUrl?.startsWith('http:')) {
+        return { status:422,body:{code:'route_invalid_media'} };
+      }
+      const orderNumber=mutation.previousStop.orderNumber;
+      const orderCandidates=authority.bindMedia && data.source==='lunna' && orderNumber
+        ? await tx.get(db.collection('orders').where('number','==',orderNumber).limit(5)):null;
+      const linkedOrders=orderCandidates?.docs.filter(order=>order.data().rotaExataRouteId===input.routeId) ?? [];
       const prior = mutation.previousStop.deliveryStatus;
       const wasPreviouslyFinalized = prior === 'completed' || prior === 'failed';
       const updatedStop = wasPreviouslyFinalized ? { ...mutation.updatedStop, editedByDriver: true, editedAt: now } : mutation.updatedStop;
@@ -100,6 +123,32 @@ export async function performDriverRouteAction(request: Request, uid: string) {
       updatedStops[mutation.index] = updatedStop;
       tx.update(routeRef, { stops: updatedStops, currentStopIndex: mutation.index + 1, updatedAt: now });
       if (prior !== 'completed' && input.patch.deliveryStatus === 'completed') tx.update(userRef, { totalDeliveries: FieldValue.increment(1) });
+
+      if (authority.bindMedia) {
+        const pointId=updatedStop.id || updatedStop.placeId || updatedStop.pointCode;
+        tx.create(db.collection('activity_log').doc(),{
+          eventType:input.patch.deliveryStatus==='completed'?'point_completed':'point_failed',
+          userId:uid,userName:user.displayName || user.name || 'Motorista',entityType:'point',entityId:pointId ?? null,
+          entityCode:updatedStop.pointCode ?? null,routeId:input.routeId,routeCode:data.code ?? null,
+          serviceId:data.serviceId ?? null,serviceCode:data.serviceCode ?? null,pointId:pointId ?? null,pointCode:updatedStop.pointCode ?? null,
+          action:input.patch.deliveryStatus==='completed'?'Entrega confirmada':'Falha de entrega registrada',
+          changes:[{field:'deliveryStatus',oldValue:prior ?? null,newValue:input.patch.deliveryStatus,fieldLabel:'Status'}],
+          metadata:{photoUrl:updatedStop.photoUrl ?? null,attemptPhotoUrl:updatedStop.attemptPhotoUrl ?? null,
+            failureReason:updatedStop.failureReason ?? null,wentToLocation:visited,address:updatedStop.address ?? null,
+            customerName:updatedStop.customerName ?? null,notes:updatedStop.notes ?? null},
+          timestamp:now,
+        });
+        if (linkedOrders.length===1) {
+          const logisticsStatus=input.patch.deliveryStatus==='completed'?'entregue':'falha';
+          tx.update(linkedOrders[0].ref,{logisticsStatus,updatedAt:now});
+        }
+        if (wasPreviouslyFinalized) tx.create(db.collection('notifications').doc(),{
+          type:'delivery_edited',title:'Entrega editada pelo motorista',
+          message:`${user.displayName || user.name || 'Motorista'} editou uma parada na rota ${data.name || data.code || input.routeId}.`,
+          priority:'normal',routeId:input.routeId,routeName:data.name ?? null,stopIndex:mutation.index,driverId:uid,
+          driverName:user.displayName || user.name || 'Motorista',read:false,opened:false,openedAt:null,timestamp:now,forAdmin:true,
+        });
+      }
 
       const key = sourceStopKey(updatedStop as unknown as Record<string, unknown>);
       if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {

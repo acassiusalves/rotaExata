@@ -25,6 +25,7 @@ function foregroundReceiver(permission: NotificationPermission = 'granted') {
   const receive = runInNewContext(code, {
     alive: true, currentUid: { current: 'driver-a' }, userId: 'driver-a',
     toast() {}, permission: () => permission, console,
+    window: { dispatchEvent() {} }, Event,
     navigator: { serviceWorker: { getRegistration: async () => ({
       showNotification: async (title: string, options: Record<string, any>) => { shown.push({ title, options }); },
     }) } },

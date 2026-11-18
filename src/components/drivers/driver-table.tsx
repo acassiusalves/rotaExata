@@ -1,5 +1,7 @@
 'use client';
 
+import { nativeDriverEnabled } from '@/lib/driver/mode';
+
 import * as React from 'react';
 import { ChevronsUpDown } from 'lucide-react';
 import {
@@ -427,6 +429,7 @@ const getDriverColumns = (
                     <DropdownMenuItem onClick={() => onEditClick(driver)}>
                        Editar
                     </DropdownMenuItem>
+                    {!nativeDriverEnabled && <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onImpersonateClick(driver)}>
                        <Smartphone className="mr-2 h-4 w-4" />
@@ -445,6 +448,7 @@ const getDriverColumns = (
                        <Trash2 className="mr-2 h-4 w-4" />
                        Remover
                     </DropdownMenuItem>
+                    </>}
                 </DropdownMenuContent>
             </DropdownMenu>
         </div>

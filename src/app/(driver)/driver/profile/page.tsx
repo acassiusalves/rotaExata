@@ -3,34 +3,12 @@
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useAuth } from '@/hooks/use-auth';
-import { Loader2, User, Mail, Phone, Car, Calendar } from 'lucide-react';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { Mail,Phone,Car,Calendar } from 'lucide-react';
 
 export default function DriverProfilePage() {
-  const { user } = useAuth();
-  const [driverData, setDriverData] = React.useState<any>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-
-  React.useEffect(() => {
-    async function loadDriverData() {
-      if (!user) return;
-
-      try {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          setDriverData(userDoc.data());
-        }
-      } catch (error) {
-        console.error('Erro ao carregar dados do motorista:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadDriverData();
-  }, [user]);
+  const {profile:user}=useDriverRuntime();
+  const driverData=user;
 
   const getInitials = (name: string | null | undefined) => {
     if (!name) return 'U';
@@ -40,14 +18,6 @@ export default function DriverProfilePage() {
     }
     return name.substring(0, 2);
   };
-
-  if (isLoading) {
-    return (
-      <div className="flex h-[400px] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4 p-4">
@@ -65,7 +35,7 @@ export default function DriverProfilePage() {
             <div className="text-center">
               <h2 className="text-xl font-bold">{user?.displayName || 'Motorista'}</h2>
               <p className="text-sm text-muted-foreground">
-                {driverData?.role === 'driver' ? 'Motorista' : 'Usuário'}
+                Motorista
               </p>
             </div>
           </div>
@@ -107,7 +77,7 @@ export default function DriverProfilePage() {
               <div>
                 <p className="text-sm font-medium">Veículo</p>
                 <p className="text-sm text-muted-foreground">
-                  {driverData.vehicle.type} - {driverData.vehicle.plate}
+                  {typeof driverData.vehicle==='string' ? driverData.vehicle : [driverData.vehicle.type,driverData.vehicle.plate].filter(Boolean).join(' · ')}
                 </p>
               </div>
             </div>

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { doc, updateDoc, serverTimestamp, onSnapshot, deleteDoc } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase/client';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
 
 interface GeolocationTrackingOptions {
   routeId: string;
+  enabled?: boolean;
   enableHighAccuracy?: boolean;
   updateInterval?: number; // em milissegundos
   distanceFilter?: number; // em metros
@@ -13,10 +14,12 @@ interface GeolocationTrackingOptions {
 
 export function useGeolocationTracking({
   routeId,
+  enabled=true,
   enableHighAccuracy = true,
   updateInterval = 5000, // 5 segundos
   distanceFilter = 10, // 10 metros
 }: GeolocationTrackingOptions) {
+  const {request,endpoint}=useDriverRuntime();
   const [location, setLocation] = useState<GeolocationPosition | null>(null);
   const [error, setError] = useState<GeolocationPositionError | null>(null);
   const [isTracking, setIsTracking] = useState(false);
@@ -50,12 +53,13 @@ export function useGeolocationTracking({
     return R * c;
   };
 
-  const updateLocationInFirebase = async (position: GeolocationPosition) => {
+  const publishLocation = async (position: GeolocationPosition, requestRevision?: string) => {
+    if (!enabled) return;
     const now = Date.now();
     const { latitude, longitude, accuracy, heading, speed } = position.coords;
 
     // Verifica filtro de distância
-    if (lastLocationRef.current) {
+    if (!requestRevision && lastLocationRef.current) {
       const distance = calculateDistance(
         lastLocationRef.current.lat,
         lastLocationRef.current.lng,
@@ -70,18 +74,9 @@ export function useGeolocationTracking({
     }
 
     try {
-      const routeRef = doc(db, 'routes', routeId);
-      await updateDoc(routeRef, {
-        currentLocation: {
-          lat: latitude,
-          lng: longitude,
-          accuracy,
-          heading: heading || null,
-          speed: speed || null,
-          timestamp: serverTimestamp(),
-        },
-        lastUpdated: serverTimestamp(),
-      });
+      await driverCommand(request,endpoint,{kind:'location',routeId,requestRevision,location:{
+        lat:latitude,lng:longitude,accuracy,heading:heading ?? null,speed:speed ?? null,
+      }});
 
       lastLocationRef.current = { lat: latitude, lng: longitude };
       lastUpdateRef.current = now;
@@ -96,7 +91,7 @@ export function useGeolocationTracking({
       if (retryCountRef.current < 3) {
         retryCountRef.current++;
         retryTimeoutRef.current = setTimeout(() => {
-          updateLocationInFirebase(position);
+          publishLocation(position);
         }, 5000);
       }
     }
@@ -156,6 +151,7 @@ export function useGeolocationTracking({
   };
 
   const startTracking = () => {
+    if (!enabled) return;
     if (!navigator.geolocation) {
       setError({
         code: 0,
@@ -179,7 +175,7 @@ export function useGeolocationTracking({
       (position) => {
         setLocation(position);
         setError(null);
-        updateLocationInFirebase(position);
+        publishLocation(position);
       },
       (err) => {
         setError(err);
@@ -198,7 +194,7 @@ export function useGeolocationTracking({
               (position) => {
                 setLocation(position);
                 setError(null);
-                updateLocationInFirebase(position);
+                publishLocation(position);
               },
               (fallbackErr) => {
                 console.error('❌ Erro no fallback de geolocalização:', fallbackErr);
@@ -237,7 +233,7 @@ export function useGeolocationTracking({
   };
 
   // Função para forçar atualização imediata da localização
-  const forceLocationUpdate = () => {
+  const forceLocationUpdate = (requestRevision?:string) => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocation(position);
@@ -245,7 +241,7 @@ export function useGeolocationTracking({
         // Força atualização ignorando filtros de distância e tempo
         const now = Date.now();
         lastUpdateRef.current = 0; // Reset para forçar atualização
-        updateLocationInFirebase(position);
+        void publishLocation(position,requestRevision);
       },
       (err) => {
         console.error('❌ Erro ao obter localização forçada:', err);
@@ -259,41 +255,22 @@ export function useGeolocationTracking({
     );
   };
 
-  // Listener para solicitações de atualização de localização
-  useEffect(() => {
-    if (!isTracking) return;
-
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.warn('⚠️ Usuário não autenticado, não é possível escutar solicitações');
-      return;
-    }
-
-    const requestRef = doc(db, 'locationUpdateRequests', currentUser.uid);
-    const unsubscribe = onSnapshot(
-      requestRef,
-      async (snapshot) => {
-        if (snapshot.exists()) {
-          // Força atualização imediata
-          forceLocationUpdate();
-
-          // Deleta a solicitação após processar
-          try {
-            await deleteDoc(requestRef);
-          } catch (err) {
-            console.error('❌ Erro ao deletar solicitação:', err);
-          }
+  useEffect(()=>{
+    if (!isTracking || !enabled) return;
+    let current=true;
+    let since:string|null=null;
+    const refresh=async ()=>{
+      try {
+        const response=await request<{revision:string|null}>(driverQuery(endpoint,'location-request'));
+        if (current && response.revision && response.revision!==since) {
+          since=response.revision;forceLocationUpdate(response.revision);
         }
-      },
-      (error) => {
-        console.error('❌ Erro no listener de solicitações:', error);
-      }
-    );
-
-    return () => {
-      unsubscribe();
+      } catch { /* The next poll honors a pending request after reconnection. */ }
     };
-  }, [isTracking]);
+    void refresh();
+    const timer=setInterval(refresh,8000);
+    return()=>{current=false;clearInterval(timer);};
+  },[isTracking,enabled,endpoint,request,routeId]);
 
   // Reativar Wake Lock quando a página voltar a ser visível
   useEffect(() => {

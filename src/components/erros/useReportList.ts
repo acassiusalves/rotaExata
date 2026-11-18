@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DriverRequest } from '@/lib/driver/runtime-client';
 import type { User } from 'firebase/auth';
 import { REPORT_CREATED_EVENT, type ReportSummary } from '@/lib/reporting/report-contract';
 import { initialReportFilters, type ReportCounts, type ReportFilterValues } from './ReportFilters';
 
-export function useReportList(user: User | null | undefined, ownOnly = false) {
+export function useReportList(user: User | null | undefined, ownOnly = false,nativeRequest?: DriverRequest) {
   const [filters, setFilters] = useState<ReportFilterValues>(initialReportFilters);
   const [pages, setPages] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -17,7 +18,7 @@ export function useReportList(user: User | null | undefined, ownOnly = false) {
   const cursor = pages.at(-1);
 
   const load = useCallback(async () => {
-    if (!user) {
+    if (!user && !nativeRequest) {
       setLoading(false);
       setReports([]);
       setCounts(undefined);
@@ -33,12 +34,15 @@ export function useReportList(user: User | null | undefined, ownOnly = false) {
       const params = new URLSearchParams(filters);
       if (ownOnly) params.set('scope', 'mine');
       if (cursor) params.set('cursor', cursor);
-      const token = await user.getIdToken();
-      const response = await fetch(`/api/feedbacks/admin?${params}`, {
-        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível carregar os chamados.');
+      let data;
+      if (nativeRequest) data=await nativeRequest<{reports:ReportSummary[];counts:ReportCounts;nextCursor:string|null}>(
+        '/api/driver/feedbacks/admin?'+params,{signal:controller.signal});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks/admin?'+params,{headers:{Authorization:'Bearer '+token},signal:controller.signal});
+        data=await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar os chamados.');
+      }
       if (controller.signal.aborted) return;
       setReports(data.reports);
       setCounts(data.counts);
@@ -48,7 +52,7 @@ export function useReportList(user: User | null | undefined, ownOnly = false) {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [user, cursor, filters, ownOnly]);
+  }, [user, cursor, filters, ownOnly,nativeRequest]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 200);

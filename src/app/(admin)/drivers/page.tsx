@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { PlusCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
@@ -422,10 +424,10 @@ export default function DriversPage() {
               <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
               {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
             </Button>
-            <Button onClick={() => setIsAddDialogOpen(true)}>
+            {nativeDriverEnabled ? <Button asChild><Link href="/driver/admin/accounts">Segurança das contas</Link></Button> : <Button onClick={() => setIsAddDialogOpen(true)}>
               <PlusCircle className="mr-2 h-4 w-4" />
               Adicionar Motorista
-            </Button>
+            </Button>}
           </div>
         </div>
         <Card>

@@ -1,6 +1,7 @@
 
 'use client';
 import { MainLayout } from '@/components/layout/main-layout';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { useAuth } from '@/hooks/use-auth';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
@@ -17,7 +18,7 @@ export default function AdminLayout({
   useEffect(() => {
     if (!loading) {
       if (!user) {
-        router.push('/login');
+        router.push(nativeDriverEnabled ? '/login?admin=1' : '/login');
       } else if (!userRole || !['admin', 'socio', 'gestor'].includes(userRole)) {
         // Se não é admin/socio/gestor, redireciona para área do motorista
         router.push('/my-routes');

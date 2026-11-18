@@ -115,3 +115,23 @@ test('motorista atualiza presença sem alterar papel, atribuição ou fatos tari
   await assertFails(db('admin').doc('routes/route-a').update({ earningsSourceStart: { driverUid: 'a' } }));
   await assertFails(db('admin').doc('rotaEarningOutbox/event-a').set({ ready: true }));
 });
+
+test('corte nativo fecha o SDK Firebase para motoristas e preserva operações do administrador', async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const source=context.firestore();
+    await source.doc('rotaAuthTransition/driver').set({mode:'supabase',driverUids:['former-driver']});
+    await source.doc('users/former-driver').set({role:'usuario'});
+  });
+  await assertFails(db('a').doc('users/a').get());
+  await assertFails(db('former-driver').doc('activity_log/log-a').get());
+  await assertSucceeds(db('no-profile').doc('activity_log/log-a').get());
+  await assertFails(db('a').doc('routes/route-a').get());
+  await assertFails(db('a').doc('notifications/notice-a').update({opened:true}));
+  await assertFails(db('a').doc('activity_log/new').set({eventType:'route_completed'}));
+  await assertSucceeds(db('admin').doc('routes/route-a').get());
+  await assertSucceeds(db('admin').doc('settings/general').get());
+  await assertFails(db('admin').doc('rotaAuthTransition/driver').update({mode:'firebase'}));
+  await env.withSecurityRulesDisabled(context =>
+    context.firestore().doc('rotaAuthTransition/driver').update({mode:'firebase'}));
+  await assertSucceeds(db('a').doc('routes/route-a').get());
+});

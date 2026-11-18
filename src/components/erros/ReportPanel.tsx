@@ -4,7 +4,8 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/auth-context';
+import { useOptionalDriverRuntime } from '@/components/driver/driver-runtime';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,17 +32,20 @@ function displayDate(value: unknown) {
 
 export function ReportPanel({ mode }: { mode: PanelMode }) {
   const { user } = useAuth();
+  const driver=useOptionalDriverRuntime();
   return (
     <Suspense fallback={<div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>}>
-      <AuthenticatedReports key={user?.uid ?? 'anonymous'} mode={mode} />
+      <AuthenticatedReports key={driver?.userId ?? user?.uid ?? 'anonymous'} mode={mode} />
     </Suspense>
   );
 }
 
 function AuthenticatedReports({ mode }: { mode: PanelMode }) {
   const { user, loading: authLoading } = useAuth();
+  const driver=useOptionalDriverRuntime();
+  const nativeRequest=driver?.native ? driver.request:undefined;
   const reportIdFromUrl = useSearchParams().get('report');
-  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user, mode === 'mine');
+  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user,mode==='mine',nativeRequest);
   const [selected, setSelected] = useState<Detail | null>(null);
   const [problem, setProblem] = useState('');
   const [details, setDetails] = useState('');
@@ -50,18 +54,21 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
   const command = useRef<{ key: string; id: string } | null>(null);
 
   const openReport = useCallback(async (id: string) => {
-    if (!user) return;
+    if (!user && !nativeRequest) return;
     detailRequest.current?.abort();
     const controller = new AbortController();
     detailRequest.current = controller;
     setProblem('');
     try {
-      const token = await user.getIdToken();
-      const response = await fetch(`/api/feedbacks/${encodeURIComponent(id)}${mode === 'mine' ? '?scope=mine' : ''}`, {
-        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível abrir o chamado.');
+      const suffix='/'+encodeURIComponent(id)+(mode==='mine'?'?scope=mine':'');
+      let data;
+      if (nativeRequest) data=await nativeRequest<{report:Detail}>('/api/driver/feedbacks'+suffix,{signal:controller.signal});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks'+suffix,{headers:{Authorization:'Bearer '+token},signal:controller.signal});
+        data=await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível abrir o chamado.');
+      }
       if (!controller.signal.aborted) {
         setSelected(data.report);
         setDetails('');
@@ -69,7 +76,7 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
     } catch (error) {
       if (!controller.signal.aborted) setProblem(error instanceof Error ? error.message : 'Chamado indisponível.');
     }
-  }, [mode, user]);
+  }, [mode,user,nativeRequest]);
 
   useEffect(() => {
     setSelected(null);
@@ -79,20 +86,22 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
   }, [openReport, reportIdFromUrl]);
 
   async function updateReport(update: ReportCommand) {
-    if (!user || !selected || updating) return;
+    if ((!user && !nativeRequest) || !selected || updating) return;
     setUpdating(true);
     setProblem('');
     const key = JSON.stringify([selected.id, update]);
     if (command.current?.key !== key) command.current = { key, id: crypto.randomUUID() };
     const requestId = command.current.id;
     try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/feedbacks/admin', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reportId: selected.id, ...update, requestId }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o chamado.');
+      const body=JSON.stringify({reportId:selected.id,...update,requestId});
+      let data;
+      if (nativeRequest) data=await nativeRequest<{report:Detail}>('/api/driver/feedbacks/admin',{method:'PATCH',body});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks/admin',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body});
+        data=await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o chamado.');
+      }
       if (command.current?.id === requestId) command.current = null;
       setSelected((current) => current?.id === selected.id ? data.report : current);
       setDetails('');
@@ -104,8 +113,8 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
     }
   }
 
-  if (authLoading) return <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>;
-  if (!user) return <div className="p-6"><Link className="underline" href="/login">Entre para acompanhar seus chamados</Link></div>;
+  if (authLoading && !nativeRequest) return <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>;
+  if (!user && !nativeRequest) return <div className="p-6"><Link className="underline" href="/login">Entre para acompanhar seus chamados</Link></div>;
 
   const manage = mode === 'admin' && selected?.capabilities.manage;
   const reopen = selected?.status === 'resolved' && selected.capabilities.reopen;

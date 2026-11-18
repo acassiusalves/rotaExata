@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/auth-context';
+import { useOptionalDriverRuntime } from '@/components/driver/driver-runtime';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,11 +20,14 @@ import { useToast } from '@/hooks/use-toast';
 
 export function FloatingFeedbackButton() {
   const { user } = useAuth();
-  return <FeedbackButton key={user?.uid ?? 'anonymous'} />;
+  const driver=useOptionalDriverRuntime();
+  return <FeedbackButton key={driver?.userId ?? user?.uid ?? 'anonymous'} />;
 }
 
 function FeedbackButton() {
   const { user, loading } = useAuth();
+  const driver=useOptionalDriverRuntime();
+  const nativeRequest=driver?.native ? driver.request:undefined;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(emptyReportDraft);
   const requestId = useRef<string | undefined>(undefined);
@@ -61,38 +65,30 @@ function FeedbackButton() {
   }, []);
 
   // Only render if user is loaded
-  if (loading || !user) {
+  if (!nativeRequest && (loading || !user)) {
     return null;
   }
 
   const submission = readSubmission(draft);
   const handleSubmit = async () => {
-    if (!user || !submission || inFlight.current) return;
+    if ((!user && !nativeRequest) || !submission || inFlight.current || driver?.readOnly) return;
     const controller = new AbortController();
     inFlight.current = controller;
     requestId.current ??= crypto.randomUUID();
     setIsSubmitting(true);
     try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/feedbacks', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...submission,
-          submissionId: requestId.current,
-          url: window.location.href,
-          userAgent: navigator.userAgent,
-          resolution: `${window.innerWidth}x${window.innerHeight}`,
-          logs: capturedLogs,
-        }),
+      const body=JSON.stringify({
+        ...submission,submissionId:requestId.current,url:window.location.href,userAgent:navigator.userAgent,
+        resolution:`${window.innerWidth}x${window.innerHeight}`,logs:capturedLogs,
       });
-
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || 'Falha ao enviar chamado.');
+      if (nativeRequest) await nativeRequest('/api/driver/feedbacks',{method:'POST',signal:controller.signal,body});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks',{method:'POST',signal:controller.signal,
+          headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body});
+        const data=await response.json().catch(()=>null);
+        if (!response.ok) throw new Error(data?.error || 'Falha ao enviar chamado.');
+      }
 
       if (controller.signal.aborted) return;
       window.dispatchEvent(new Event(REPORT_CREATED_EVENT));

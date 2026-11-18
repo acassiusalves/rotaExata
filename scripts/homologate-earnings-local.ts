@@ -23,6 +23,8 @@ async function observe(client: SupabaseClient,target: string,onChange: (payload:
 
 async function main() {
   assert.equal(earningsSupabaseUrl(),'http://127.0.0.1:61421');
+  assert.equal(process.env.NEXT_PUBLIC_ROTA_DRIVER_AUTH,'supabase');
+  assert.equal(process.env.ROTA_EARNINGS_SOURCE_PROJECT,'demo-rotaexata-driver');
   assert.equal(process.env.FIREBASE_PROJECT_ID,'demo-rotaexata-driver');
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
   assert.ok(!process.env.FIREBASE_PRIVATE_KEY && !process.env.GOOGLE_APPLICATION_CREDENTIALS,'Only emulator configuration is allowed');
