@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reconcileRotaEarnings = exports.retryRotaEarnings = exports.captureRotaEarnings = exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.updateDriverProfile = exports.resetUserPassword = exports.deleteUser = exports.inviteUser = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
+const params_1 = require("firebase-functions/params");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const earnings_source_adapter_1 = require("./earnings-source-adapter");
 const earnings_source_bridge_1 = require("./earnings-source-bridge");
@@ -50,6 +51,7 @@ const sync_user_1 = require("./sync-user");
 const auto_completion_1 = require("./auto-completion");
 const push_outcome_1 = require("./push-outcome");
 (0, app_1.initializeApp)();
+const earningsBridgeAccount = (0, params_1.defineString)("ROTA_EARNINGS_BRIDGE_EMAIL");
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
 const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
@@ -556,29 +558,40 @@ exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
     }
     try {
+        const token = req.rawRequest.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+        if (!token)
+            throw new https_1.HttpsError("unauthenticated", "Sessão ausente");
+        const verified = await (0, auth_1.getAuth)().verifyIdToken(token, true);
+        if (verified.uid !== auth.uid || verified.firebase.sign_in_provider === "custom") {
+            throw new https_1.HttpsError("permission-denied", "Sessão operacional inválida");
+        }
         const db = (0, firestore_2.getFirestore)();
         // Buscar role do usuário
         const userDoc = await db.collection("users").doc(auth.uid).get();
         const userData = userDoc.data();
         const userRole = userData?.role || "";
         // Verificar se o usuário tem permissão (admin ou socio)
-        if (userRole !== "admin" && userRole !== "socio") {
+        if ((userRole !== "admin" && userRole !== "socio") || userData?.active === false ||
+            userData?.disabled === true || userData?.mustChangePassword) {
             throw new https_1.HttpsError("permission-denied", "Apenas administradores e sócios podem marcar rotas como concluídas");
         }
         if (!routeId) {
             throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
         }
-        // Buscar a rota para verificar se pertence a um serviço
-        const routeDoc = await db.collection("routes").doc(routeId).get();
-        if (!routeDoc.exists) {
-            throw new https_1.HttpsError("not-found", "Rota não encontrada");
-        }
-        const routeData = routeDoc.data();
-        // Atualizar status da rota para 'completed'
-        await db.collection("routes").doc(routeId).update({
-            status: "completed",
-            completedAt: firestore_2.FieldValue.serverTimestamp(),
-            completedBy: auth.uid,
+        const routeRef = db.collection("routes").doc(routeId);
+        const evidenceRef = db.collection("rotaEarningRouteEvidence").doc(routeId);
+        const routeData = await db.runTransaction(async (transaction) => {
+            const [route, evidence] = await transaction.getAll(routeRef, evidenceRef);
+            if (!route.exists)
+                throw new https_1.HttpsError("not-found", "Rota não encontrada");
+            const data = route.data() ?? {};
+            if (data.status === "completed" || data.status === "completed_auto")
+                return data;
+            const closed = { status: "completed", completedAt: firestore_2.Timestamp.now(), completedBy: auth.uid };
+            const completion = (0, earnings_source_adapter_1.protectCompletion)({ ...data, ...closed, earningsSourceStart: evidence.data()?.start }, "admin-server-v1");
+            transaction.update(routeRef, closed);
+            transaction.set(evidenceRef, { completion: completion ?? null }, { merge: true });
+            return data;
         });
         // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
         if (routeData?.serviceId) {
@@ -587,6 +600,8 @@ exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         return { ok: true, message: `Rota marcada como concluída com sucesso.` };
     }
     catch (error) {
+        if (error instanceof https_1.HttpsError)
+            throw error;
         const msg = error.message || "Falha ao marcar a rota como concluída.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -1454,9 +1469,9 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
         throw new https_1.HttpsError("internal", `Erro: ${msg}`);
     }
 });
-exports.captureRotaEarnings = (0, firestore_1.onDocumentWritten)({ document: "routes/{routeId}", region: "southamerica-east1", retry: true }, async (event) => {
+exports.captureRotaEarnings = (0, firestore_1.onDocumentWritten)({ document: "routes/{routeId}", region: "southamerica-east1", retry: true, serviceAccount: earningsBridgeAccount }, async (event) => {
     await (0, earnings_source_bridge_1.captureFinancialRoute)(event.params.routeId, event.data?.before, event.data?.after, event.time);
 });
-exports.retryRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1 }, async () => { await (0, earnings_source_bridge_1.retryCapturedFinancialRoutes)(); });
-exports.reconcileRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1 }, async () => { await (0, earnings_source_bridge_1.reconcileFinancialRoutes)(); });
+exports.retryRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1, serviceAccount: earningsBridgeAccount }, async () => { await (0, earnings_source_bridge_1.retryCapturedFinancialRoutes)(); });
+exports.reconcileRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1, serviceAccount: earningsBridgeAccount }, async () => { await (0, earnings_source_bridge_1.reconcileFinancialRoutes)(); });
 //# sourceMappingURL=index.js.map

@@ -44,3 +44,14 @@ test('retains unknown UID, orphan and duplicated route for private reconciliatio
   assert.ok(result.rows[1].reviewReasons.includes('duplicate_route'));
   assert.ok(result.rows[2].reviewReasons.includes('orphan_route'));
 });
+
+test('manifest binds source document identities, eligibility inputs and revisions', () => {
+  const original = prepareLegacyBatch(snapshot);
+  const renamed = prepareLegacyBatch({...snapshot,payments:[{...payment,documentId:'payment-different'}]});
+  const orphan = prepareLegacyBatch({...snapshot,routes:[]});
+  const revised = prepareLegacyBatch({...snapshot,payments:[{...payment,sourceRevision:'001795000000.123456790'}]});
+  assert.notEqual(original.fingerprint,renamed.fingerprint);
+  assert.notEqual(original.fingerprint,orphan.fingerprint);
+  assert.notEqual(original.fingerprint,revised.fingerprint);
+  assert.equal(original.fingerprint,prepareLegacyBatch(snapshot).fingerprint);
+});

@@ -88,8 +88,8 @@ export function prepareLegacyBatch(input: unknown) {
       ? itemValues : totalCents !== null ? [{ key: 'historic:total', component: 'historical', cents: totalCents }] : [];
     return {
       documentId: row.documentId, sourceRevision: row.sourceRevision,
-      fingerprint: factsHash({ revision: row.sourceRevision, data: input }),
-      routeId, driverUid, status, totalCents, version, workedAt, plannedAt,
+      fingerprint: factsHash({ documentId:row.documentId, revision:row.sourceRevision, data:input }),
+      routeId, routeReference:safeText(input.routeCode,40), driverUid, status, totalCents, version, workedAt, plannedAt,
       paidAt: manualPaidAt, noOriginalRuleSnapshot: !input.ruleSnapshot, items, reviewReasons, original: input,
     };
   });
@@ -131,5 +131,10 @@ export function prepareLegacyBatch(input: unknown) {
       completedAutoWithoutDate: auto.filter(route => !timestampIso(route.data.completedAt)).length,
     },
   };
-  return { ...report, fingerprint: factsHash({ sourceProject: report.sourceProject, sourceCutoff: report.sourceCutoff, payments: rows.map(row => row.fingerprint), rule: source.legacyRule }) };
+  return { ...report, fingerprint: factsHash({
+    transformVersion:1, sourceProject:report.sourceProject, sourceCutoff:report.sourceCutoff,
+    payments:rows.map(({ documentId,sourceRevision,fingerprint,routeId,reviewReasons }) =>
+      ({ documentId,sourceRevision,fingerprint,routeId,reviewReasons })),
+    routeInventoryPresent:source.routes!==undefined, rule:source.legacyRule,
+  }) };
 }

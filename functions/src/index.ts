@@ -1,4 +1,5 @@
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
+import {defineString} from "firebase-functions/params";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import {protectCompletion} from "./earnings-source-adapter";
 import {captureFinancialRoute,reconcileFinancialRoutes,retryCapturedFinancialRoutes} from "./earnings-source-bridge";
@@ -7,7 +8,7 @@ import {onCall,HttpsError} from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
-import {getFirestore,FieldValue} from "firebase-admin/firestore";
+import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
 import {checkInviteConflict} from "./invite-conflict";
@@ -17,6 +18,7 @@ import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-
 
 initializeApp();
 
+const earningsBridgeAccount = defineString("ROTA_EARNINGS_BRIDGE_EMAIL");
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
 const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
@@ -692,6 +694,12 @@ export const completeRoute = onCall(
     }
 
     try {
+      const token = req.rawRequest.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+      if (!token) throw new HttpsError("unauthenticated","Sessão ausente");
+      const verified = await getAuth().verifyIdToken(token,true);
+      if (verified.uid!==auth.uid || verified.firebase.sign_in_provider==="custom") {
+        throw new HttpsError("permission-denied","Sessão operacional inválida");
+      }
       const db = getFirestore();
 
       // Buscar role do usuário
@@ -700,7 +708,8 @@ export const completeRoute = onCall(
       const userRole = userData?.role || "";
 
       // Verificar se o usuário tem permissão (admin ou socio)
-      if (userRole !== "admin" && userRole !== "socio") {
+      if ((userRole !== "admin" && userRole !== "socio") || userData?.active===false ||
+          userData?.disabled===true || userData?.mustChangePassword) {
         throw new HttpsError(
           "permission-denied",
           "Apenas administradores e sócios podem marcar rotas como concluídas"
@@ -711,20 +720,18 @@ export const completeRoute = onCall(
         throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
       }
 
-      // Buscar a rota para verificar se pertence a um serviço
-      const routeDoc = await db.collection("routes").doc(routeId).get();
-
-      if (!routeDoc.exists) {
-        throw new HttpsError("not-found", "Rota não encontrada");
-      }
-
-      const routeData = routeDoc.data();
-
-      // Atualizar status da rota para 'completed'
-      await db.collection("routes").doc(routeId).update({
-        status: "completed",
-        completedAt: FieldValue.serverTimestamp(),
-        completedBy: auth.uid,
+      const routeRef = db.collection("routes").doc(routeId);
+      const evidenceRef = db.collection("rotaEarningRouteEvidence").doc(routeId);
+      const routeData = await db.runTransaction(async (transaction) => {
+        const [route, evidence] = await transaction.getAll(routeRef,evidenceRef);
+        if (!route.exists) throw new HttpsError("not-found","Rota não encontrada");
+        const data = route.data() ?? {};
+        if (data.status==="completed" || data.status==="completed_auto") return data;
+        const closed = {status:"completed", completedAt:Timestamp.now(), completedBy:auth.uid};
+        const completion = protectCompletion({...data,...closed,earningsSourceStart:evidence.data()?.start},"admin-server-v1");
+        transaction.update(routeRef,closed);
+        transaction.set(evidenceRef,{completion:completion ?? null},{merge:true});
+        return data;
       });
 
       // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
@@ -734,6 +741,7 @@ export const completeRoute = onCall(
 
       return { ok: true, message: `Rota marcada como concluída com sucesso.` };
     } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao marcar a rota como concluída.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -1775,18 +1783,18 @@ export const forceCompleteService = onCall(
 );
 
 export const captureRotaEarnings = onDocumentWritten(
-  {document: "routes/{routeId}", region: "southamerica-east1", retry: true},
+  {document: "routes/{routeId}", region: "southamerica-east1", retry: true, serviceAccount: earningsBridgeAccount},
   async (event) => {
     await captureFinancialRoute(event.params.routeId,event.data?.before,event.data?.after,event.time);
   },
 );
 
 export const retryRotaEarnings = onSchedule(
-  {schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1},
+  {schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1, serviceAccount: earningsBridgeAccount},
   async () => { await retryCapturedFinancialRoutes(); },
 );
 
 export const reconcileRotaEarnings = onSchedule(
-  {schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1},
+  {schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1, serviceAccount: earningsBridgeAccount},
   async () => { await reconcileFinancialRoutes(); },
 );

@@ -82,15 +82,20 @@ function baseFacts(data: RecordValue) {
   const originLat = number(origin.lat, -90, 90);
   const originLng = number(origin.lng, -180, 180);
   const plannedInstant = timestampIso(data.plannedDate);
+  const meters = number(data.distanceMeters, 0, 10000000);
+  const hasComputedPath = typeof data.encodedPolyline === "string" && data.encodedPolyline.length > 0 &&
+    typeof data.duration === "string" && data.duration !== "0s";
+  const routeCode = string(data.code,40);
   return {
     driverUid: string(data.driverId, 128),
+    routeCode: routeCode && /^[a-z0-9][a-z0-9_-]*$/i.test(routeCode) ? routeCode : null,
     status: string(data.status, 40),
     workedAt: timestampIso(data.completedAt),
     plannedAt: plannedInstant ? localDay.format(new Date(plannedInstant)) :
       typeof data.plannedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.plannedDate) ? data.plannedDate : null,
     forced: Boolean(data.forceCompletedBy),
     origin: originLat !== null && originLng !== null ? {lat: originLat, lng: originLng} : null,
-    distanceMeters: number(data.distanceMeters, 0, 10000000),
+    distanceMeters: meters === 0 && !hasComputedPath ? null : meters,
     stops: (Array.isArray(data.stops) ? data.stops : []).slice(0, 1001).map(projectedStop),
   };
 }
@@ -129,16 +134,7 @@ export function routeFacts(data: RecordValue) {
 }
 
 export function sourceSnapshot(data: RecordValue, proof: RecordValue = {}) {
-  const candidate = {...data, earningsSourceCompletion: proof.completion};
-  if (routeFacts(candidate).evidence || !["completed","completed_auto"].includes(String(data.status))) return candidate;
-  // A privileged operational closer may mark the route done without marking the
-  // work time. A full set of independently confirmed stops can prove that time.
-  const stops = baseFacts(data).stops;
-  if (!stops.length || stops.some((stop) => stop.status === "open" || !stop.completedAt)) return candidate;
-  const workedAt = stops.map((stop) => stop.completedAt!).sort().at(-1);
-  const fromStops = {...candidate, completedAt: workedAt, earningsSourceStart: proof.start};
-  const completion = protectCompletion(fromStops,data.status === "completed_auto" ? "auto-server-v1" : "admin-server-v1");
-  return completion ? {...fromStops, earningsSourceCompletion: completion} : candidate;
+  return {...data, earningsSourceCompletion: proof.completion};
 }
 
 export function makeEnvelope(

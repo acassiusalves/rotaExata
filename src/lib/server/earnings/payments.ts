@@ -16,6 +16,7 @@ const commandSchema = z.discriminatedUnion('kind',[
     method: z.enum(['pix','bank_transfer','cash','other']), reference: z.string().trim().min(1).max(200), paidAt: z.string().datetime().nullish(),
   }).strict() }).strict(),
   z.object({ ...commandHeader, kind: z.literal('cancel'), payload: z.object({ reason }).strict() }).strict(),
+  z.object({ ...commandHeader, kind: z.literal('resolve_review'), payload: z.object({ reason }).strict() }).strict(),
   z.object({ ...commandHeader, kind: z.literal('adjust_total'), payload: z.object({ reason,valueCents }).strict() }).strict(),
   z.object({ ...commandHeader, kind: z.literal('adjust_stop'), payload: z.object({ reason,valueCents,stopId: z.string().min(1).max(150) }).strict() }).strict(),
 ]);

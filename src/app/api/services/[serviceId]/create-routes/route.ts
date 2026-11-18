@@ -1,3 +1,5 @@
+import { authorizeOperationalWriter } from '@/lib/firebase/operational-writer-auth';
+import { EarningsError } from '@/lib/server/earnings/transport';
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -16,6 +18,7 @@ export async function POST(
   { params }: { params: Promise<{ serviceId: string }> }
 ) {
   try {
+    const userId = await authorizeOperationalWriter(request);
     const { serviceId } = await params;
 
     if (!adminDb) {
@@ -26,19 +29,12 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { routes, userId } = body;
+    const { routes } = body;
 
     // Validação de entrada
     if (!routes || !Array.isArray(routes) || routes.length === 0) {
       return NextResponse.json(
         { error: 'routes é obrigatório e deve ser um array não vazio' },
-        { status: 400 }
-      );
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'userId é obrigatório' },
         { status: 400 }
       );
     }
@@ -246,6 +242,7 @@ export async function POST(
       serviceStatus: allRoutesDispatched ? 'dispatched' : 'organizing',
     });
   } catch (error) {
+    if (error instanceof EarningsError) return NextResponse.json({error:error.code},{status:error.status});
     if (error instanceof InvalidDispatchDriverError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

@@ -6,11 +6,11 @@ function normalizeFingerprintValue(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
 
   const timestampLike = value as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
-  if (typeof timestampLike.toMillis === 'function') {
-    return { timestampMillis: timestampLike.toMillis() };
-  }
   if (typeof timestampLike.seconds === 'number' && typeof timestampLike.nanoseconds === 'number') {
     return { seconds: timestampLike.seconds, nanoseconds: timestampLike.nanoseconds };
+  }
+  if (typeof timestampLike.toMillis === 'function') {
+    return { timestampMillis: timestampLike.toMillis() };
   }
 
   return Object.fromEntries(

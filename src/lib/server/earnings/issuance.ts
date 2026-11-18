@@ -9,6 +9,7 @@ const evidence = z.enum(['driver-server-v1', 'auto-server-v1', 'admin-server-v1'
 const point = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).strict();
 const factsSchema = z.object({
   driverUid: boundedString(128).nullable(),
+  routeCode: boundedString(40).regex(/^[a-z0-9][a-z0-9_-]*$/i).nullable(),
   status: boundedString(40).nullable(),
   workedAt: z.string().datetime().nullable(),
   plannedAt: z.string().date().nullable(),

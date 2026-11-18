@@ -127,7 +127,7 @@ async function main() {
     assert.equal(invisible.data?.length,0);
     const deadline=Date.now()+10000;
     while (received<3 && Date.now()<deadline) await new Promise(resolve => setTimeout(resolve,150));
-    assert.ok(received>=3,'Own Realtime INSERT and UPDATE events');
+    assert.ok(received>=3,`Own Realtime INSERT and UPDATE events (own: ${received}, other: ${denied})`);
     assert.equal(denied,0,'Other driver receipts invisible in Realtime');
     console.log(JSON.stringify({ start:true,confirm:true,finish:true,proof:true,exactCents:result.total_cents,statuses:['pending','approved','paid'],
       pendingOnce:true,otherDriverRestRows:invisible.data?.length,ownRealtimeEvents:received,otherRealtimeEvents:denied }));

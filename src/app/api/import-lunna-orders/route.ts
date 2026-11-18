@@ -1,3 +1,5 @@
+import { authorizeOperationalWriter } from '@/lib/firebase/operational-writer-auth';
+import { EarningsError } from '@/lib/server/earnings/transport';
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore';
@@ -101,29 +103,10 @@ function generateRouteCodeForService(serviceCode: string, routeIndex: number): s
   return `${serviceCode}-${letter}`;
 }
 
-// Validar permissões do usuário
-async function validateUserPermissions(userId: string): Promise<boolean> {
-  try {
-    if (!adminDb) {
-      return false;
-    }
-
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
-      return false;
-    }
-
-    const userData = userDoc.data();
-    const allowedRoles = ['admin', 'gestor', 'socio'];
-    return allowedRoles.includes(userData?.role);
-  } catch (error) {
-    console.error('Erro ao validar permissões:', error);
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
+    const userId = await authorizeOperationalWriter(request);
+
     // Rate limiting (mais restritivo para importação)
     const clientIP = getClientIP(request);
     const rateLimitResult = rateLimit(clientIP, rateLimitConfigs.write);
@@ -143,29 +126,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { orderIds, userId, existingRouteId, existingServiceId } = body;
+    const { orderIds, existingRouteId, existingServiceId } = body;
 
     // Validação de entrada
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
       return NextResponse.json(
         { error: 'orderIds é obrigatório e deve ser um array não vazio' },
         { status: 400, headers: corsHeaders }
-      );
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'userId é obrigatório' },
-        { status: 400, headers: corsHeaders }
-      );
-    }
-
-    // Validar permissões do usuário
-    const hasPermission = await validateUserPermissions(userId);
-    if (!hasPermission) {
-      return NextResponse.json(
-        { error: 'Usuário não tem permissão para importar pedidos' },
-        { status: 403, headers: corsHeaders }
       );
     }
 
@@ -639,6 +606,7 @@ export async function POST(request: NextRequest) {
       },
     }, { headers: corsHeaders });
   } catch (error) {
+    if (error instanceof EarningsError) return NextResponse.json({error:error.code},{status:error.status,headers:corsHeaders});
     console.error('Erro ao importar pedidos:', error);
     return NextResponse.json(
       {

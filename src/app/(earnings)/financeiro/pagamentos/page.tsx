@@ -28,12 +28,12 @@ type Detail = {
   historical: boolean; ruleVersion: number | null; ruleEffectiveAt: string | null; legacyDocumentId: string | null;
   reviewReasons: string[];
   items: { key: string; component: string; stopId: string | null; cents: number; effectiveCents: number }[];
-  history: { id: string; kind: Command; at: string; payload: { reason?: string; reference?: string; method?: string } }[];
+  history: { id: string; kind: Command; at: string; payload: { reason?: string; reference?: string; method?: string }; result?: { previousTotalCents:string; totalCents:string; deltaCents:number } }[];
 };
-type Command = 'approve' | 'pay' | 'cancel' | 'adjust_total' | 'adjust_stop';
+type Command = 'approve' | 'pay' | 'cancel' | 'adjust_total' | 'adjust_stop' | 'resolve_review';
 const commands: Record<Command,string> = {
   approve: 'Aprovar', pay: 'Registrar baixa', cancel: 'Cancelar lançamento',
-  adjust_total: 'Ajustar total', adjust_stop: 'Ajustar parada',
+  adjust_total: 'Ajustar total', adjust_stop: 'Ajustar parada', resolve_review:'Concluir conferência',
 };
 const reasonLabels: Record<string,string> = {
   driver_uid_missing: 'Identificador histórico do motorista ausente',
@@ -44,6 +44,7 @@ const reasonLabels: Record<string,string> = {
   forced_closure: 'Encerramento forçado',
   source_deleted: 'Rota excluída',
   route_already_accounted: 'Rota com lançamento anterior',
+  source_revision_requires_review: 'A origem da rota mudou após o lançamento',
   revision_conflict: 'Revisões da rota divergentes',
   no_rule_at_work_time: 'Sem regra vigente na data do trabalho',
   partial_work: 'Rota com paradas em aberto',
@@ -55,7 +56,8 @@ function PaymentDetails({ payment,onCommit }: { payment: Detail; onCommit: () =>
   const [error,setError] = useState('');
   const [busy,setBusy] = useState(false);
   const requestKey = useRef<{ fingerprint: string; id: string }>();
-  const allowed: Command[] = payment.reviewReasons.length ? [] : payment.status === 'pending'
+  const canResolve = payment.reviewReasons.includes('source_revision_requires_review') && ['pending','approved'].includes(payment.status);
+  const allowed: Command[] = payment.reviewReasons.length ? (canResolve ? ['resolve_review'] : []) : payment.status === 'pending'
     ? ['approve','adjust_total',...(payment.items.some(item => item.stopId) ? ['adjust_stop' as const] : []),'cancel']
     : payment.status === 'approved' ? ['pay','cancel'] : [];
   function choose(action: Command) {
@@ -71,7 +73,7 @@ function PaymentDetails({ payment,onCommit }: { payment: Detail; onCommit: () =>
     if ((kind === 'adjust_total' || kind === 'adjust_stop') && cents === undefined) {
       setError('Informe um valor em reais com até duas casas decimais.'); return;
     }
-    const payload = kind === 'approve' ? {} : kind === 'cancel' ? { reason } : kind === 'pay'
+    const payload = kind === 'approve' ? {} : (kind === 'cancel' || kind === 'resolve_review') ? { reason } : kind === 'pay'
       ? { method: form.get('method'), reference: String(form.get('reference')).trim(), paidAt: at ? new Date(at).toISOString() : null }
       : { reason, valueCents: cents, ...(kind === 'adjust_stop' ? { stopId: form.get('stopId') } : {}) };
     const fingerprint = JSON.stringify({ kind, revision: payment.revision,
@@ -115,12 +117,15 @@ function PaymentDetails({ payment,onCommit }: { payment: Detail; onCommit: () =>
       <ul className="mt-2 space-y-2 text-sm">{payment.history.map(item => <li key={item.id}>
         {commands[item.kind]} · {displayWorkedAt(item.at)}{item.payload.reason ? ' · ' + item.payload.reason : ''}
         {item.payload.reference ? ' · ' + item.payload.reference : ''}
+        {item.result?.deltaCents ? ' · '+displayCents(item.result.previousTotalCents)+' → '+displayCents(item.result.totalCents)
+          +' ('+displayCents(item.result.deltaCents)+')' : ''}
       </li>)}</ul>
     </details>}
     {!kind && <div className="flex flex-wrap gap-2">{allowed.map(action =>
       <Button key={action} type="button" size="sm" variant={action === 'approve' || action === 'pay' ? 'default' : 'outline'} onClick={() => choose(action)}>{commands[action]}</Button>)}</div>}
     {kind && <form key={kind} onSubmit={submit} className="space-y-3 rounded-md border p-3 text-sm">
       <h3 className="font-semibold">{commands[kind]}</h3>
+      {kind === 'resolve_review' && <p>Confirme o valor lançado após verificar a divergência da rota.</p>}
       {kind === 'approve' && <p>O valor atual será aprovado. A baixa é registrada em outra etapa.</p>}
       {kind === 'adjust_stop' && <div className="space-y-1"><Label htmlFor="command-stop">Parada</Label>
         <select name="stopId" id="command-stop" className="w-full rounded-md border bg-background p-2">
@@ -137,7 +142,7 @@ function PaymentDetails({ payment,onCommit }: { payment: Detail; onCommit: () =>
         <div className="space-y-1"><Label htmlFor="command-at">Data e hora da baixa</Label><Input type="datetime-local" id="command-at" name="paidAt" />
           <p className="text-xs text-muted-foreground">Horário deste dispositivo. Deixe em branco para registrar agora.</p></div>
       </>}
-      {(kind === 'cancel' || kind === 'adjust_total' || kind === 'adjust_stop') && <div className="space-y-1">
+      {(kind === 'cancel' || kind === 'adjust_total' || kind === 'adjust_stop' || kind === 'resolve_review') && <div className="space-y-1">
         <Label htmlFor="command-reason">Motivo</Label><Textarea name="reason" id="command-reason" maxLength={1000} required /></div>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
       <div className="flex gap-2">

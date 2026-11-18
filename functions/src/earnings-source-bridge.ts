@@ -86,6 +86,7 @@ export async function retryCapturedFinancialRoutes() {
   if (!endpoint || !endpoint.startsWith("https://")) throw new Error("Earnings endpoint unavailable");
   try {
     const client = await new GoogleAuth().getIdTokenClient(endpoint);
+    await client.request({url: endpoint, method: "GET", timeout: 10000, maxRedirects: 0});
     await client.request({url: endpoint, method: "PUT", timeout: 45000, maxRedirects: 0});
   } catch {
     throw new Error("Earnings worker unavailable");

@@ -7,6 +7,8 @@ import { ArrowLeft, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EarningsMfa } from './earnings-mfa';
+import { requiredEarningsFactors, type EarningsFactor } from '@/lib/earnings/mfa';
 import { earningsBrowserClient } from '@/lib/earnings/client';
 
 export class EarningsRequestError extends Error {
@@ -77,6 +79,18 @@ export function EarningsShell({ children, driver = false }: { children: ReactNod
   const [client,setClient] = useState<SupabaseClient>();
   const [session,setSession] = useState<Session | null>(null);
   const [loading,setLoading] = useState(true);
+  const [assurance,setAssurance] = useState<{token:string; factors:EarningsFactor[]; error?:boolean}>();
+  const token = session?.access_token;
+  useEffect(() => {
+    if (!client || !token) return;
+    let current = true;
+    requiredEarningsFactors(client.auth.mfa).then(factors => {
+      if (current) setAssurance({token,factors});
+    }).catch(() => {
+      if (current) setAssurance({token,factors:[],error:true});
+    });
+    return () => {current=false;};
+  },[client,token]);
   useEffect(() => {
     const browser = earningsBrowserClient();
     if (!browser) { setLoading(false); return; }
@@ -87,6 +101,11 @@ export function EarningsShell({ children, driver = false }: { children: ReactNod
     return () => data.subscription.unsubscribe();
   }, []);
   const userId = session?.user.id;
+  async function leave() {
+    setSession(null);
+    setAssurance(undefined);
+    await client?.auth.signOut({scope:'local'});
+  }
   const request = useCallback(async <T,>(path: string,init?: RequestInit): Promise<T> => {
     const auth = await client?.auth.getSession();
     const active = auth?.data.session;
@@ -104,15 +123,18 @@ export function EarningsShell({ children, driver = false }: { children: ReactNod
     <header className="sticky top-0 z-10 border-b bg-background">
       <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center justify-between gap-2 px-4">
         <Link href={driver ? '/my-routes' : '/dashboard'} className="inline-flex items-center gap-2 text-sm font-medium"><ArrowLeft aria-hidden="true" className="size-4" />{driver ? 'Minhas rotas' : 'Painel RotaExata'}</Link>
-        {userId && <Button variant="ghost" size="sm" onClick={async () => {
-          setSession(null);
-          await client?.auth.signOut({ scope: 'local' });
-        }}><LogOut aria-hidden="true" className="mr-2 size-4" />Sair do financeiro</Button>}
+        {userId && <Button variant="ghost" size="sm" onClick={() => void leave()}><LogOut aria-hidden="true" className="mr-2 size-4" />Sair do financeiro</Button>}
       </div>
     </header>
     <main className="mx-auto max-w-6xl px-4 py-6">
       {loading ? <p role="status">Carregando sessão…</p> : !client ? <p role="status">Financeiro indisponível neste ambiente.</p> :
         !userId ? <SignIn client={client} /> :
+        !assurance || assurance.token!==token ? <p role="status">Verificando sessão…</p> :
+        assurance.error ? <div role="alert" className="space-y-2 text-sm">
+          <p>A verificação da sessão está indisponível.</p>
+          <Button variant="outline" onClick={() => void leave()}>Entrar novamente</Button>
+        </div> :
+        assurance.factors.length ? <EarningsMfa key={token} client={client} factors={assurance.factors} onCancel={() => void leave()} /> :
           <Context.Provider key={userId} value={{ client,userId,request }}>
             {!driver && <nav aria-label="Financeiro" className="mb-5 flex gap-2 border-b pb-3">
               <Button asChild variant="ghost" size="sm"><Link href="/financeiro/pagamentos">Pagamentos</Link></Button>
