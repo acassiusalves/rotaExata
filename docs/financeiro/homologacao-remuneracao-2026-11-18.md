@@ -33,3 +33,15 @@ O escopo tem zero membros, zero lançamentos, zero linhas de extrato e zero even
 Foram executados 80 testes da aplicação, 19 das Cloud Functions, 14 das Firestore Rules e cinco suítes SQL. A aplicação compilou no modo Vercel com variáveis sintéticas. O typecheck global retornou 84 diagnósticos que já existiam na base. O ensaio SQL usou a estrutura Auth efetiva do GoTrue, o contrato mínimo do vínculo CRM e a migration do diretório de plataforma. O histórico completo do owner tem uma versão CRM duplicada e exige tratamento em sua frente.
 
 A autoria em Cloud Functions com a conta Google dedicada exige verificação no ambiente de destino antes da captura. A interface web em viewport móvel e o ensaio da API operacional são evidências locais. O corte de Auth da PWA inteira exige validar uploads, presença, notificações, perfil, chamados e a jornada operacional com uma única sessão canônica. O ensaio físico depende de aparelho Android autorizado.
+
+## Fechamento da revisão e da interface
+
+Uma revisão final com GPT Astra identificou onze pontos críticos ou importantes. O GPT Sol corrigiu a autorização dos escritores de rotas, a separação entre staging e promoção, a integridade do manifesto, a distância não calculada, a data do encerramento administrativo, a retenção do pagamento após divergência da fonte, a referência e a apuração no extrato, o MFA, o ajuste global, a precisão dos recibos e o preflight OIDC. As regressões passaram após a correção. A identidade Google efetiva ainda depende do ensaio publicado.
+
+O navegador local confirmou a rota sintética `FILA-LOCAL` como **Em apuração** para o titular. A segunda conta recebeu um extrato vazio, sem essa rota. O cancelamento do MFA foi conferido após a resposta 204 de logout: token removido e recarregamento na tela de entrada. Os ensaios foram feitos no Chrome com viewport móvel e contas sintéticas.
+
+Dois achados menores foram adiados: a atualização automática volta à primeira página da paginação; o contador no singular ainda usa o plural de “lançamentos”.
+
+O verificador de segurança do Supabase confirmou as doze tabelas privadas com RLS e sem acesso direto. Seus avisos informativos de RLS sem política são intencionais: o acesso ocorre pelas RPCs de servidor. As quatorze RPCs públicas do módulo negam EXECUTE a anon e authenticated e fixam search_path. O alerta de proteção contra senhas vazadas já existia antes desta migração e pertence à configuração geral de Auth. [Referência dos avisos](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
+
+A entrega está preservada nas branches locais `codex/remuneracao-entregadores-supabase` (RotaExata) e `codex/remuneracao-entregadores-supabase-db` (Luna). O código da aplicação e os gatilhos não foram publicados; o banco compartilhado recebeu somente as quatro migrations e o staging privado descritos neste relatório. A conclusão integral da etapa 8 aguarda os critérios de corte registrados no runbook.
