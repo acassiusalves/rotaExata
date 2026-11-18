@@ -10,7 +10,16 @@ O PostgreSQL mantém a única razão financeira após o corte. A contribuição 
 
 ## Componentes e configuração
 
-As migrations `20261211120300` a `20261211120600` são versionadas no repositório Luna. A sequência depende de `20261118132716_platform_directory.sql`. O histórico do owner contém versões datadas no futuro e uma duplicata anterior. Confira a sequência aplicada antes de executar as quatro migrations. Preserve a ordem e os arquivos de outros módulos.
+As migrations são versionadas no repositório Luna. A sequência depende de `20261118132716_platform_directory.sql`. As quatro migrations foram aplicadas separadamente ao projeto compartilhado Sistema Lunna, ref `rjmrndqmzgcxpclnqvgv`. As versões abaixo são as que o Supabase registrou no histórico. A troca de nome dos arquivos preservou os bytes aplicados.
+
+| Etapa | Versão registrada | SHA-256 do SQL |
+|---|---|---|
+| Esquema | `20261118194002` | `ab5485a3d6b68f2cf33d7e05163c0c4a4d95c9f620fbbab86612d329b43dc46a` |
+| Acesso | `20261118194019` | `c9535996c89a7a4511d79c4ba26dc362224ac9ce4d08c2183a7f9bbdaa2120dd` |
+| Emissão | `20261118194032` | `aa87fad043228fe311b233ac27caccd85a1e58071b256d8e204d993b4b9d58c1` |
+| Comandos e extrato | `20261118194050` | `d06211704160986d5ed176e62f1bb121feda6d119e2eee7b75ead8c518c51612` |
+
+O histórico do owner já incluía versões datadas no futuro e uma duplicata anterior de CRM. A ordem efetiva da nova cadeia segue a tabela acima. Preserve os arquivos e registros de outros módulos.
 
 A configuração pública da interface usa `NEXT_PUBLIC_ROTA_EARNINGS_ENABLED`, `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. O runtime do Next.js usa `SUPABASE_EARNINGS_SECRET_KEY` e `ROTA_EARNINGS_SCOPE_ID`. O emissor usa um service account dedicado e token Google com audience igual a `ROTA_EARNINGS_EVENTS_URL`. Configure no receptor `ROTA_EARNINGS_SOURCE_PROJECT`, `ROTA_EARNINGS_BRIDGE_EMAIL` e `ROTA_EARNINGS_BRIDGE_SUBJECT`. A função Firebase requer o mesmo projeto e URL, `ROTA_EARNINGS_BRIDGE_ENABLED` e o watermark `ROTA_EARNINGS_CAPTURE_FROM`.
 
