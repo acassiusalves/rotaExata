@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { db, storage } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, Timestamp, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import type { PlaceValue, RouteInfo, Payment, RouteChangeNotification } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -48,8 +48,6 @@ import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
 import { logPointCompleted, logPointFailed } from '@/lib/firebase/activity-log';
 import { useAuth } from '@/hooks/use-auth';
 import {
-  acknowledgeRouteChangesAtomically,
-  confirmRouteStopAtomically,
   getRouteChangeNotificationFingerprint,
   RouteStopNotFoundError,
 } from '@/lib/firebase/route-stop-mutations';
@@ -92,6 +90,19 @@ export default function RouteDetailsPage() {
   const params = useParams();
   const routeId = params?.id as string;
   const { user } = useAuth();
+
+  async function routeAction<Result = unknown>(action: string, details: Record<string, unknown> = {}): Promise<Result> {
+    if (!user || isImpersonationSessionActive()) throw new Error('Ação disponível na conta do entregador.');
+    const response = await fetch('/api/driver/route-actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await user.getIdToken() },
+      body: JSON.stringify({ action, routeId, ...details }),
+    });
+    const result = await response.json();
+    if (result.code === 'route_stop_changed') throw new RouteStopNotFoundError();
+    if (!response.ok) throw new Error('Não foi possível atualizar a rota.');
+    return result as Result;
+  }
   const [route, setRoute] = React.useState<RouteDocument | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selectedStop, setSelectedStop] = React.useState<PlaceValue | null>(null);
@@ -195,10 +206,7 @@ export default function RouteDetailsPage() {
 
     setIsAcknowledging(true);
     try {
-      await acknowledgeRouteChangesAtomically(
-        routeId,
-        getRouteChangeNotificationFingerprint(notification),
-      );
+      await routeAction('acknowledge', { fingerprint: getRouteChangeNotificationFingerprint(notification) });
 
       toast({
         title: 'Alterações confirmadas',
@@ -293,12 +301,7 @@ export default function RouteDetailsPage() {
     if (!route) return;
 
     try {
-      const routeRef = doc(db, 'routes', routeId);
-      await updateDoc(routeRef, {
-        status: 'in_progress',
-        startedAt: Timestamp.now(),
-        currentStopIndex: 0,
-      });
+      await routeAction('start');
 
       startTracking();
 
@@ -343,13 +346,8 @@ export default function RouteDetailsPage() {
     }
 
     try {
+      await routeAction('finish');
       stopTracking();
-
-      const routeRef = doc(db, 'routes', routeId);
-      await updateDoc(routeRef, {
-        status: 'completed',
-        completedAt: Timestamp.now(),
-      });
 
       toast({
         title: 'Rota finalizada!',
@@ -444,7 +442,6 @@ export default function RouteDetailsPage() {
 
       const deliveryPatch: Record<string, unknown> = {
         deliveryStatus: data.status,
-        completedAt: Timestamp.now(),
         notes: data.notes || null,
         failureReason: data.status === 'failed' ? data.failureReason || null : null,
         wentToLocation: data.status === 'failed' ? Boolean(data.wentToLocation) : null,
@@ -454,11 +451,9 @@ export default function RouteDetailsPage() {
         attemptPhotoUrl: resolvedAttemptPhotoUrl,
       };
 
-      const result = await confirmRouteStopAtomically({
-        routeId,
-        driverId: user.uid,
-        targetStop: selectedStop,
-        patch: deliveryPatch as Partial<PlaceValue>,
+      const result = await routeAction<{ updatedStop: PlaceValue; stopIndex: number; wasPreviouslyFinalized: boolean }>('confirm', {
+        targetStop: { id: selectedStop.id, pointCode: selectedStop.pointCode, placeId: selectedStop.placeId, orderNumber: selectedStop.orderNumber },
+        patch: deliveryPatch,
       });
 
       // Registrar no activity log
@@ -518,7 +513,7 @@ export default function RouteDetailsPage() {
       if (result.wasPreviouslyFinalized) {
         try {
           const driverName = route.driverInfo?.name || 'Motorista';
-          const committedStopIndex = result.stops.indexOf(updatedStop);
+          const committedStopIndex = result.stopIndex;
           const stopName = updatedStop.customerName || updatedStop.address || 'Ponto confirmado';
 
           await addDoc(collection(db, 'notifications'), {

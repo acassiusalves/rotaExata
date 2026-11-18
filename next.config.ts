@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import type {NextConfig} from 'next';
 import withPWA from 'next-pwa';
+import defaultRuntimeCaching from 'next-pwa/cache';
 
 function getGitCommitSha() {
   try {
@@ -114,6 +115,11 @@ const pwaConfig = withPWA({
   },
   buildExcludes: [/middleware-manifest\.json$/],
   publicExcludes: ['!firebase-messaging-sw.js'],
+  runtimeCaching: [
+    { urlPattern: /\/api\/(?:financeiro|driver\/(?:earnings|routes|route-actions))(?:\/|\?|$)/, handler: 'NetworkOnly' },
+    { urlPattern: /\/(?:auth|rest)\/v1\//, handler: 'NetworkOnly' },
+    ...defaultRuntimeCaching,
+  ],
 });
 
 export default pwaConfig(nextConfig);

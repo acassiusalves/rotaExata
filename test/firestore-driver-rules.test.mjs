@@ -104,3 +104,14 @@ test('ativação explícita atualiza token e versão sem apagar preferências ex
   assert.equal(prefs.darkMode, true);
   await assertFails(owner.doc('users/a/settings/preferences').update({ pushRevision: -1 }));
 });
+
+test('motorista atualiza presença sem alterar papel, atribuição ou fatos tarifáveis', async () => {
+  await assertSucceeds(db('a').doc('users/a').update({ status: 'online' }));
+  await assertFails(db('a').doc('users/a').update({ role: 'admin' }));
+  await assertSucceeds(db('a').doc('routes/route-a').update({ currentLocation: { lat: 0, lng: 0 } }));
+  await assertFails(db('a').doc('routes/route-a').update({ driverId: 'b' }));
+  await assertFails(db('a').doc('routes/route-a').update({ status: 'completed' }));
+  await assertFails(db('a').doc('routes/route-a').update({ stops: [{ id: 'fake' }] }));
+  await assertFails(db('admin').doc('routes/route-a').update({ earningsSourceStart: { driverUid: 'a' } }));
+  await assertFails(db('admin').doc('rotaEarningOutbox/event-a').set({ ready: true }));
+});

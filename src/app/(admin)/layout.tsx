@@ -18,7 +18,7 @@ export default function AdminLayout({
     if (!loading) {
       if (!user) {
         router.push('/login');
-      } else if (userRole && !['admin', 'socio', 'gestor'].includes(userRole)) {
+      } else if (!userRole || !['admin', 'socio', 'gestor'].includes(userRole)) {
         // Se não é admin/socio/gestor, redireciona para área do motorista
         router.push('/my-routes');
       }
@@ -34,7 +34,7 @@ export default function AdminLayout({
   }
 
   // Renderiza nulo enquanto redireciona para evitar piscar o layout errado
-  if (!user || (userRole && !['admin', 'socio', 'gestor'].includes(userRole))) {
+  if (!user || (!userRole || !['admin', 'socio', 'gestor'].includes(userRole))) {
     return (
         <div className="flex h-screen w-full items-center justify-center bg-background">
           <Loader2 className="h-8 w-8 animate-spin" />

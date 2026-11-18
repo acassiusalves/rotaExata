@@ -3,7 +3,6 @@ import type { Metadata } from 'next';
 import './globals.css';
 // import { Toaster } from '@/components/ui/toaster'; // Removido daqui
 import { AuthProviderWrapper } from '@/components/providers/auth-provider-wrapper';
-import { FloatingFeedbackButton } from '@/components/FloatingFeedbackButton';
 import React from 'react';
 import { ServiceWorkerRegistration } from '@/components/pwa/service-worker-registration';
 
@@ -47,7 +46,6 @@ export default function RootLayout({
       <body className="font-sans antialiased transition-colors duration-300">
         <AuthProviderWrapper>
           {children}
-          <FloatingFeedbackButton />
         </AuthProviderWrapper>
         {/* <Toaster /> Foi movido para o AuthProvider */}
         <ServiceWorkerRegistration />

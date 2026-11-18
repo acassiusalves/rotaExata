@@ -1,3 +1,7 @@
+import {onDocumentWritten} from "firebase-functions/v2/firestore";
+import {onSchedule} from "firebase-functions/v2/scheduler";
+import {protectCompletion} from "./earnings-source-adapter";
+import {captureFinancialRoute,reconcileFinancialRoutes,retryCapturedFinancialRoutes} from "./earnings-source-bridge";
 
 import {onCall,HttpsError} from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
@@ -1331,7 +1335,9 @@ export const autoCompleteRoutes = functionsV1
       // Atualizar status em batch
       const batch = db.batch();
       const affectedServiceIds = new Set<string>();
-      staleRoutes.docs.forEach((routeDoc) => {
+      const proofs = await db.getAll(...staleRoutes.docs.map((routeDoc) =>
+        db.collection("rotaEarningRouteEvidence").doc(routeDoc.id)));
+      staleRoutes.docs.forEach((routeDoc, index) => {
         const routeData = routeDoc.data();
 
         const update: Record<string, unknown> = {
@@ -1348,6 +1354,9 @@ export const autoCompleteRoutes = functionsV1
         const desfecho = resolveAutoCompletion(routeData.stops ?? []);
         if (desfecho.worked) {
           update.completedAt = desfecho.finishedAt;
+          const start = proofs[index].data()?.start;
+          const completion = protectCompletion({...routeData, ...update, earningsSourceStart: start}, "auto-server-v1");
+          if (completion) batch.set(proofs[index].ref, {completion}, {merge: true});
         }
 
         batch.update(routeDoc.ref, update);
@@ -1763,4 +1772,21 @@ export const forceCompleteService = onCall(
       throw new HttpsError("internal", `Erro: ${msg}`);
     }
   }
+);
+
+export const captureRotaEarnings = onDocumentWritten(
+  {document: "routes/{routeId}", region: "southamerica-east1", retry: true},
+  async (event) => {
+    await captureFinancialRoute(event.params.routeId,event.data?.before,event.data?.after,event.time);
+  },
+);
+
+export const retryRotaEarnings = onSchedule(
+  {schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1},
+  async () => { await retryCapturedFinancialRoutes(); },
+);
+
+export const reconcileRotaEarnings = onSchedule(
+  {schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1},
+  async () => { await reconcileFinancialRoutes(); },
 );

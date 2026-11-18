@@ -33,12 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.updateDriverProfile = exports.resetUserPassword = exports.deleteUser = exports.inviteUser = void 0;
+exports.reconcileRotaEarnings = exports.retryRotaEarnings = exports.captureRotaEarnings = exports.forceCompleteService = exports.resendRouteToDriver = exports.autoCompleteRoutes = exports.generateDriverImpersonationToken = exports.forceCleanupOfflineDrivers = exports.cleanupOfflineDrivers = exports.syncAuthUsers = exports.forceLogoutDriver = exports.authUserMirror = exports.sendCustomNotification = exports.notifyRouteChanges = exports.completeRoute = exports.duplicateRoute = exports.updateRouteDriver = exports.updateRouteName = exports.deleteRoute = exports.updateDriverProfile = exports.resetUserPassword = exports.deleteUser = exports.inviteUser = void 0;
+const firestore_1 = require("firebase-functions/v2/firestore");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
+const earnings_source_adapter_1 = require("./earnings-source-adapter");
+const earnings_source_bridge_1 = require("./earnings-source-bridge");
 const https_1 = require("firebase-functions/v2/https");
 const functionsV1 = __importStar(require("firebase-functions/v1"));
 const app_1 = require("firebase-admin/app");
 const auth_1 = require("firebase-admin/auth");
-const firestore_1 = require("firebase-admin/firestore");
+const firestore_2 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
 const invite_conflict_1 = require("./invite-conflict");
@@ -60,7 +64,7 @@ async function assertAuthorizedRole(uid, errorMessage) {
     if (!uid) {
         throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
     }
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const userDoc = await db.collection("users").doc(uid).get();
     const userRole = userDoc.data()?.role || "";
     if (!ADMIN_ROLES.includes(userRole)) {
@@ -72,7 +76,7 @@ function generateTemporaryPassword() {
     return `${(0, node_crypto_1.randomBytes)(18).toString("base64url")}Aa1!`;
 }
 async function reconcileServiceProgress(serviceId) {
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const serviceRef = db.collection("services").doc(serviceId);
     const serviceDoc = await serviceRef.get();
     if (!serviceDoc.exists) {
@@ -117,9 +121,9 @@ async function reconcileServiceProgress(serviceId) {
         "stats.completedDeliveries": completedDeliveries,
         status: newServiceStatus,
         completedAt: newServiceStatus === "completed" ?
-            (serviceData?.completedAt || firestore_1.FieldValue.serverTimestamp()) :
-            firestore_1.FieldValue.delete(),
-        updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            (serviceData?.completedAt || firestore_2.FieldValue.serverTimestamp()) :
+            firestore_2.FieldValue.delete(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
     console.log(`📊 Serviço ${serviceId} reconciliado: status=${newServiceStatus}, ` +
         `rotasConcluidas=${completedRoutes}/${totalRoutes}`);
@@ -129,7 +133,7 @@ async function reconcileServiceProgress(serviceId) {
  * Formato: RT-0001, RT-0002, RT-0003, etc.
  */
 async function generateRouteCode() {
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const counterRef = db.collection("counters").doc("routeCode");
     try {
         const newCount = await db.runTransaction(async (transaction) => {
@@ -180,7 +184,7 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
     try {
         await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem convidar usuários");
         const auth = (0, auth_1.getAuth)();
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         let user;
         let authUserExists = true;
         try {
@@ -219,10 +223,10 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
             displayName: displayName || "",
             name: displayName || "",
             phone: phone || "",
-            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
         };
         if (!existingUserDoc.exists) {
-            userData.createdAt = firestore_1.FieldValue.serverTimestamp();
+            userData.createdAt = firestore_2.FieldValue.serverTimestamp();
             userData.status = "offline";
             userData.lastSeenAt = null;
         }
@@ -253,7 +257,7 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         const auth = (0, auth_1.getAuth)();
         const assignedRoutesSnapshot = await db
             .collection("routes")
@@ -283,7 +287,7 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         // still try to delete from firestore as the main goal.
         if (error.code === 'auth/user-not-found') {
             try {
-                const db = (0, firestore_1.getFirestore)();
+                const db = (0, firestore_2.getFirestore)();
                 await db.collection("users").doc(uid).delete();
                 return { ok: true, message: `Usuário ${uid} removido do Firestore (não encontrado na Autenticação).` };
             }
@@ -306,7 +310,7 @@ exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }
     const requesterUid = req.auth?.uid || "";
     try {
         const auth = (0, auth_1.getAuth)();
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         const userRef = db.collection("users").doc(uid);
         const userSnap = await userRef.get();
         if (!userSnap.exists) {
@@ -323,11 +327,11 @@ exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }
         await auth.revokeRefreshTokens(uid);
         await userRef.set({
             mustChangePassword: true,
-            forceLogoutAt: firestore_1.FieldValue.serverTimestamp(),
-            passwordResetAt: firestore_1.FieldValue.serverTimestamp(),
+            forceLogoutAt: firestore_2.FieldValue.serverTimestamp(),
+            passwordResetAt: firestore_2.FieldValue.serverTimestamp(),
             passwordResetBy: requesterUid,
             passwordResetByRole: requesterRole,
-            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            updatedAt: firestore_2.FieldValue.serverTimestamp(),
         }, { merge: true });
         return {
             ok: true,
@@ -361,7 +365,7 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
     if (!uid || !displayName) {
         throw new https_1.HttpsError("invalid-argument", "uid e displayName são obrigatórios");
     }
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const auth = (0, auth_1.getAuth)();
     const userRef = db.collection("users").doc(uid);
     const userDoc = await userRef.get();
@@ -384,7 +388,7 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
         name: displayName,
         phone,
         vehicle: normalizedVehicle,
-        updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        updatedAt: firestore_2.FieldValue.serverTimestamp(),
     }, { merge: true });
     const driverRoutesSnapshot = await db
         .collection("routes")
@@ -402,7 +406,7 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
                     name: displayName,
                     vehicle: normalizedVehicle,
                 },
-                updatedAt: firestore_1.FieldValue.serverTimestamp(),
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
             });
         });
         await batch.commit();
@@ -420,7 +424,7 @@ exports.deleteRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, asyn
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Buscar a rota para verificar se pertence a um serviço
         const routeDoc = await db.collection("routes").doc(routeId).get();
         if (!routeDoc.exists) {
@@ -452,7 +456,7 @@ exports.updateRouteName = (0, https_1.onCall)({ region: "southamerica-east1" }, 
         throw new https_1.HttpsError("invalid-argument", "Nome da rota é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         await db.collection("routes").doc(routeId).update({ name });
         return { ok: true, message: `Nome da rota atualizado com sucesso.` };
     }
@@ -474,7 +478,7 @@ exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
         throw new https_1.HttpsError("invalid-argument", "ID do motorista é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         const routeRef = db.collection("routes").doc(routeId);
         // Buscar a rota atual para verificar o status
         const routeDoc = await routeRef.get();
@@ -507,7 +511,7 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         const routeDoc = await db.collection("routes").doc(routeId).get();
         if (!routeDoc.exists) {
             throw new https_1.HttpsError("not-found", "Rota não encontrada");
@@ -523,7 +527,7 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
             ...routeData,
             code: newCode,
             name: `${routeData.name} (Cópia)`,
-            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            createdAt: firestore_2.FieldValue.serverTimestamp(),
         };
         // Se a rota pertence a um serviço Luna, remover o vínculo
         // A rota duplicada será uma rota independente
@@ -552,7 +556,7 @@ exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Buscar role do usuário
         const userDoc = await db.collection("users").doc(auth.uid).get();
         const userData = userDoc.data();
@@ -573,7 +577,7 @@ exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         // Atualizar status da rota para 'completed'
         await db.collection("routes").doc(routeId).update({
             status: "completed",
-            completedAt: firestore_1.FieldValue.serverTimestamp(),
+            completedAt: firestore_2.FieldValue.serverTimestamp(),
             completedBy: auth.uid,
         });
         // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
@@ -600,19 +604,19 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
         throw new https_1.HttpsError("invalid-argument", "changes deve ser um array não vazio");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Criar ou atualizar a notificação
         const notificationWrite = await db.collection("routeChangeNotifications").doc(routeId).set({
             routeId,
             driverId,
             changes,
-            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            createdAt: firestore_2.FieldValue.serverTimestamp(),
             acknowledged: false,
         });
         // Marcar a rota com flag de mudanças pendentes
         await db.collection("routes").doc(routeId).update({
             pendingChanges: true,
-            lastModifiedAt: firestore_1.FieldValue.serverTimestamp(),
+            lastModifiedAt: firestore_2.FieldValue.serverTimestamp(),
             lastModifiedBy: req.auth?.uid || "admin",
         });
         // Buscar FCM token do motorista
@@ -697,7 +701,7 @@ exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-eas
         throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Verificar permissão (admin, socio ou gestor)
         const userDoc = await db.collection("users").doc(auth.uid).get();
         const userData = userDoc.data();
@@ -785,7 +789,7 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
     .auth.user()
     .onCreate(async (u) => {
     const email = (u.email || "").toLowerCase();
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const ref = db.collection("users").doc(u.uid);
     await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
@@ -793,7 +797,7 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
             const existingData = snap.data() || {};
             const updateData = {
                 email,
-                updatedAt: firestore_1.FieldValue.serverTimestamp()
+                updatedAt: firestore_2.FieldValue.serverTimestamp()
             };
             if (u.displayName && !existingData.displayName) {
                 updateData.displayName = u.displayName;
@@ -809,9 +813,9 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
                 displayName: u.displayName || '',
                 phone: u.phoneNumber || '',
                 status: 'offline',
-                createdAt: firestore_1.FieldValue.serverTimestamp(),
-                updatedAt: firestore_1.FieldValue.serverTimestamp(),
-                lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
+                createdAt: firestore_2.FieldValue.serverTimestamp(),
+                updatedAt: firestore_2.FieldValue.serverTimestamp(),
+                lastSeenAt: firestore_2.FieldValue.serverTimestamp(),
             });
         }
     });
@@ -830,7 +834,7 @@ exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
     }
     try {
         const auth = (0, auth_1.getAuth)();
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Verificar permissão (admin, socio ou gestor)
         const userDoc = await db.collection("users").doc(authContext.uid).get();
         const userData = userDoc.data();
@@ -842,9 +846,9 @@ exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
         await auth.revokeRefreshTokens(uid);
         // Atualizar documento do usuário com timestamp de logout forçado e limpar deviceInfo
         await db.collection("users").doc(uid).update({
-            forceLogoutAt: firestore_1.FieldValue.serverTimestamp(),
+            forceLogoutAt: firestore_2.FieldValue.serverTimestamp(),
             status: "offline",
-            deviceInfo: firestore_1.FieldValue.delete(),
+            deviceInfo: firestore_2.FieldValue.delete(),
         });
         return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
     }
@@ -865,7 +869,7 @@ exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         throw new https_1.HttpsError("invalid-argument", "O email é obrigatório.");
     }
     const auth = (0, auth_1.getAuth)();
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     try {
         const callerUid = req.auth?.uid;
         if (!callerUid) {
@@ -889,7 +893,7 @@ exports.syncAuthUsers = (0, https_1.onCall)({ region: "southamerica-east1" }, as
         await userRef.set({
             ...patch,
             email: userRecord.email,
-            updatedAt: firestore_1.FieldValue.serverTimestamp()
+            updatedAt: firestore_2.FieldValue.serverTimestamp()
         }, { merge: true });
         return {
             ok: true,
@@ -916,7 +920,7 @@ exports.cleanupOfflineDrivers = functionsV1
     .region("southamerica-east1")
     .pubsub.schedule("every 2 minutes")
     .onRun(async () => {
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const now = new Date();
     const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
     try {
@@ -950,7 +954,7 @@ exports.cleanupOfflineDrivers = functionsV1
 // Função callable para limpeza manual de motoristas offline
 exports.forceCleanupOfflineDrivers = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem atualizar o status dos motoristas");
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const now = new Date();
     const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000);
     // Buscar todos os motoristas para filtragem em memória (evita problemas de índice)
@@ -996,7 +1000,7 @@ exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southa
     }
     try {
         const auth = (0, auth_1.getAuth)();
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Verificar permissão do admin (apenas admin, socio ou gestor)
         const adminDoc = await db.collection("users").doc(authContext.uid).get();
         const adminData = adminDoc.data();
@@ -1024,7 +1028,7 @@ exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southa
             driverId: driverId,
             driverEmail: driverData?.email || "",
             driverName: driverData?.displayName || driverData?.email || "",
-            timestamp: firestore_1.FieldValue.serverTimestamp(),
+            timestamp: firestore_2.FieldValue.serverTimestamp(),
             userAgent: req.rawRequest?.headers["user-agent"] || "unknown",
             expiresAt: new Date(Date.now() + 3600000), // 1 hora
         });
@@ -1051,7 +1055,7 @@ exports.autoCompleteRoutes = functionsV1
     .region("southamerica-east1")
     .pubsub.schedule("every 30 minutes")
     .onRun(async () => {
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     const now = new Date();
     const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
     try {
@@ -1074,11 +1078,12 @@ exports.autoCompleteRoutes = functionsV1
         // Atualizar status em batch
         const batch = db.batch();
         const affectedServiceIds = new Set();
-        staleRoutes.docs.forEach((routeDoc) => {
+        const proofs = await db.getAll(...staleRoutes.docs.map((routeDoc) => db.collection("rotaEarningRouteEvidence").doc(routeDoc.id)));
+        staleRoutes.docs.forEach((routeDoc, index) => {
             const routeData = routeDoc.data();
             const update = {
                 status: "completed_auto",
-                autoCompletedAt: firestore_1.FieldValue.serverTimestamp(),
+                autoCompletedAt: firestore_2.FieldValue.serverTimestamp(),
             };
             // Rota inteiramente percorrida = servico prestado, faltou so o clique de
             // encerrar no app. Ela precisa de `completedAt` para entrar no pagamento,
@@ -1089,6 +1094,10 @@ exports.autoCompleteRoutes = functionsV1
             const desfecho = (0, auto_completion_1.resolveAutoCompletion)(routeData.stops ?? []);
             if (desfecho.worked) {
                 update.completedAt = desfecho.finishedAt;
+                const start = proofs[index].data()?.start;
+                const completion = (0, earnings_source_adapter_1.protectCompletion)({ ...routeData, ...update, earningsSourceStart: start }, "auto-server-v1");
+                if (completion)
+                    batch.set(proofs[index].ref, { completion }, { merge: true });
             }
             batch.update(routeDoc.ref, update);
             if (routeData.serviceId) {
@@ -1119,7 +1128,7 @@ exports.autoCompleteRoutes = functionsV1
             // 1. Gravar activity log
             try {
                 await db.collection("activity_log").add({
-                    timestamp: firestore_1.FieldValue.serverTimestamp(),
+                    timestamp: firestore_2.FieldValue.serverTimestamp(),
                     eventType: "route_auto_completed",
                     userId: "system",
                     userName: "Sistema",
@@ -1213,7 +1222,7 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
     try {
-        const db = (0, firestore_1.getFirestore)();
+        const db = (0, firestore_2.getFirestore)();
         // Verificar role do usuário (admin ou socio)
         const userDoc = await db.collection("users").doc(auth.uid).get();
         const userData = userDoc.data();
@@ -1242,7 +1251,7 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
         // Atualizar status da rota para dispatched
         await db.collection("routes").doc(routeId).update({
             status: "dispatched",
-            resentAt: firestore_1.FieldValue.serverTimestamp(),
+            resentAt: firestore_2.FieldValue.serverTimestamp(),
             resentBy: auth.uid,
         });
         if (routeData?.serviceId) {
@@ -1251,7 +1260,7 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
         // Gravar activity log
         try {
             await db.collection("activity_log").add({
-                timestamp: firestore_1.FieldValue.serverTimestamp(),
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
                 eventType: "route_resent",
                 userId: auth.uid,
                 userName: adminName,
@@ -1340,7 +1349,7 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
     if (!authContext) {
         throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
     }
-    const db = (0, firestore_1.getFirestore)();
+    const db = (0, firestore_2.getFirestore)();
     try {
         // Verificar se o usuário é admin ou socio
         const userDoc = await db.collection("users").doc(authContext.uid).get();
@@ -1383,7 +1392,7 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
             if (routeData.status !== "completed" && routeData.status !== "completed_auto") {
                 batch.update(routeDoc.ref, {
                     status: "completed_auto",
-                    autoCompletedAt: firestore_1.FieldValue.serverTimestamp(),
+                    autoCompletedAt: firestore_2.FieldValue.serverTimestamp(),
                     forceCompletedBy: authContext.uid,
                 });
                 completedRoutesCount++;
@@ -1392,7 +1401,7 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
         // Atualizar o serviço para completed
         batch.update(serviceDoc.ref, {
             status: "completed",
-            completedAt: firestore_1.FieldValue.serverTimestamp(),
+            completedAt: firestore_2.FieldValue.serverTimestamp(),
             forceCompletedBy: authContext.uid,
             stats: {
                 ...serviceData?.stats,
@@ -1404,7 +1413,7 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
         // Gravar activity log
         try {
             await db.collection("activity_log").add({
-                timestamp: firestore_1.FieldValue.serverTimestamp(),
+                timestamp: firestore_2.FieldValue.serverTimestamp(),
                 eventType: "service_force_completed",
                 userId: authContext.uid,
                 userName: adminName,
@@ -1445,4 +1454,9 @@ exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1
         throw new https_1.HttpsError("internal", `Erro: ${msg}`);
     }
 });
+exports.captureRotaEarnings = (0, firestore_1.onDocumentWritten)({ document: "routes/{routeId}", region: "southamerica-east1", retry: true }, async (event) => {
+    await (0, earnings_source_bridge_1.captureFinancialRoute)(event.params.routeId, event.data?.before, event.data?.after, event.time);
+});
+exports.retryRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1 }, async () => { await (0, earnings_source_bridge_1.retryCapturedFinancialRoutes)(); });
+exports.reconcileRotaEarnings = (0, scheduler_1.onSchedule)({ schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1 }, async () => { await (0, earnings_source_bridge_1.reconcileFinancialRoutes)(); });
 //# sourceMappingURL=index.js.map

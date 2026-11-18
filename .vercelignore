@@ -5,7 +5,10 @@
 .aws
 .env*
 node_modules
-functions
+functions/*
+!functions/src/
+functions/src/*
+!functions/src/earnings-source-adapter.ts
 docs/investigations
 docs/superpowers
 firebase-debug.log

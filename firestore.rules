@@ -43,7 +43,8 @@ service cloud.firestore {
     // ===== USERS COLLECTION =====
     match /users/{userId} {
       allow read: if isOwner(userId) || isAppAdmin();
-      allow update: if isOwner(userId) || isAppAdmin();
+      allow update: if isAppAdmin() || (isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','active','disabled','permissions','forceLogoutAt']));
       allow create, delete: if isAppAdmin();
       // Permitir list para usuários autenticados (vendedores precisam ver lista de vendedores para criar pedidos)
       allow list: if isAuthed();
@@ -67,9 +68,13 @@ service cloud.firestore {
       }
 
       // Usuários com acesso podem criar, deletar, ler, listar e atualizar
-      allow create, delete, read, list, update: if hasRoutesAccess();
-      // Motoristas podem ler e atualizar suas próprias rotas
-      allow read, update: if isAuthed() && resource.data.driverId == request.auth.uid;
+      allow create, delete, read, list: if hasRoutesAccess();
+      allow update: if hasRoutesAccess() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['earningsSourceStart','earningsSourceCompletion']);
+      // O motorista publica a posição. Confirmações e estados da rota passam pelo servidor.
+      allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
+      allow update: if isAuthed() && resource.data.driverId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentLocation','lastUpdated','actualPath']);
     }
 
     // ===== COUNTERS COLLECTION (para geração de códigos sequenciais) =====

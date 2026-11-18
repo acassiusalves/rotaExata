@@ -11,7 +11,14 @@ const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-if (projectId && clientEmail && privateKey) {
+const firestoreEmulator = process.env.FIRESTORE_EMULATOR_HOST;
+const localDemo = projectId === 'demo-rotaexata-driver' && firestoreEmulator === '127.0.0.1:8181';
+
+if (localDemo) {
+  adminApp = getApps()[0] ?? initializeApp({ projectId });
+  adminDb = getFirestore(adminApp);
+  if (process.env.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:9199') adminAuth = getAuth(adminApp);
+} else if (!firestoreEmulator && !process.env.FIREBASE_AUTH_EMULATOR_HOST && projectId && clientEmail && privateKey) {
   try {
     // Check if app already exists
     const apps = getApps();
