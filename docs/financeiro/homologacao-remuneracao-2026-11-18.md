@@ -20,6 +20,14 @@ As APIs operacionais de escrita foram ensaiadas com Firebase Auth e Firestore em
 
 O dry-run do snapshot de origem de 18/11/2026 às 18:30:13.973649 UTC somou 374 documentos e **R$ 28.690,00 nos registros**. São 373 pendentes e um aprovado. Há 93 sem UID histórico, 114 casos cuja composição requer conferência e dez valores zerados na versão 2. O inventário encontrou 536 rotas concluídas e 69 autoencerradas sem documento. Essas rotas continuam sem lançamento. A regra legada ativa estava na versão 3.
 
+## Staging no projeto compartilhado
+
+As quatro migrations constam no histórico do projeto Sistema Lunna. O escopo `e82fdc1f-e12a-42ea-9429-82a1bfec172e` recebeu 374 documentos privados em oito lotes, com ID de execução `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. A conciliação comparou ID, revisão, fingerprint, original e candidato em todos os documentos e encontrou zero divergências. A repetição reconheceu 374 documentos e criou zero. A leitura da origem após o staging, às 19:44:27 UTC, encontrou zero inclusões, alterações ou remoções.
+
+Os registros preservados somam R$ 28.667,00 pendentes e R$ 23,00 aprovados. Todos os 374 carregam a lacuna do snapshot original da regra. O valor financeiro ainda exige conferência. O manifesto tem fingerprint `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`.
+
+O escopo tem zero membros, zero lançamentos, zero linhas de extrato e zero eventos de origem. Captura, emissão, comandos e visibilidade permanecem desligados. O diretório canônico verificado nesse ponto tinha zero perfis e zero vínculos. A promoção depende da prova de quem prestou o serviço e da reconciliação dos valores em revisão.
+
 ## Verificações e limites
 
 Foram executados 80 testes da aplicação, 19 das Cloud Functions, 14 das Firestore Rules e cinco suítes SQL. A aplicação compilou no modo Vercel com variáveis sintéticas. O typecheck global retornou 84 diagnósticos que já existiam na base. O ensaio SQL usou a estrutura Auth efetiva do GoTrue, o contrato mínimo do vínculo CRM e a migration do diretório de plataforma. O histórico completo do owner tem uma versão CRM duplicada e exige tratamento em sua frente.

@@ -60,3 +60,8 @@ Use o Supabase local isolado com GoTrue, REST, Realtime e PostgreSQL reais. As s
 O roteiro `scripts/homologate-earnings-local.ts` exige exatamente o gateway Supabase local em `127.0.0.1:61421`, o emulador Firestore e três contas sintéticas em arquivo privado. Ele valida a API de rotas com sessão Supabase, emissão, ajuste de estado e isolamento por REST/Realtime. A execução local da ponte chama o receptor validado de dados diretamente. A credencial e o gatilho do Cloud Functions são verificados na janela de homologação do ambiente de destino.
 
 O ensaio em navegador cobre as telas de regras, pagamentos e ganhos conforme o relatório de homologação. O ensaio em dispositivo requer Android autorizado e exploração ARTEMIS antes da autoria de testes de aparelho.
+
+
+## Registro da migração em 18/11/2026
+
+Foram preservados no staging privado os 374 pagamentos do snapshot de `2026-11-18T18:30:13.973649Z`. O escopo é `e82fdc1f-e12a-42ea-9429-82a1bfec172e` e o ID da execução é `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. O manifesto conferido tem SHA-256 `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`. Os quatro controles de operação estão desligados e o estágio ainda aguarda promoção. Consulte a [evidência de homologação](homologacao-remuneracao-2026-11-18.md).
