@@ -26,17 +26,17 @@ As quatro migrations constam no histórico do projeto Sistema Lunna. O escopo `e
 
 Os registros preservados somam R$ 28.667,00 pendentes e R$ 23,00 aprovados. Todos os 374 carregam a lacuna do snapshot original da regra. O valor financeiro ainda exige conferência. O manifesto tem fingerprint `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`.
 
-O escopo tem zero membros, zero lançamentos, zero linhas de extrato e zero eventos de origem. Captura, emissão, comandos e visibilidade permanecem desligados. O diretório canônico verificado nesse ponto tinha zero perfis e zero vínculos. A promoção depende da prova de quem prestou o serviço e da reconciliação dos valores em revisão.
+Na conferência do staging, o escopo tinha zero membros, zero lançamentos, zero linhas de extrato e zero eventos de origem. Os quatro controles estavam desligados e o diretório canônico tinha zero perfis e zero vínculos. A promoção depende da prova de quem prestou o serviço e da reconciliação dos valores em revisão.
 
 ## Verificações e limites
 
 Foram executados 80 testes da aplicação, 19 das Cloud Functions, 14 das Firestore Rules e cinco suítes SQL. A aplicação compilou no modo Vercel com variáveis sintéticas. O typecheck global retornou 84 diagnósticos que já existiam na base. O ensaio SQL usou a estrutura Auth efetiva do GoTrue, o contrato mínimo do vínculo CRM e a migration do diretório de plataforma. O histórico completo do owner tem uma versão CRM duplicada e exige tratamento em sua frente.
 
-A autoria em Cloud Functions com a conta Google dedicada exige verificação no ambiente de destino antes da captura. A interface web em viewport móvel e o ensaio da API operacional são evidências locais. O corte de Auth da PWA inteira exige validar uploads, presença, notificações, perfil, chamados e a jornada operacional com uma única sessão canônica. O ensaio físico depende de aparelho Android autorizado.
+As verificações locais usaram identidades sintéticas. O ensaio da conta Google no ambiente de destino está registrado no fechamento de produção. A interface web em viewport móvel e o ensaio da API operacional são evidências locais. O corte de Auth da PWA inteira exige validar uploads, presença, notificações, perfil, chamados e a jornada operacional com uma única sessão canônica. O ensaio físico depende de aparelho Android autorizado.
 
 ## Fechamento da revisão e da interface
 
-Uma revisão final com GPT Astra identificou onze pontos críticos ou importantes. O GPT Sol corrigiu a autorização dos escritores de rotas, a separação entre staging e promoção, a integridade do manifesto, a distância não calculada, a data do encerramento administrativo, a retenção do pagamento após divergência da fonte, a referência e a apuração no extrato, o MFA, o ajuste global, a precisão dos recibos e o preflight OIDC. As regressões passaram após a correção. A identidade Google efetiva ainda depende do ensaio publicado.
+Uma revisão final com GPT Astra identificou onze pontos críticos ou importantes. O GPT Sol corrigiu a autorização dos escritores de rotas, a separação entre staging e promoção, a integridade do manifesto, a distância não calculada, a data do encerramento administrativo, a retenção do pagamento após divergência da fonte, a referência e a apuração no extrato, o MFA, o ajuste global, a precisão dos recibos e o preflight OIDC. As regressões passaram após a correção. O ensaio com a identidade Google efetiva consta no fechamento de produção.
 
 O navegador local confirmou a rota sintética `FILA-LOCAL` como **Em apuração** para o titular. A segunda conta recebeu um extrato vazio, sem essa rota. O cancelamento do MFA foi conferido após a resposta 204 de logout: token removido e recarregamento na tela de entrada. Os ensaios foram feitos no Chrome com viewport móvel e contas sintéticas.
 
@@ -44,7 +44,7 @@ Dois achados menores foram adiados: a atualização automática volta à primeir
 
 O verificador de segurança do Supabase confirmou as doze tabelas privadas com RLS e sem acesso direto. Seus avisos informativos de RLS sem política são intencionais: o acesso ocorre pelas RPCs de servidor. As quatorze RPCs públicas do módulo negam EXECUTE a anon e authenticated e fixam search_path. O alerta de proteção contra senhas vazadas já existia antes desta migração e pertence à configuração geral de Auth. [Referência dos avisos](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
 
-A entrega está preservada nas branches locais `codex/remuneracao-entregadores-supabase` (RotaExata) e `codex/remuneracao-entregadores-supabase-db` (Luna). O código da aplicação e os gatilhos não foram publicados; o banco compartilhado recebeu somente as quatro migrations e o staging privado descritos neste relatório. A conclusão integral da etapa 8 aguarda os critérios de corte registrados no runbook.
+A entrega está preservada nas branches locais `codex/remuneracao-entregadores-supabase` (RotaExata) e `codex/remuneracao-entregadores-supabase-db` (Luna). O estado de publicação e os critérios pendentes estão registrados no fechamento de produção deste relatório.
 
 ## PWA com sessão nativa
 
@@ -52,7 +52,7 @@ No Chrome em viewport móvel, um motorista sintético entrou por `/login`, volto
 
 O painel de contas usou a sessão Supabase do operador. O JWT antigo recebeu 401 imediatamente após revogação. O motorista bloqueado teve o acesso operacional recusado, inclusive depois de entrar de novo, e a reativação restaurou o acesso. Uma senha rejeitada pelo Auth preservou a exigência de troca. A troca bem-sucedida removeu a exigência e permitiu o novo login. O ensaio de recuperação PKCE e o reenvio de confirmação foram verificados no Mailpit sintético. O teste passou pelo túnel local da VM e preservou o callback emitido pelo GoTrue. A senha sintética foi restaurada e a conta de teste de confirmação removida.
 
-O Firebase Messaging permanece como transporte. Entrega de push em aparelho, regras do Storage ativo, release do PWA, onboarding real, captura Eventarc e ponte OIDC de produção requerem evidência no destino. A homologação web usou os emuladores e não validou instalação Android.
+O Firebase Messaging permanece como transporte. A entrega de push em aparelho, a virada das Rules de Storage, a promoção da PWA nativa e a ativação de captura Eventarc permanecem para a janela operacional. A homologação web usou os emuladores e não validou instalação Android.
 
 
 O corte do Storage foi composto sobre uma cópia da release ativa. No emulador, tokens Firebase de dois motoristas sintéticos perderam leitura e escrita no caminho de comprovantes. O operador autenticado manteve acesso válido. O emulador recusou acesso anônimo, MIME incompatível e arquivo no limite de 5 MiB. O acesso administrativo de servidor funcionou e o rollback restaurou o acesso da coorte.
@@ -66,4 +66,17 @@ O comprovante novo foi gravado no Storage emulado e lido pela API privada. O tit
 No Chrome, uma falha 503 preservou a foto e a observação da confirmação e bloqueou a escrita até a revalidação. O motorista saiu de Meus ganhos offline, recarregou e permaneceu desconectado após reconectar. O operador sintético recuperou a senha via Mailpit e PKCE e voltou ao painel original. A senha da conta de teste foi restaurada.
 
 
-A migração de controles de conta foi aplicada ao Sistema Lunna como `20261119005719_rota_driver_account_controls.sql`, com o SHA-256 `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. As três funções remotas corresponderam às definições homologadas. A importação de identidades e a liberação da PWA dependem das etapas operacionais do corte.
+A migração de controles de conta foi aplicada ao Sistema Lunna como `20261119005719_rota_driver_account_controls.sql`, com o SHA-256 `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. As três funções remotas corresponderam às definições homologadas. A importação de identidades e o estado da candidata constam no fechamento de produção.
+
+
+## Fechamento de produção em 19/11/2026 UTC
+
+O canário no Supabase hospedado confirmou preservação de UUID e senha, recusa de senha incorreta, bloqueio de contas não verificadas e banidas, callback do RotaExata e a exigência de TOTP para alcançar AAL2. As três contas de canário foram removidas. O cadastro público foi desligado. Nenhum e-mail real foi disparado durante o ensaio.
+
+A importação criou 25 contas e reconciliou 30 perfis, 30 vínculos e 30 associações de escopo. Vinte e duas associações estão ativas, incluindo os 15 motoristas. Nove motoristas têm e-mail verificado e seis precisam confirmá-lo. Os hashes e fatores das oito contas Supabase preexistentes foram preservados. A comparação de origem encontrou zero divergências e o replay do diretório foi idempotente.
+
+O domínio recebeu o build `a23d128c21cd` com login Firebase e financeiro fechado. O smoke público passou em sete verificações. A candidata com login Supabase teve 16 verificações HTTP e de arquivos públicos aprovadas, inclusive rejeição de chamadas sem sessão, bloqueio das APIs legadas e workers da PWA e do FCM. Esses checks verificaram a candidata isolada. A promoção nativa continua suspensa para preservar a rota em andamento e o acesso do motorista.
+
+O retry publicado entregou um evento sintético do tipo `gap` ao receptor usando OIDC da conta dedicada. O primeiro ACK foi confirmado às 01:46:28.869 UTC e o replay às 01:48:02.956 UTC. O destino preservou uma única linha de inbox, posteriormente arquivada como `ignored:operational_canary`. O ensaio produziu zero créditos e zero linhas de extrato, com zero alterações de rotas reais, e-mails ou notificações. Emissão, comandos e extrato continuam desligados. Captura Eventarc e reconciliação na origem também continuam desativadas.
+
+As Rules preparadas de Firestore e Storage estão compiladas, com a publicação reservada para a janela de corte. O canário de OIDC e os checks HTTP do FCM não ensaiaram entrega de push real nem instalação Android. Os 374 históricos permanecem no staging privado.

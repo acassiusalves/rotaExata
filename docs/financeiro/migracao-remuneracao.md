@@ -4,7 +4,7 @@
 
 O programa de identidade da plataforma Lunna administra as contas Supabase, os perfis canônicos e o vínculo comprovado entre emissor/UID Firebase e UUID Supabase. Cada operação de remuneração tem um escopo cadastrado em `rota_earnings_private.scopes` e exige um vínculo ativo em `memberships`. Admin e sócio publicam regras. Admin, sócio e gestor operam pagamentos de acordo com a política de páginas vigente. O entregador acessa o extrato do próprio escopo.
 
-O Firestore conserva a autoridade sobre rotas e entregas. A API de rotas por sessão Supabase usa o vínculo privado da plataforma para validar o titular, registrar os desfechos e gravar a prova da prestação. A interface operacional legada tem uma API separada que exige sua sessão Firebase vigente. Os endpoints de escrita de criação de rotas e de importação Lunna exigem `Authorization: Bearer <Firebase ID token>` do operador durante essa fase. A atribuição da gravação vem da sessão verificada. Consumidores externos desses endpoints devem ser homologados no corte. A tela de ganhos usa a sessão Supabase da própria origem. A virada do login de toda a PWA depende também da migração de uploads, presença, notificações, perfil, chamados, reedição e outras operações diretas ainda usadas na interface.
+O Firestore conserva a autoridade sobre rotas e entregas. A API de rotas por sessão Supabase usa o vínculo privado da plataforma para validar o titular, registrar os desfechos e gravar a prova da prestação. A interface operacional legada tem uma API separada que exige sua sessão Firebase vigente. Os endpoints de escrita de criação de rotas e de importação Lunna exigem `Authorization: Bearer <Firebase ID token>` do operador durante essa fase. A atribuição da gravação vem da sessão verificada. Consumidores externos desses endpoints devem ser homologados no corte. A tela de ganhos usa a sessão Supabase da própria origem. A candidata nativa inclui os adaptadores de uploads, presença, notificações, perfil, chamados e reedição. A virada depende da janela operacional do motorista e da aplicação das proteções de origem.
 
 O PostgreSQL mantém a única razão financeira após o corte. A contribuição de uma rota depende da revisão e da regra da data de encerramento comprovada. O lançamento nasce **a conferir**, segue para aprovação e recebe baixa manual com referência. Um lançamento quitado permanece congelado e uma correção depende de procedimento compensatório aprovado.
 
@@ -64,17 +64,17 @@ O ensaio em navegador cobre as telas de regras, pagamentos e ganhos conforme o r
 
 ## Registro da migração em 18/11/2026
 
-Foram preservados no staging privado os 374 pagamentos do snapshot de `2026-11-18T18:30:13.973649Z`. O escopo é `e82fdc1f-e12a-42ea-9429-82a1bfec172e` e o ID da execução é `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. O manifesto conferido tem SHA-256 `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`. Os quatro controles de operação estão desligados e o estágio ainda aguarda promoção. Consulte a [evidência de homologação](homologacao-remuneracao-2026-11-18.md).
+Foram preservados no staging privado os 374 pagamentos do snapshot de `2026-11-18T18:30:13.973649Z`. O escopo é `e82fdc1f-e12a-42ea-9429-82a1bfec172e` e o ID da execução é `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. O manifesto conferido tem SHA-256 `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`. No momento do staging, os quatro controles de operação estavam desligados. A atribuição dos pagamentos históricos ainda aguarda promoção auditada. Consulte a [evidência de homologação](homologacao-remuneracao-2026-11-18.md).
 
 ## Corte do PWA e contas canônicas
 
-A candidata do PWA utiliza `NEXT_PUBLIC_ROTA_DRIVER_AUTH=supabase` para selecionar o login de motoristas. A operação financeira continua com os próprios controles de ativação. Todos os endpoints do runtime do motorista verificam a fase. A aplicação precisa do projeto e do bucket Firebase de origem na configuração Admin SDK, das credenciais Supabase de servidor e do escopo financeiro correspondente. O login depende também do e-mail verificado no Auth e do vínculo de identidade do diretório. Confira o fechamento do cadastro público e permita o callback `https://rota-exata.vercel.app/driver/conta` no projeto de Auth.
+A candidata do PWA utiliza `NEXT_PUBLIC_ROTA_DRIVER_AUTH=supabase` para selecionar o login de motoristas. A operação financeira continua com os próprios controles de ativação. Todos os endpoints do runtime do motorista verificam a fase. A aplicação precisa do projeto e do bucket Firebase de origem na configuração Admin SDK, das credenciais Supabase de servidor e do escopo financeiro correspondente. O login depende também do e-mail verificado no Auth e do vínculo de identidade do diretório. O cadastro público foi fechado e o callback `https://rota-exata.vercel.app/driver/conta` foi verificado no Auth hospedado.
 
 A migração adicional da Luna `20261119005719_rota_driver_account_controls.sql` define o painel e o fluxo de troca de senha. O SHA-256 revisado é `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. O Supabase registrou essa versão na aplicação ao projeto Sistema Lunna. O painel vive em `/driver/admin/accounts`. O acesso operacional legado do administrador continua disponível em `/login?admin=1`.
 
 Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. Publique `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver` com a proteção de fase antes da virada. As funções recusam convites legados para motorista e comandos legados sobre a coorte quando o modo nativo entra em vigor. Antes de qualquer alteração nativa de senha, bloqueio ou sessão, o retorno legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Após uma alteração de segurança no destino, mantenha o Firebase da coorte fechado, suspenda o acesso afetado e corrija o destino. Reconcilie previamente credenciais, estado de bloqueio e revogação entre os dois provedores para autorizar um eventual retorno. Preserve a trilha de auditoria e a operação financeira pausada durante a reconciliação. Aplique as Rules privadas do Storage na mesma janela de corte.
 
-Antes de abrir captura, emissão, comandos e extrato, valide as três funções de ponte, a identidade de execução e a aceitação persistente pelo destino. Os pagamentos legados aguardam promoção auditada. A gestão de aparelhos e o push instalado dependem de homologação no dispositivo alvo.
+O retry publicado já comprovou a aceitação persistente por OIDC com um evento sintético. Valide a captura e a reconciliação de rotas na janela autorizada antes de habilitar esses gatilhos. Os pagamentos legados aguardam promoção auditada. A gestão de aparelhos e o push instalado dependem de homologação no dispositivo alvo.
 
 
 ### Corte do Storage
@@ -92,14 +92,34 @@ A release rejeita a leitura e a escrita por tokens Firebase da coorte em `delive
 
 ## Fechamento da fronteira nativa
 
-A coorte reconciliada inclui 30 perfis. Os 15 motoristas estão ativos na origem. Nove têm e-mail verificado e seis passam pela confirmação antes do primeiro acesso. As 25 contas novas preservam dez confirmações e 15 e-mails pendentes. Os cinco reusos pertencem a três administradores e dois gestores ativos e verificados nos dois sistemas. O SMTP próprio está configurado. Valide o callback permitido e o cadastro público fechado antes de ativar. Envie confirmação ou recuperação pelo fluxo optativo da conta quando o usuário iniciar o pedido.
+A coorte reconciliada inclui 30 perfis. Os 15 motoristas estão ativos na origem. Nove têm e-mail verificado e seis passam pela confirmação antes do primeiro acesso. As 25 contas novas preservam dez confirmações e 15 e-mails pendentes. Os cinco reusos pertencem a três administradores e dois gestores ativos e verificados nos dois sistemas. O SMTP próprio está configurado. O canário hospedado confirmou o callback, o tratamento de e-mail não verificado e o MFA. O usuário inicia a confirmação ou a recuperação pelo fluxo da conta.
 
 O FCM nativo envia somente identificadores transitórios de entrega. O emissor consulta o destino com a prova privada do dispositivo e o worker revalida a entrega antes de exibir ou abrir o aviso. O destino deriva da origem de `ROTA_EARNINGS_EVENTS_URL` e usa `/api/driver/push-delivery`. O worker antigo em `/sw.js` recebe uma resposta de aposentadoria na fase nativa. A limpeza é limitada aos caches históricos próprios do Rota.
 
 As fotos novas permanecem privadas no Storage. A API `/api/driver/media/[id]` lê o objeto após autorizar a sessão e a parada do titular atual ou o operador ativo. Links de mídia históricos seguem sua autorização original.
 
-Publique os seguintes alvos Firebase antes da abertura da fase nativa.
+O pacote publicado da origem contém os alvos abaixo. Nas novas publicações, valide as proteções dos escritores e a identidade de execução da ponte.
 
 - Contas legadas com proteção de fase usam `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver`.
 - As operações administrativas usam `updateDriverProfile`, `deleteRoute`, `updateRouteName`, `updateRouteDriver`, `duplicateRoute`, `completeRoute`, `notifyRouteChanges`, `sendCustomNotification`, `resendRouteToDriver` e `forceCompleteService`.
 - Os agendamentos e lógicas de ponte usam `autoCompleteRoutes`, `captureRotaEarnings`, `retryRotaEarnings` e `reconcileRotaEarnings`.
+
+
+## Estado e retomada em 19/11/2026 UTC
+
+| Componente | Estado verificado |
+|---|---|
+| Domínio RotaExata | Build `a23d128c21cd` promovido com login Firebase e interface financeira fechada. Sete verificações HTTP passaram após a promoção. |
+| Candidata nativa | O mesmo artefato ficou READY com login Supabase na PWA e interface financeira habilitada nessa implantação. Dezesseis verificações passaram. O domínio canônico ainda responde no modo Firebase. |
+| Auth e diretório | Foram criadas 25 contas. O diretório contém 30 perfis e 30 vínculos comprovados. Há 30 associações ao escopo, 22 ativas, incluindo 15 motoristas. As oito credenciais e os fatores nativos preexistentes foram preservados. |
+| Ponte | O retry real aceitou o OIDC da conta dedicada, obteve dois ACKs do mesmo evento sintético e deixou uma linha privada ignorada. O escopo recebe eventos em sombra. A captura Eventarc e a reconciliação continuam desativadas na origem. |
+| Apuração | Emissão, comandos e extrato do escopo continuam desligados. Os 374 pagamentos históricos aguardam promoção auditada e a tarifa inicial aguarda aprovação. |
+| Rules | As Rules de Firestore e Storage foram compiladas e preparadas. As releases atualmente ativas ainda atendem à operação Firebase. |
+
+Uma rota em andamento pertence a um motorista com e-mail nativo ainda não verificado. Mantenha a fase Firebase até confirmar a conclusão da rota e a capacidade de acesso nativo do motorista, ou até registrar a decisão do responsável de que se trata de teste e como tratá-la. Preserve a rota e o vínculo na pendência. A decisão está em aberto.
+
+Na retomada, releia a situação da rota, o estado de Auth e as revisões de Rules. Depois de resolver a pendência, coordene a publicação das Rules, o documento privado de fase e a promoção da candidata na mesma janela. Confira a autenticação e a jornada completa no domínio canônico. A decisão de abrir tarifa, emissão, comandos, extrato e histórico ocorre na etapa financeira aprovada.
+
+A fase nativa cobre a coorte de 15 motoristas provisionados. O convite Firebase de motorista fica recusado após o corte. O cadastro de novos motoristas depende do fluxo canônico de provisionamento de identidade e papel da plataforma Lunna. Qualquer necessidade imediata de novo cadastro precisa ser atendida antes da virada da coorte.
+
+Firestore e Storage permanecem como origem operacional. O runtime adapta as chamadas da PWA à sessão Supabase, e o transporte de push usa FCM. O recebimento e a razão financeira usam o PostgreSQL do Supabase.
