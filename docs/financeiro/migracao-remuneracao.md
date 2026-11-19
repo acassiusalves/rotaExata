@@ -72,6 +72,19 @@ A candidata do PWA utiliza `NEXT_PUBLIC_ROTA_DRIVER_AUTH=supabase` para selecion
 
 A migração adicional da Luna `20261118232957_rota_driver_account_controls.sql` define o painel e o fluxo de troca de senha do motorista. SHA-256 revisável `e57729fcf772d4ae21cac8c86871ee5205cb01b77e256d4692340d9c72b27caa`. A versão deve acompanhar o identificador registrado pelo provedor na aplicação. O painel vive em `/driver/admin/accounts`. O acesso operacional legado do administrador continua disponível em `/login?admin=1`.
 
-Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. O retorno para o modo legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Verifique as Rules ativas do Storage antes de fechar o acesso direto nas pastas de comprovantes.
+Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. Publique `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver` com a proteção de fase antes da virada. As funções recusam convites legados para motorista e comandos legados sobre a coorte quando o modo nativo entra em vigor. O retorno para o modo legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Aplique as Rules privadas do Storage na mesma janela de corte.
 
 Antes de abrir captura, emissão, comandos e extrato, valide as três funções de ponte, a identidade de execução e a aceitação persistente pelo destino. Os pagamentos legados aguardam promoção auditada. A gestão de aparelhos e o push instalado dependem de homologação no dispositivo alvo.
+
+
+### Corte do Storage
+
+Exporte a release ativa para um arquivo local e confira SHA-256 `a2df67ee0bca229e57475db6896efbea0d0d36618cfc79436d703d9fd805986c`. Se houver drift, revise a nova release antes de compor a alteração. Prepare um manifesto JSON privado com apenas a chave `driverUids` e a lista de UIDs Firebase canônicos usada no corte do Firestore. Restrinja as permissões do manifesto a 600.
+
+Gere a release pelo comando abaixo. A saída padrão contém o caminho do arquivo privado. A lista é incorporada às Rules em um diretório temporário fora da worktree. Publique por um caminho privado e retenha o artefato original com seu hash para rollback.
+
+```sh
+node --experimental-strip-types scripts/render-storage-cutover.ts "$STORAGE_BASELINE" "$STORAGE_DRIVER_MANIFEST"
+```
+
+A release rejeita a leitura e a escrita por tokens Firebase da coorte em `delivery-photos`. O acesso de clientes fora da coorte segue as condições de autenticação, tipo da imagem e tamanho da release ativa. Os comprovantes novos são gravados pela API do motorista via Admin SDK. A restauração da release original reabre o SDK da coorte na janela de rollback.

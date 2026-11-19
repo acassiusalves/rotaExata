@@ -12,6 +12,7 @@ import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
 import {checkInviteConflict} from "./invite-conflict";
+import {blocksLegacyDriverAccountAction, type LegacyDriverAccountAction} from "./legacy-driver-accounts";
 import {buildSyncPatch} from "./sync-user";
 import {resolveAutoCompletion} from "./auto-completion";
 import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
@@ -47,6 +48,14 @@ async function assertAuthorizedRole(
   }
 
   return userRole;
+}
+
+async function assertLegacyDriverAccountAllowed(action: LegacyDriverAccountAction): Promise<void> {
+  if ("role" in action && action.role !== "driver") return;
+  const phase = await getFirestore().doc("rotaAuthTransition/driver").get();
+  if (blocksLegacyDriverAccountAction(phase.data(), action)) {
+    throw new HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
+  }
 }
 
 function generateTemporaryPassword(): string {
@@ -193,6 +202,8 @@ export const inviteUser = onCall(
         "Apenas administradores, sócios e gestores podem convidar usuários"
       );
 
+      await assertLegacyDriverAccountAllowed({role});
+
       const auth=getAuth();
       const db=getFirestore();
       let user;
@@ -285,6 +296,8 @@ export const deleteUser = onCall(
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
     
+    await assertLegacyDriverAccountAllowed({uid});
+
     try {
       const db = getFirestore();
       const auth = getAuth();
@@ -357,6 +370,8 @@ export const resetUserPassword = onCall(
     const requesterUid = req.auth?.uid || "";
 
     try {
+      await assertLegacyDriverAccountAllowed({uid});
+
       const auth = getAuth();
       const db = getFirestore();
       const userRef = db.collection("users").doc(uid);
@@ -1042,6 +1057,8 @@ export const forceLogoutDriver = onCall(
         );
       }
 
+      await assertLegacyDriverAccountAllowed({uid});
+
       // Revogar todos os tokens de refresh do usuário
       await auth.revokeRefreshTokens(uid);
 
@@ -1054,6 +1071,7 @@ export const forceLogoutDriver = onCall(
 
       return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
     } catch (err) {
+      if (err instanceof HttpsError) throw err;
       const error = err as any;
       const msg = error.message || "Falha ao forçar logout";
 

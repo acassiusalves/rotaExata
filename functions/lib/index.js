@@ -47,6 +47,7 @@ const firestore_2 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
 const invite_conflict_1 = require("./invite-conflict");
+const legacy_driver_accounts_1 = require("./legacy-driver-accounts");
 const sync_user_1 = require("./sync-user");
 const auto_completion_1 = require("./auto-completion");
 const push_outcome_1 = require("./push-outcome");
@@ -73,6 +74,14 @@ async function assertAuthorizedRole(uid, errorMessage) {
         throw new https_1.HttpsError("permission-denied", errorMessage);
     }
     return userRole;
+}
+async function assertLegacyDriverAccountAllowed(action) {
+    if ("role" in action && action.role !== "driver")
+        return;
+    const phase = await (0, firestore_2.getFirestore)().doc("rotaAuthTransition/driver").get();
+    if ((0, legacy_driver_accounts_1.blocksLegacyDriverAccountAction)(phase.data(), action)) {
+        throw new https_1.HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
+    }
 }
 function generateTemporaryPassword() {
     return `${(0, node_crypto_1.randomBytes)(18).toString("base64url")}Aa1!`;
@@ -185,6 +194,7 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
     }
     try {
         await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem convidar usuários");
+        await assertLegacyDriverAccountAllowed({ role });
         const auth = (0, auth_1.getAuth)();
         const db = (0, firestore_2.getFirestore)();
         let user;
@@ -258,6 +268,7 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
     if (!uid) {
         throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
+    await assertLegacyDriverAccountAllowed({ uid });
     try {
         const db = (0, firestore_2.getFirestore)();
         const auth = (0, auth_1.getAuth)();
@@ -311,6 +322,7 @@ exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }
     const requesterRole = await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem resetar senhas");
     const requesterUid = req.auth?.uid || "";
     try {
+        await assertLegacyDriverAccountAllowed({ uid });
         const auth = (0, auth_1.getAuth)();
         const db = (0, firestore_2.getFirestore)();
         const userRef = db.collection("users").doc(uid);
@@ -857,6 +869,7 @@ exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
         if (!["admin", "socio", "gestor"].includes(userRole)) {
             throw new https_1.HttpsError("permission-denied", "Apenas administradores podem forçar logout de motoristas");
         }
+        await assertLegacyDriverAccountAllowed({ uid });
         // Revogar todos os tokens de refresh do usuário
         await auth.revokeRefreshTokens(uid);
         // Atualizar documento do usuário com timestamp de logout forçado e limpar deviceInfo
@@ -868,6 +881,8 @@ exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
         return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
     }
     catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
         const error = err;
         const msg = error.message || "Falha ao forçar logout";
         if (error.code === "auth/user-not-found") {
