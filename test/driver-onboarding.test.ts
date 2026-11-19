@@ -51,10 +51,10 @@ test('the source stays out of dispatch until canonical activation and resumes an
     },
   };
   await assert.rejects(()=>finishDriverOnboarding(row,'Senha-nunca-persistida',authority),/source offline/);
-  assert.equal(current.state,'assignable');
+  assert.equal(current.state,'complete');
   const result=await finishDriverOnboarding(current,undefined,authority);
   assert.equal(result.state,'complete');
-  assert.deepEqual(calls,['password','activate','ready','publish','assignable','assignable','settle']);
+  assert.deepEqual(calls,['password','activate','ready','publish','settle','assignable','assignable']);
 });
 
 test('activation with no password proof cannot touch the source or canonical membership',async()=>{
@@ -82,4 +82,42 @@ test('only owned pending projections become discoverable and access commands fen
   assert.equal(driverDispatchPatch(reopened,pending.commandId,2,true),null);
   const blockedAgain={...reopened,...driverDispatchPatch(reopened,pending.commandId,3,false)};
   assert.throws(()=>driverDispatchPatch(blockedAgain,pending.commandId,2,true),{code:'driver_account_revision_conflict'});
+});
+
+
+test('canonical settlement must complete before the first discoverable projection is written',async()=>{
+  const projections:string[]=[];
+  const awaitingPublication:DriverProvision={...pending,state:'assignable',revision:3};
+  await assert.rejects(()=>finishDriverOnboarding({...awaitingPublication,passwordSet:true},undefined,{
+    changePassword:async()=>assert.fail(),
+    project:async(_,stage)=>{projections.push(stage);},
+    progress:async()=>{throw new Error('settle not committed');},
+  }),/settle not committed/);
+  assert.deepEqual(projections,[]);
+});
+
+test('initial publication respects a durable block before the Source role exists',()=>{
+  const original=driverProjectionPatch(pending,'pending',undefined)!;
+  const ready={...original,...driverProjectionPatch(pending,'ready',original)};
+  const blocked={...ready,...driverDispatchPatch(ready,pending.commandId,1,false)};
+  const exposed={...blocked,...driverProjectionPatch(pending,'assignable',blocked)};
+  assert.equal(exposed.role,'driver');
+  assert.equal(exposed.nativeDriverDispatchEnabled,false);
+  assert.equal(exposed.nativeDriverDispatchFence,2);
+});
+
+test('a refreshed account exposes a safe explicit recovery path without remembering a command',async()=>{
+  const workflow=await import('../src/lib/server/driver/onboarding-workflow.ts');
+  const inspected=workflow.driverDispatchRecovery;
+  const restore=workflow.restoreDriverDispatchPatch;
+  assert.equal(typeof inspected,'function');
+  assert.equal(typeof restore,'function');
+  const suppressed={nativeDriverProvisioningId:pending.commandId,nativeDriverReady:true,role:'driver',
+    nativeDriverDispatchEnabled:false,nativeDriverDispatchFence:2};
+  // A build that closed PostgreSQL correctly, then lost Source on reactivation.
+  assert.equal(inspected(suppressed,pending.commandId,3,true),'restore');
+  assert.deepEqual(restore(suppressed,pending.commandId,3),{nativeDriverDispatchEnabled:true,nativeDriverDispatchFence:3});
+  assert.equal(inspected({...suppressed,nativeDriverDispatchFence:4},pending.commandId,3,true),'finish_block');
+  assert.throws(()=>restore({...suppressed,nativeDriverDispatchFence:4},pending.commandId,3),{code:'driver_account_revision_conflict'});
+  assert.equal(inspected(suppressed,pending.commandId,2,false),'blocked');
 });

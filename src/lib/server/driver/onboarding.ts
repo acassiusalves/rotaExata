@@ -10,7 +10,7 @@ import {
 import {
   driverProvisionCommand,driverProvisionSchema,driverProvisionSelfSchema,type DriverProvision,
 } from '@/lib/driver/provisioning-contract';
-import { driverDispatchPatch,driverProjectionPatch,finishDriverOnboarding,provisionDriver } from './onboarding-workflow';
+import { driverDispatchPatch,driverDispatchRecovery,driverProjectionPatch,finishDriverOnboarding,provisionDriver,restoreDriverDispatchPatch } from './onboarding-workflow';
 
 const listed=z.object({provisioning:z.array(driverProvisionSchema)});
 const password=z.string().min(8).max(72).refine(value=>Buffer.byteLength(value,'utf8')<=72);
@@ -91,7 +91,14 @@ export async function serveDriverOnboarding(request:Request) {
     const inspect=async()=>parseRpc(await run('inspect'),driverProvisionSelfSchema.nullable());
     const onboarding=await inspect();
     if (request.method==='GET') {
-      return privateJson({onboarding:onboarding ? {state:onboarding.state,passwordSet:onboarding.passwordSet} : null});
+      if (!onboarding) return privateJson({onboarding:null});
+      let state=onboarding.state;
+      if (state==='complete') {
+        const source=sourceDb(onboarding.sourceProject);
+        const projection=(await source.collection('users').doc(actor.userId).get()).data();
+        if (projection?.nativeDriverProvisioningId!==onboarding.commandId || projection?.role!=='driver') state='assignable';
+      }
+      return privateJson({onboarding:{state,passwordSet:onboarding.passwordSet}});
     }
     if (!onboarding) throw new EarningsError(404,'route_not_found');
     const parsed=selfCommand.safeParse(await readJsonBody(request,2048));
@@ -114,13 +121,28 @@ export async function serveDriverOnboarding(request:Request) {
 
 
 export async function projectDriverDispatch(
-  id:string,guard:{provisioningId:string;sourceProject:string;revision:number},enabled:boolean,
+  id:string,guard:{provisioningId:string;sourceProject:string;revision:number},operation:boolean|'restore',
 ) {
   const db=sourceDb(guard.sourceProject);
   const target=db.collection('users').doc(id);
   await db.runTransaction(async tx=>{
     const snapshot=await tx.get(target);
-    const patch=driverDispatchPatch(snapshot.data(),guard.provisioningId,guard.revision,enabled);
+    const patch=operation==='restore'
+      ? restoreDriverDispatchPatch(snapshot.data(),guard.provisioningId,guard.revision)
+      : driverDispatchPatch(snapshot.data(),guard.provisioningId,guard.revision,operation);
     if (patch) tx.update(target,{...patch,updatedAt:FieldValue.serverTimestamp()});
   });
+}
+
+
+export async function readDriverDispatchState(
+  id:string,guard:{provisioningId:string;sourceProject:string;revision:number},active:boolean,
+) {
+  try {
+    const source=sourceDb(guard.sourceProject);
+    const existing=(await source.collection('users').doc(id).get()).data();
+    return driverDispatchRecovery(existing,guard.provisioningId,guard.revision,active);
+  } catch {
+    return 'unavailable' as const;
+  }
 }

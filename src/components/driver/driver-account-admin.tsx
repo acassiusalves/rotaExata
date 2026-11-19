@@ -9,6 +9,7 @@ import { useConfirm } from '@/hooks/use-confirm';
 import type { DriverAccount,DriverAccountCommand } from '@/lib/driver/account-contract';
 
 const descriptions:Record<DriverAccountCommand['action'],{label:string;description:string}> = {
+  restore_dispatch:{label:'Restaurar despacho',description:'A disponibilidade será atualizada de acordo com a conta Lunna ativa.'},
   revoke_sessions:{label:'Encerrar sessões',description:'O motorista precisará entrar de novo nos dispositivos conectados.'},
   set_inactive:{label:'Bloquear acesso',description:'As sessões serão encerradas e a conta perderá acesso às rotas e aos ganhos.'},
   set_active:{label:'Reativar acesso',description:'O motorista poderá entrar novamente com a conta Lunna.'},
@@ -47,7 +48,7 @@ function DriverAccountControls() {
   async function run(account:DriverAccount,action:DriverAccountCommand['action']) {
     const text=descriptions[action];
     const accepted=await confirm({title:text.label+' · '+account.name,description:text.description,
-      confirmText:text.label,cancelText:'Cancelar',variant:action==='set_active'?'default':'destructive'});
+      confirmText:text.label,cancelText:'Cancelar',variant:action==='set_active'||action==='restore_dispatch'?'default':'destructive'});
     if (!accepted) return;
     const previous=retry.current;
     const command=previous?.targetId===account.userId && previous.action===action && previous.revision===account.revision
@@ -55,7 +56,7 @@ function DriverAccountControls() {
     retry.current=command;
     setPending(true); setError(''); setMessage('');
     try {
-      await request<DriverAccount>('/api/driver/accounts',{method:'POST',body:JSON.stringify(command)});
+      await request('/api/driver/accounts',{method:'POST',body:JSON.stringify(command)});
       retry.current=null;
       setMessage(text.label+' · Alteração registrada.');
       await load();
@@ -81,11 +82,16 @@ function DriverAccountControls() {
       <div><h2 className="font-semibold">{account.name}</h2><p className="text-sm text-muted-foreground">
         {account.active?'Acesso ativo':'Acesso bloqueado'} · {account.emailVerified?'E-mail confirmado':'E-mail pendente'}
         {account.mustChangePassword && ' · Troca de senha exigida'}
+        {account.dispatchState==='restore' && ' · Despacho pendente'}
+        {account.dispatchState==='finish_block' && ' · Bloqueio pendente'}
+        {account.dispatchState==='unavailable' && ' · Despacho indisponível para conferência'}
       </p></div>
       <div className="flex flex-wrap gap-2">
+        {account.dispatchState==='restore' &&
+          <Button size="sm" variant="outline" disabled={pending} onClick={()=>void run(account,'restore_dispatch')}>Restaurar despacho</Button>}
         <Button size="sm" variant="outline" disabled={pending || !account.active} onClick={()=>void run(account,'revoke_sessions')}>Encerrar sessões</Button>
         {account.active
-          ? <Button size="sm" variant="outline" disabled={pending} onClick={()=>void run(account,'set_inactive')}>Bloquear acesso</Button>
+          ? <Button size="sm" variant="outline" disabled={pending} onClick={()=>void run(account,'set_inactive')}>{account.dispatchState==='finish_block'?'Concluir bloqueio':'Bloquear acesso'}</Button>
           : <Button size="sm" variant="outline" disabled={pending || account.legacyDisabled} onClick={()=>void run(account,'set_active')}>Reativar acesso</Button>}
         <Button size="sm" variant="outline" disabled={pending || !account.active} onClick={()=>void run(account,'require_password_change')}>Exigir troca de senha</Button>
       </div>

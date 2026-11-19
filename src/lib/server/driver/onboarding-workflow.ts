@@ -48,11 +48,9 @@ export async function finishDriverOnboarding(
     await authority.project(current,'ready');
     current=await authority.progress('publish',current);
   }
-  if (current.state==='assignable') {
-    await authority.project(current,'assignable');
-    current=await authority.progress('settle',current);
-  }
+  if (current.state==='assignable') current=await authority.progress('settle',current);
   if (current.state!=='complete') throw new EarningsError(409,'driver_provision_revision_conflict');
+  await authority.project(current,'assignable');
   return current;
 }
 
@@ -75,20 +73,47 @@ export function driverProjectionPatch(
   if (stage==='pending') return null;
   if (stage==='ready') return existing.nativeDriverReady===true ? null : {nativeDriverReady:true};
   if (existing.nativeDriverReady!==true) throw new EarningsError(409,'driver_provision_source_conflict');
-  return existing.role==='driver' ? null : {role:'driver',nativeDriverDispatchEnabled:true};
+  const fence=dispatchFence(existing,row.commandId);
+  if (existing.role==='driver') return null;
+  // A security command may already have fenced this completed account.
+  return fence===0 ? {role:'driver',nativeDriverDispatchEnabled:true} : {role:'driver'};
 }
 
-
-export function driverDispatchPatch(existing:Record<string,unknown>|undefined,provisioningId:string,revision:number,enabled:boolean) {
+function dispatchFence(existing:Record<string,unknown>|undefined,provisioningId:string) {
   const fence=existing?.nativeDriverDispatchFence;
-  const desired=revision+1;
   if (existing?.nativeDriverProvisioningId!==provisioningId || existing.nativeDriverReady!==true ||
-      existing.role!=='driver' || typeof fence!=='number' || !Number.isSafeInteger(fence)) {
+      (existing.role!==undefined && existing.role!=='driver') ||
+      typeof fence!=='number' || !Number.isSafeInteger(fence) || fence<0) {
     throw new EarningsError(409,'driver_provision_source_conflict');
   }
-  if (fence===desired && existing.nativeDriverDispatchEnabled===enabled) return null;
-  if (fence>=desired || (enabled && existing.nativeDriverDispatchEnabled!==false)) {
+  return fence;
+}
+
+export function driverDispatchPatch(existing:Record<string,unknown>|undefined,provisioningId:string,revision:number,enabled:boolean) {
+  const fence=dispatchFence(existing,provisioningId);
+  const desired=revision+1;
+  if (fence===desired && existing?.nativeDriverDispatchEnabled===enabled) return null;
+  if (fence>=desired || (enabled && existing?.nativeDriverDispatchEnabled!==false)) {
     throw new EarningsError(409,'driver_account_revision_conflict');
   }
-  return {nativeDriverDispatchEnabled:enabled,nativeDriverDispatchFence:desired};
+  return {nativeDriverDispatchEnabled:enabled,nativeDriverDispatchFence:desired,
+    ...(enabled && existing?.role!=='driver' ? {role:'driver'} : {})};
+}
+
+export function driverDispatchRecovery(existing:Record<string,unknown>|undefined,provisioningId:string,revision:number,active:boolean) {
+  let fence:number;
+  try { fence=dispatchFence(existing,provisioningId); }
+  catch { return 'unavailable'; }
+  const open=existing?.role==='driver' && existing.nativeDriverDispatchEnabled===true;
+  if (!active) return open ? 'unavailable' : 'blocked';
+  if (fence>revision) return 'finish_block';
+  return open ? 'enabled' : 'restore';
+}
+
+export function restoreDriverDispatchPatch(existing:Record<string,unknown>|undefined,provisioningId:string,revision:number) {
+  const fence=dispatchFence(existing,provisioningId);
+  if (fence>revision) throw new EarningsError(409,'driver_account_revision_conflict');
+  if (existing?.role==='driver' && existing.nativeDriverDispatchEnabled===true) return null;
+  return {nativeDriverDispatchEnabled:true,nativeDriverDispatchFence:revision,
+    ...(existing?.role!=='driver' ? {role:'driver'} : {})};
 }

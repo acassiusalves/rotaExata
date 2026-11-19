@@ -3,11 +3,12 @@ import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { earningsScopeId,verifyNativeSession } from '@/lib/server/earnings/actor';
 import { privateJson } from '@/lib/server/earnings/store';
 import { EarningsError,earningsErrorResponse,earningsRpc,readJsonBody,updateSupabasePassword } from '@/lib/server/earnings/transport';
-import { projectDriverDispatch } from './onboarding';
+import { projectDriverDispatch,readDriverDispatchState } from './onboarding';
 import { changeDriverPassword } from './account-password';
 import { driverAccountSchema,driverAccountCommand } from '@/lib/driver/account-contract';
 
 const dispatchGuard=z.object({provisioningId:z.string().uuid(),sourceProject:z.string(),revision:z.number().int().nonnegative().safe()});
+const accountRecord=driverAccountSchema.extend({nativeSource:dispatchGuard.omit({revision:true}).extend({lastActivationRevision:dispatchGuard.shape.revision}).optional()});
 const passwordCommand=z.object({password:z.string().min(8).max(72).refine(value=>Buffer.byteLength(value,'utf8')<=72)}).strict();
 
 function accountResult<T>(payload:unknown,schema:z.ZodType<T>) {
@@ -36,16 +37,34 @@ export async function serveDriverAccounts(request:Request) {
     if (command && !command.success) throw new EarningsError(422,'driver_account_invalid_command');
     const body=command?.data;
     const args={p_user_id:actor.userId,p_session_id:actor.sessionId,p_scope_id:earningsScopeId()};
-    const guard=body && (body.action==='set_active' || body.action==='set_inactive')
-      ? accountResult(await earningsRpc('rota_driver_dispatch_preflight',{
-        ...args,p_target_id:body.targetId,p_action:body.action,p_revision:body.revision,p_command_id:body.commandId,
-      }),dispatchGuard.nullable()) : null;
+    const readGuard=async (action:string)=>{
+      if (!body) return null;
+      return accountResult(await earningsRpc('rota_driver_dispatch_preflight',{
+        ...args,p_target_id:body.targetId,p_action:action,p_revision:body.revision,p_command_id:body.commandId,
+      }),dispatchGuard.nullable());
+    };
+    if (body?.action==='restore_dispatch') {
+      const guard=await readGuard(body.action);
+      if (!guard) throw new EarningsError(403,'earnings_access_denied');
+      await projectDriverDispatch(body.targetId,guard,'restore');
+      await readGuard('restore_dispatch_applied');
+      return privateJson({ok:true});
+    }
+    const guard=body && (body.action==='set_active' || body.action==='set_inactive') ? await readGuard(body.action) : null;
     if (guard && body?.action==='set_inactive') await projectDriverDispatch(body.targetId,guard,false);
     const result=await earningsRpc('rota_driver_accounts',{
       ...args,
       p_target_id:body?.targetId ?? null,p_action:body?.action ?? null,p_expected_revision:body?.revision ?? null,p_command_id:body?.commandId ?? null,
     });
-    if (!body) return privateJson(accountResult(result,z.object({accounts:z.array(driverAccountSchema)})));
+    if (!body) {
+      const {accounts}=accountResult(result,z.object({accounts:z.array(accountRecord)}));
+      return privateJson({accounts:await Promise.all(accounts.map(async ({nativeSource,...account})=>{
+        if (!nativeSource) return account;
+        const {lastActivationRevision,...source}=nativeSource;
+        const dispatchState=await readDriverDispatchState(account.userId,{...source,revision:lastActivationRevision},account.active);
+        return {...account,dispatchState};
+      }))});
+    }
     const account=accountResult(result,driverAccountSchema);
     if (guard && body.action==='set_active') await projectDriverDispatch(body.targetId,guard,true);
     return privateJson(account);
