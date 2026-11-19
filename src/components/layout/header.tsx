@@ -35,7 +35,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescri
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth';
+import { useLayoutIdentity } from '@/components/staff/staff-session';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 
 
@@ -45,12 +45,13 @@ interface HeaderProps {
 export function Header({}: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, userRole, signOut } = useAuth();
+  const { user, userRole, signOut, canNavigate } = useLayoutIdentity();
   const isDriver = userRole === 'driver';
 
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { href: '/users', icon: Users, label: 'Usuários' },
+    { href: '/permissions', icon: Users, label: 'Usuários' },
+    { href: '/financeiro/pagamentos', icon: LineChart, label: 'Pagamentos' },
     { href: '/drivers', icon: Users, label: 'Motoristas' },
     { href: '/history', icon: History, label: 'Histórico' },
     { href: '/reports', icon: LineChart, label: 'Relatórios' },
@@ -108,7 +109,7 @@ export function Header({}: HeaderProps) {
             </Link>
              {!isDriver ? (
               <>
-                {navItems.map((item) => (
+                {navItems.filter(item=>canNavigate(item.href)).map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -119,7 +120,7 @@ export function Header({}: HeaderProps) {
                     {item.label}
                   </Link>
                 ))}
-                <DropdownMenu>
+                {canNavigate('/routes') && <DropdownMenu>
                   <DropdownMenuTrigger
                     className={cn(
                       'flex items-center gap-1 text-lg font-medium hover:text-foreground',
@@ -135,15 +136,14 @@ export function Header({}: HeaderProps) {
                     <DropdownMenuItem asChild>
                       <Link href="/routes">Ver Rotas</Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
+                    {canNavigate('/routes/monitoring') && <DropdownMenuItem asChild>
                       <Link href="/routes/monitoring">Monitoramento</Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
+                    </DropdownMenuItem>}
+                    {canNavigate('/routes/new') && <DropdownMenuItem asChild>
                       <Link href="/routes/new">Nova Rota</Link>
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>}
                   </DropdownMenuContent>
-                </DropdownMenu>
+                </DropdownMenu>}
               </>
             ) : (
                 <>

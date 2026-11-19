@@ -1,13 +1,21 @@
 
 'use client';
 import { MainLayout } from '@/components/layout/main-layout';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { StaffGate } from '@/components/staff/staff-session';
+import { EarningsShell } from '@/components/earnings/earnings-shell';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
-export default function AdminLayout({
+export default function AdminLayout({children}:{children:React.ReactNode}) {
+  if (nativeStaffEnabled) return <EarningsShell portal staffLogin><StaffGate><MainLayout>{children}</MainLayout></StaffGate></EarningsShell>;
+  return <FirebaseAdminLayout>{children}</FirebaseAdminLayout>;
+}
+
+function FirebaseAdminLayout({
   children,
 }: {
   children: React.ReactNode;

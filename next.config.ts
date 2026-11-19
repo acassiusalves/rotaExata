@@ -123,7 +123,7 @@ const pwaConfig = withPWA({
   buildExcludes: [/middleware-manifest\.json$/],
   publicExcludes: ['!firebase-messaging-sw.js'],
   runtimeCaching: [
-    { urlPattern: /\/api\/(?:financeiro|driver|feedbacks)(?:\/|\?|$)/, handler: 'NetworkOnly' },
+    { urlPattern: /\/api\/(?:financeiro|driver|feedbacks|staff)(?:\/|\?|$)/, handler: 'NetworkOnly' },
     { urlPattern: /\/(?:auth|rest)\/v1\//, handler: 'NetworkOnly' },
     ...defaultRuntimeCaching,
   ],

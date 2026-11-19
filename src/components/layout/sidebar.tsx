@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/tooltip';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth';
+import { useLayoutIdentity } from '@/components/staff/staff-session';
 import {
   Collapsible,
   CollapsibleContent,
@@ -57,7 +57,7 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
   const pathname = usePathname();
-  const { user, userRole, signOut } = useAuth();
+  const { user, userRole, signOut, canNavigate } = useLayoutIdentity();
   const isDriver = userRole === 'driver';
   const [routesOpen, setRoutesOpen] = useState(pathname.startsWith('/routes'));
   const [historyOpen, setHistoryOpen] = useState(pathname.startsWith('/history'));
@@ -143,7 +143,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
       <div className="flex flex-1 flex-col overflow-y-auto p-2 uber-scrollbar">
         <nav className="flex-1 space-y-1">
-          {navItems.map((item) => (
+          {navItems.filter(item=>canNavigate(item.href)).map((item) => (
             <TooltipProvider key={item.href} delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -207,7 +207,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
             {isOpen && (
                <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
-                  {reportItems.map((item) => (
+                  {reportItems.filter(item=>canNavigate(item.href)).map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
@@ -263,7 +263,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
             
             {isOpen && (
                <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
-                  {routeItems.map((item) => (
+                  {routeItems.filter(item=>canNavigate(item.href)).map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
@@ -319,7 +319,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
             {isOpen && (
                <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
-                  {historyItems.map((item) => (
+                  {historyItems.filter(item=>canNavigate(item.href)).map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
@@ -375,7 +375,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
             {isOpen && (
               <CollapsibleContent className="ml-4 space-y-1 border-l border-border/50 pl-4 animate-slide-up">
-                {financialItems.map((item) => (
+                {financialItems.filter(item=>canNavigate(item.href)).map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -400,7 +400,7 @@ export function Sidebar({ isOpen, onToggleSidebar }: SidebarProps) {
 
         {/* Bottom items */}
         <div className={cn("space-y-1 border-t pt-2", !isOpen && "space-y-2")}>
-          {settingsItems.map((item) => (
+          {settingsItems.filter(item=>canNavigate(item.href)).map((item) => (
               <TooltipProvider key={item.href} delayDuration={0}>
                 <Tooltip>
                   <TooltipTrigger asChild>

@@ -1,4 +1,5 @@
 'use client';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
 import {clearDevicePushGrant} from '@/lib/driver/push-device';
 import { localSessionId,nativeAuthStorage,nativeStorageKey,retireStoredSession } from './session-storage';
@@ -8,7 +9,7 @@ let native: SupabaseClient | undefined;
 export const nativeEarningsEnabled = process.env.NEXT_PUBLIC_ROTA_EARNINGS_ENABLED === 'true';
 
 export function earningsBrowserClient() {
-  if (typeof window === 'undefined' || (!nativeEarningsEnabled && !nativeDriverEnabled)) return undefined;
+  if (typeof window === 'undefined' || (!nativeEarningsEnabled && !nativeDriverEnabled && !nativeStaffEnabled)) return undefined;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) return undefined;
