@@ -113,6 +113,7 @@ export function staffPageForPath(pathname:string):StaffPage|null {
   if (Object.hasOwn(staffPages,pathname)) return pathname as StaffPage;
   if (/^\/routes\/organize\/acompanhar\/?$/.test(pathname) ||
       /^\/routes\/service\/[^/]+\/organize\/?$/.test(pathname)) return '/routes/organize';
+  if (/^\/track\/[^/]+\/?$/.test(pathname)) return '/routes';
   if (/^\/routes\/(?:service\/)?[^/]+\/acompanhar\/?$/.test(pathname)) return '/routes';
   return null;
 }

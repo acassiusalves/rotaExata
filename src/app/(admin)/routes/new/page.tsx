@@ -59,10 +59,10 @@ import { useToast } from '@/hooks/use-toast';
 import { ImportAssistantDialog } from '@/components/routes/import-assistant-dialog';
 import Papa from 'papaparse';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { FALLBACK_ORIGIN, isLegacyBadOrigin } from '@/lib/default-origin';
-import { useDefaultOrigin } from '@/hooks/use-default-origin';
+import { FALLBACK_ORIGIN, isLegacyBadOrigin,isValidOrigin } from '@/lib/default-origin';
+import { useStaff,useStaffWorkspace } from '@/components/staff/staff-session';
+import { staffPlannedPlaceSchema } from '@/lib/staff/route-contract';
+import { EarningsRequestError } from '@/lib/earnings/session-request';
 
 const initialSavedOrigins = [
   {
@@ -140,12 +140,15 @@ async function readTextSmart(file: File): Promise<string> {
 
 export default function NewRoutePage() {
   const router = useRouter();
+  const {request}=useStaff();
+  const {draftKey,originKey}=useStaffWorkspace();
+  const draftRetry=React.useRef<{fingerprint:string;id:string}>();
 
   // Carregar origens salvas do localStorage ou usar as iniciais
   const [savedOrigins, setSavedOrigins] = React.useState<typeof initialSavedOrigins>(() => {
     if (typeof window === 'undefined') return initialSavedOrigins;
 
-    const stored = localStorage.getItem('savedOrigins');
+    const stored = localStorage.getItem(originKey);
     if (stored) {
       try {
         return sanitizarOrigensSalvas(JSON.parse(stored));
@@ -165,7 +168,14 @@ export default function NewRoutePage() {
   });
   // Origem padrão vinda de settings/defaultOrigin. Quando chega, substitui a origem
   // em uso apenas se o operador ainda não tiver escolhido outra.
-  const { origin: origemPadrao } = useDefaultOrigin();
+  const [origemPadrao,setOrigemPadrao]=React.useState(FALLBACK_ORIGIN);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    request<{origin:PlaceValue|null}>('/api/staff/routes/origin',{signal:controller.signal}).then(result=>{
+      if (!controller.signal.aborted && isValidOrigin(result.origin)) setOrigemPadrao(result.origin!);
+    }).catch(()=>{});
+    return ()=>controller.abort();
+  },[request]);
   React.useEffect(() => {
     setOrigin((atual) =>
       !atual || atual.id === FALLBACK_ORIGIN.id || isLegacyBadOrigin(atual) ? origemPadrao : atual,
@@ -217,9 +227,9 @@ export default function NewRoutePage() {
   // Salvar origens no localStorage sempre que mudar
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('savedOrigins', JSON.stringify(savedOrigins));
+      localStorage.setItem(originKey, JSON.stringify(savedOrigins));
     }
-  }, [savedOrigins]);
+  }, [originKey,savedOrigins]);
 
   const handleSelectOrigin = (placeValue: PlaceValue) => {
     setOrigin(placeValue);
@@ -424,14 +434,11 @@ export default function NewRoutePage() {
     setNewOriginLink(url);
     if (!url.trim()) return;
 
-    const res = await fetch('/api/resolve-maps-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url.trim() }),
-    });
-    const dados = await res.json();
-    if (!res.ok) {
-      toast({ variant: 'destructive', title: 'Link não reconhecido', description: dados.error });
+    let dados:{lat:number;lng:number;expandedUrl:string};
+    try {
+      dados=await request('/api/staff/maps/link',{method:'POST',body:JSON.stringify({url:url.trim()})});
+    } catch(error) {
+      toast({variant:'destructive',title:'Link não reconhecido',description:error instanceof Error ? error.message:undefined});
       return;
     }
 
@@ -925,48 +932,19 @@ export default function NewRoutePage() {
       // Gerar nome padrão para o rascunho
       const draftName = `Rascunho - ${format(plannedDate, 'dd/MM/yyyy HH:mm', { locale: ptBR })}`;
 
-      // Limpar campos undefined dos stops antes de salvar
-      const cleanedStops = stops.filter(s => s.placeId).map(stop => {
-        const cleanStop: Record<string, any> = {};
-        Object.entries(stop).forEach(([key, value]) => {
-          if (value !== undefined) {
-            cleanStop[key] = value;
-          }
-        });
-        return cleanStop;
-      });
-
-      // Limpar campos undefined da origin
-      const cleanedOrigin: Record<string, any> = {};
-      Object.entries(origin).forEach(([key, value]) => {
-        if (value !== undefined) {
-          cleanedOrigin[key] = value;
-        }
-      });
-
-      // Salvar rota como rascunho COMPLETO no Firestore
-      // Isso garante que todos os dados estejam disponíveis em qualquer computador
-      const draftDoc = {
-        name: draftName,
-        status: 'draft',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        plannedDate: Timestamp.fromDate(plannedDate),
-        origin: cleanedOrigin,
-        stops: cleanedStops,
-        // Dados adicionais para persistência completa
-        routeDate: routeDate?.toISOString() || '',
-        routeTime: routeTime,
-        // Campos que serão preenchidos ao despachar
-        distanceMeters: 0,
-        duration: '0s',
-        encodedPolyline: '',
-        // Array para armazenar rotas organizadas (A, B, C, etc.)
-        // Será preenchido na página de organização
-        organizedRoutes: null,
+      const draft={
+        name:draftName,
+        plannedDate:plannedDate.toISOString(),
+        routeDate:routeDate?.toISOString() || '',
+        routeTime,
+        origin:staffPlannedPlaceSchema.parse(origin),
+        stops:stops.filter(stop=>stop.placeId).map(stop=>staffPlannedPlaceSchema.parse(stop)),
       };
-
-      const docRef = await addDoc(collection(db, 'routes'), draftDoc);
+      const fingerprint=JSON.stringify(draft);
+      const commandId=draftRetry.current?.fingerprint===fingerprint ? draftRetry.current.id:crypto.randomUUID();
+      draftRetry.current={fingerprint,id:commandId};
+      const {routeId}=await request<{routeId:string}>('/api/staff/routes',{method:'POST',body:JSON.stringify({...draft,commandId})});
+      draftRetry.current=undefined;
 
       // Salvar ID do rascunho no sessionStorage para a página organize carregar
       const routeData = {
@@ -975,17 +953,18 @@ export default function NewRoutePage() {
         routeDate: routeDate?.toISOString() || '',
         routeTime,
         isDraft: true,
-        draftRouteId: docRef.id,
+        draftRouteId: routeId,
       };
-      sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+      sessionStorage.setItem(draftKey, JSON.stringify(routeData));
 
       toast({
         title: 'Rascunho criado',
         description: 'A rota foi salva como rascunho. Você pode continuar a organização.',
       });
 
-      router.push('/routes/organize');
+      router.push('/routes/organize?draft='+encodeURIComponent(routeId));
     } catch (error) {
+      if (error instanceof EarningsRequestError && error.status<500) draftRetry.current=undefined;
       console.error('Erro ao salvar rascunho:', error);
       toast({
         variant: 'destructive',

@@ -1,7 +1,6 @@
 
 'use client';
 
-import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import * as React from 'react';
 import Link from 'next/link';
 import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check, FileEdit, Sun, Sunset, Moon } from 'lucide-react';
@@ -39,16 +38,16 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { db, functions } from '@/lib/firebase/client';
-import { collection, onSnapshot, query, orderBy, Timestamp, doc, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import { useStaff } from '@/components/staff/staff-session';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { staffRouteDates } from '@/lib/staff/route-dates';
+import { EarningsRequestError } from '@/lib/earnings/session-request';
+import type { StaffRouteCommand } from '@/lib/staff/route-contract';
 import type { RouteInfo, Driver, LunnaService } from '@/lib/types';
 import { ServiceCard } from '@/components/routes/service-card';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/hooks/use-auth';
-import { logDriverChanged, logRouteDeleted } from '@/lib/firebase/activity-log';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,7 +80,8 @@ type RouteDocument = RouteInfo & {
     name: string;
     vehicle: { type: string; plate: string };
   } | null;
-  plannedDate: Timestamp;
+  plannedDate: Date;
+  revision: string;
   origin: any; // Can be complex object
 };
 
@@ -109,19 +109,67 @@ const getRoutePeriod = (date: Date): { label: string; color: string; icon: React
 
 // Type for Luna Service with its routes
 type ServiceWithRoutes = {
-  service: LunnaService & { id: string };
+  service: LunnaService & { id: string;revision:string };
   routes: RouteDocument[];
 };
 
 export default function RoutesPage() {
   const router = useRouter();
   const { searchQuery } = useRouteSearch();
-  const { userRole, user } = useAuth();
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
-  const [services, setServices] = React.useState<ServiceWithRoutes[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
-  const [pendingNotifications, setPendingNotifications] = React.useState<Set<string>>(new Set());
+  const { request,role:userRole }=useStaff();
+  const readBoard=React.useCallback(async (signal:AbortSignal)=>{
+    const endpoint='/api/staff/routes';
+    const options=request<{services:ServiceWithRoutes['service'][];drivers:Driver[]}>(endpoint+'?view=options',{signal});
+    const pages=request<{routes:RouteDocument[];pendingNotifications:string[];cursor:string|null}>(endpoint,{signal});
+    const [directory,first]=await Promise.all([options,pages]);
+    const routes=new Map(first.routes.map(route=>[route.id,route]));
+    const pending=new Set(first.pendingNotifications);
+    let cursor=first.cursor;
+    while (cursor) {
+      const page=await request<typeof first>(endpoint+'?cursor='+encodeURIComponent(cursor),{signal});
+      for (const route of page.routes) routes.set(route.id,route);
+      for (const routeId of page.pendingNotifications) pending.add(routeId);
+      cursor=page.cursor;
+    }
+    const current=staffRouteDates<RouteDocument[]>([...routes.values()]).sort((a,b)=>b.plannedDate.valueOf()-a.plannedDate.valueOf());
+    return {
+      routes:current,
+      services:staffRouteDates<ServiceWithRoutes['service'][]>(directory.services).flatMap(service=>{
+        const related=current.filter(route=>route.serviceId===service.id);
+        return related.length || service.status==='organizing' ? [{service,routes:related}]:[];
+      }),
+      drivers:directory.drivers.map(driver=>({
+        ...staffRouteDates<Driver>(driver),status:driver.status ?? 'offline',phone:driver.phone ?? 'N/A',
+        totalDeliveries:driver.totalDeliveries ?? 0,rating:driver.rating ?? 0,lastSeenAt:driver.lastSeenAt ?
+          new Date(driver.lastSeenAt.valueOf()) : new Date(0),
+        avatarUrl:(driver as Driver & {photoURL?:string}).photoURL ?? '',
+      })),
+      pending,
+    };
+  },[request]);
+  const {data,error:boardError,loading:isLoading,refresh}=useStaffQuery(readBoard);
+  const routes=React.useMemo(()=>data?.routes ?? [],[data]);
+  const services=React.useMemo(()=>data?.services ?? [],[data]);
+  const availableDrivers=data?.drivers ?? [];
+  const pendingNotifications=data?.pending ?? new Set<string>();
+  const retryCommand=React.useRef<{fingerprint:string;id:string}>();
+  async function write(path:string,revision:string,command:{kind:StaffRouteCommand['kind']|'force-complete';name?:string;driverId?:string}) {
+    const fingerprint=JSON.stringify({path,revision,command});
+    const commandId=retryCommand.current?.fingerprint===fingerprint ? retryCommand.current.id:crypto.randomUUID();
+    retryCommand.current={fingerprint,id:commandId};
+    try {
+      await request(path,{method:'PATCH',body:JSON.stringify({...command,revision,commandId})});
+      retryCommand.current=undefined;
+      refresh();
+    } catch(error) {
+      if (error instanceof EarningsRequestError && error.status<500) {
+        retryCommand.current=undefined;
+        if (error.status===409) refresh();
+      }
+      throw error;
+    }
+  }
+  const routeEndpoint=(id:string)=>'/api/staff/routes/'+encodeURIComponent(id);
   const [isChangeDriverDialogOpen, setIsChangeDriverDialogOpen] = React.useState(false);
   const [isEditNameDialogOpen, setIsEditNameDialogOpen] = React.useState(false);
   const [isCompleteRouteDialogOpen, setIsCompleteRouteDialogOpen] = React.useState(false);
@@ -142,133 +190,8 @@ export default function RoutesPage() {
   const { toast } = useToast();
 
   React.useEffect(() => {
-    const q = query(collection(db, 'routes'), orderBy('plannedDate', 'desc'));
-
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const routesData: RouteDocument[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data() as RouteDocument;
-        // Filtrar apenas rotas não concluídas (excluir completed e completed_auto)
-        if (data.status !== 'completed' && data.status !== 'completed_auto') {
-          routesData.push({
-            ...data,
-            id: doc.id,
-          } as RouteDocument);
-        }
-      });
-      setRoutes(routesData);
-      setIsLoading(false);
-    }, (error) => {
-        console.error("Error fetching routes: ", error);
-        setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Carregar Serviços Luna
-  React.useEffect(() => {
-    // Query simplificada - ordenar por createdAt e filtrar status no cliente
-    // Isso evita a necessidade de índice composto (status + createdAt)
-    const q = query(
-      collection(db, 'services'),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
-      const servicesData: ServiceWithRoutes[] = [];
-      const activeStatuses = ['organizing', 'dispatched', 'in_progress', 'partial'];
-
-      for (const docSnap of querySnapshot.docs) {
-        const serviceData = { id: docSnap.id, ...docSnap.data() } as LunnaService & { id: string };
-
-        // Filtrar apenas serviços ativos (não completados)
-        if (!activeStatuses.includes(serviceData.status)) {
-          continue;
-        }
-
-        // Buscar rotas deste serviço - filtrar por serviceId independente do routeIds
-        const serviceRoutes = routes.filter(r => r.serviceId === docSnap.id);
-
-        // Adicionar se:
-        // - Houver rotas ativas OU
-        // - Status for 'organizing' (serviços aguardando organização devem aparecer)
-        if (serviceRoutes.length > 0 || serviceData.status === 'organizing') {
-          servicesData.push({
-            service: serviceData,
-            routes: serviceRoutes,
-          });
-        }
-      }
-
-      setServices(servicesData);
-    }, (error) => {
-      console.error("Error fetching services: ", error);
-    });
-
-    return () => unsubscribe();
-  }, [routes]);
-
-  React.useEffect(() => {
-    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const driversData: Driver[] = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (!isSourceDriverAssignable(data)) return;
-        driversData.push({
-          id: doc.id,
-          name: data.displayName || data.name || 'Motorista sem nome',
-          email: data.email,
-          phone: data.phone || 'N/A',
-          status: data.status || 'offline',
-          vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
-          lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
-          totalDeliveries: data.totalDeliveries || 0,
-          rating: data.rating || 0,
-          avatarUrl: data.photoURL,
-        })
-      });
-      setAvailableDrivers(driversData);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Reset to page 1 when search query changes
-  React.useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
-
-  // Monitor pending notifications
-  React.useEffect(() => {
-    const routeIds = routes.map(r => r.id);
-    if (routeIds.length === 0) return;
-
-    const unsubscribes = routeIds.map(routeId => {
-      const notificationRef = doc(db, 'routeChangeNotifications', routeId);
-      return onSnapshot(notificationRef, (docSnap) => {
-        if (docSnap.exists() && !docSnap.data().acknowledged) {
-          setPendingNotifications(prev => new Set(prev).add(routeId));
-        } else {
-          setPendingNotifications(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(routeId);
-            return newSet;
-          });
-        }
-      }, () => {
-        // On error, remove from pending
-        setPendingNotifications(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(routeId);
-          return newSet;
-        });
-      });
-    });
-
-    return () => unsubscribes.forEach(unsub => unsub());
-  }, [routes.map(r => r.id).join(',')]);
 
   const handleOpenChangeDriver = (route: RouteDocument) => {
     setOpenDropdownId(null); // Close dropdown first
@@ -311,36 +234,7 @@ export default function RoutesPage() {
 
     try {
       const driver = availableDrivers.find(d => d.id === newDriverId);
-      const updateRouteDriverFn = httpsCallable(functions, 'updateRouteDriver');
-
-      console.log('🔄 [ChangeDriver] Atualizando rota:', routeToModify.id);
-      console.log('🔄 [ChangeDriver] Novo driverId:', newDriverId);
-      console.log('🔄 [ChangeDriver] Status atual da rota:', routeToModify.status);
-      console.log('🔄 [ChangeDriver] DriverInfo:', driver ? { name: driver.name, vehicle: driver.vehicle } : null);
-
-      await updateRouteDriverFn({
-        routeId: routeToModify.id,
-        driverId: newDriverId,
-        driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
-      });
-
-      console.log('✅ [ChangeDriver] Rota atualizada com sucesso');
-
-      // Registrar no activity log
-      if (user && driver) {
-        logDriverChanged({
-          userId: user.uid,
-          userName: user.email || 'Usuário',
-          routeId: routeToModify.id,
-          routeCode: routeToModify.code || routeToModify.name,
-          serviceId: routeToModify.serviceId,
-          serviceCode: routeToModify.serviceCode,
-          oldDriverName: routeToModify.driverInfo?.name,
-          oldDriverId: routeToModify.driverId,
-          newDriverName: driver.name,
-          newDriverId: newDriverId,
-        }).catch(err => console.error('[ActivityLog] Erro ao registrar troca de motorista:', err));
-      }
+      await write(routeEndpoint(routeToModify.id),routeToModify.revision,{kind:'assign',driverId:newDriverId});
 
       toast({
         title: 'Motorista Alterado!',
@@ -367,22 +261,7 @@ export default function RoutesPage() {
     setIsDeleting(true);
 
     try {
-        const deleteRouteFn = httpsCallable(functions, 'deleteRoute');
-        await deleteRouteFn({ routeId: routeToModify.id });
-
-        // Registrar no activity log
-        if (user) {
-          logRouteDeleted({
-            userId: user.uid,
-            userName: user.email || 'Usuário',
-            routeId: routeToModify.id,
-            routeCode: routeToModify.code || routeToModify.name,
-            serviceId: routeToModify.serviceId,
-            serviceCode: routeToModify.serviceCode,
-            routeName: routeToModify.name,
-            totalPoints: routeToModify.stops?.length || 0,
-          }).catch(err => console.error('[ActivityLog] Erro ao registrar exclusão:', err));
-        }
+        await write(routeEndpoint(routeToModify.id),routeToModify.revision,{kind:'delete'});
 
         toast({
             title: 'Rota Removida!',
@@ -416,8 +295,7 @@ export default function RoutesPage() {
     setIsUpdating(true);
 
     try {
-      const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
-      await updateRouteNameFn({ routeId: routeToModify.id, name: newRouteName.trim() });
+      await write(routeEndpoint(routeToModify.id),routeToModify.revision,{kind:'rename',name:newRouteName.trim()});
 
       toast({
         title: 'Nome da Rota Atualizado!',
@@ -444,8 +322,7 @@ export default function RoutesPage() {
     setIsCompleting(true);
 
     try {
-      const completeRouteFn = httpsCallable(functions, 'completeRoute');
-      await completeRouteFn({ routeId: routeToModify.id });
+      await write(routeEndpoint(routeToModify.id),routeToModify.revision,{kind:'complete'});
 
       toast({
         title: 'Rota Concluída!',
@@ -479,39 +356,19 @@ export default function RoutesPage() {
     setIsCompletingService(true);
 
     try {
-      const forceCompleteServiceFn = httpsCallable(functions, 'forceCompleteService');
-      console.log('🔄 Forçando conclusão do serviço:', serviceToForceComplete.service.id);
-
-      const result = await forceCompleteServiceFn({ serviceId: serviceToForceComplete.service.id });
-      const data = result.data as { message: string; completedRoutes: number };
-
-      console.log('✅ Serviço concluído com sucesso:', data);
+      const target=serviceToForceComplete.service;
+      await write('/api/staff/services/'+encodeURIComponent(target.id),target.revision,{kind:'force-complete'});
 
       toast({
         title: 'Serviço Concluído!',
-        description: data.message || `O serviço "${serviceToForceComplete.service.code}" foi arquivado com sucesso.`,
+        description: `O serviço "${serviceToForceComplete.service.code}" foi arquivado com sucesso.`,
       });
 
       setIsForceCompleteServiceDialogOpen(false);
       setServiceToForceComplete(null);
     } catch (error: any) {
-      console.error('❌ Erro ao forçar conclusão do serviço:', {
-        error,
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        serviceId: serviceToForceComplete.service.id,
-      });
-
-      let errorMessage = 'Não foi possível forçar a conclusão do serviço.';
-
-      if (error.code === 'functions/not-found') {
-        errorMessage = 'A função ainda não foi deployada. Aguarde alguns minutos e tente novamente.';
-      } else if (error.code === 'functions/permission-denied') {
-        errorMessage = 'Você não tem permissão para executar esta ação.';
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
+      const errorMessage=error instanceof EarningsRequestError && error.status===403 ?
+        'Você não tem permissão para executar esta ação.' : 'Não foi possível forçar a conclusão do serviço.';
 
       toast({
         variant: 'destructive',
@@ -526,8 +383,8 @@ export default function RoutesPage() {
   const handleDuplicateRoute = async (route: RouteDocument) => {
     setIsDuplicating(true);
     try {
-      const duplicateRouteFn = httpsCallable(functions, 'duplicateRoute');
-      await duplicateRouteFn({ routeId: route.id });
+      await write(routeEndpoint(route.id),route.revision,{kind:'duplicate'});
+
       toast({
         title: 'Rota Duplicada!',
         description: `Uma cópia da rota "${route.name}" foi criada com sucesso.`,
@@ -545,7 +402,7 @@ export default function RoutesPage() {
   };
 
   const handleEditRoute = (route: RouteDocument) => {
-    const routeDate = route.plannedDate.toDate();
+    const routeDate = route.plannedDate;
     const period = getRoutePeriod(routeDate).label; // Matutino, Vespertino ou Noturno
     const routeData = {
       origin: route.origin,
@@ -664,7 +521,7 @@ export default function RoutesPage() {
 
   const groupedRoutes = React.useMemo(() => {
     return filteredRoutes.reduce((acc, route) => {
-      const dateKey = format(route.plannedDate.toDate(), 'yyyy-MM-dd');
+      const dateKey = format(route.plannedDate, 'yyyy-MM-dd');
       if (!acc[dateKey]) {
         acc[dateKey] = [];
       }
@@ -679,6 +536,11 @@ export default function RoutesPage() {
     return filteredServices.slice(startIndex, endIndex);
   }, [filteredServices, currentPage, itemsPerPage]);
 
+
+  if (!data && boardError) return <div className="space-y-3 p-6">
+    <p role="alert">Não foi possível carregar as rotas.</p>
+    <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
+  </div>;
 
   if (isLoading) {
       return (
@@ -732,7 +594,7 @@ export default function RoutesPage() {
     const route = routes.find(r => r.id === routeId);
     if (route) {
       // Preparar sessionStorage como handleEditRoute faz
-      const routeDate = route.plannedDate?.toDate?.() || new Date();
+      const routeDate = route.plannedDate || new Date();
       const period = getRoutePeriod(routeDate).label;
       const routeData = {
         origin: route.origin,
@@ -830,7 +692,7 @@ export default function RoutesPage() {
                   <AccordionTrigger className="p-4 hover:no-underline [&[data-state=open]>svg]:text-primary">
                     <div className="flex w-full items-center justify-between">
                       <div className="text-left">
-                        <p className="font-semibold text-lg">{format(dailyRoutes[0].plannedDate.toDate(), "dd 'de' MMMM, yyyy", { locale: ptBR })}</p>
+                        <p className="font-semibold text-lg">{format(dailyRoutes[0].plannedDate, "dd 'de' MMMM, yyyy", { locale: ptBR })}</p>
                         <p className="text-sm text-muted-foreground">
                           {dailyRoutes.length} rota{dailyRoutes.length > 1 ? 's' : ''} planejada{dailyRoutes.length > 1 ? 's' : ''}
                         </p>
@@ -851,7 +713,7 @@ export default function RoutesPage() {
                       {(() => {
                         // Agrupar rotas por período
                         const routesByPeriod = dailyRoutes.reduce((acc, route) => {
-                          const period = route.status === 'draft' ? 'Rascunho' : getRoutePeriod(route.plannedDate.toDate()).label;
+                          const period = route.status === 'draft' ? 'Rascunho' : getRoutePeriod(route.plannedDate).label;
                           if (!acc[period]) acc[period] = [];
                           acc[period].push(route);
                           return acc;
@@ -869,7 +731,7 @@ export default function RoutesPage() {
                               const periodRoutes = routesByPeriod[period];
                               const periodInfo = period === 'Rascunho'
                                 ? { icon: FileEdit, color: 'bg-yellow-500', bgLight: 'bg-yellow-50 dark:bg-yellow-950/30' }
-                                : getRoutePeriod(periodRoutes[0].plannedDate.toDate());
+                                : getRoutePeriod(periodRoutes[0].plannedDate);
                               const PeriodIcon = periodInfo.icon;
 
                               return (
@@ -902,8 +764,8 @@ export default function RoutesPage() {
                                                       Rascunho
                                                     </Badge>
                                                   ) : (
-                                                    <Badge className={`${getRoutePeriod(route.plannedDate.toDate()).color} text-white hover:${getRoutePeriod(route.plannedDate.toDate()).color}`}>
-                                                      {getRoutePeriod(route.plannedDate.toDate()).label}
+                                                    <Badge className={`${getRoutePeriod(route.plannedDate).color} text-white hover:${getRoutePeriod(route.plannedDate).color}`}>
+                                                      {getRoutePeriod(route.plannedDate).label}
                                                     </Badge>
                                                   )}
                                                   {pendingNotifications.has(route.id) && (
@@ -914,7 +776,7 @@ export default function RoutesPage() {
                                                   )}
                                                 </div>
                                                 <CardDescription>
-                                                    {format(route.plannedDate.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                                    {format(route.plannedDate, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                                                 </CardDescription>
                                             </div>
                                             <div className="flex items-center gap-2">

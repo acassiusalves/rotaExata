@@ -13,8 +13,10 @@ type Summary={userId:string;scopeId:string;name:string;role:StaffRole;paths:Staf
 type StaffSession=Summary & ReturnType<typeof useEarnings>;
 const Context=createContext<StaffSession|null>(null);
 
+export function useOptionalStaff() {return useContext(Context);}
+
 export function useStaff() {
-  const actor=useContext(Context);
+  const actor=useOptionalStaff();
   if (!actor) throw new Error('Staff session is required');
   return actor;
 }

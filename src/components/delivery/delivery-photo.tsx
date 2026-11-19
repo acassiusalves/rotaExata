@@ -3,13 +3,20 @@
 import {useEffect,useState,type ImgHTMLAttributes} from 'react';
 import {useOptionalDriverRuntime} from '@/components/driver/driver-runtime';
 import {useAuth} from '@/hooks/auth-context';
-import {isProtectedPhoto} from '@/lib/driver/photo-policy';
+import {usePathname} from 'next/navigation';
+import {useOptionalStaff} from '@/components/staff/staff-session';
+import {staffPhotoViewForPath} from '@/lib/staff/media-policy';
+import {protectedPhotoPrefix,isProtectedPhoto} from '@/lib/driver/photo-policy';
 
 export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<HTMLImageElement>,'src'> & {src:string;expand?:boolean}) {
   const runtime=useOptionalDriverRuntime();
+  const staff=useOptionalStaff();
+  const inStaff=!!staff;
+  const staffView=staffPhotoViewForPath(usePathname());
   const {user}=useAuth();
-  const request=runtime?.request;
-  const actor=runtime?.userId ?? user?.uid;
+  const request=staff?.request ?? runtime?.request;
+  const actor=staff?.userId ?? runtime?.userId ?? user?.uid;
+  const staffSource=staff && staffView ? '/api/staff/media/'+src.slice(protectedPhotoPrefix.length)+'?view='+staffView:null;
   const native=runtime?.native;
   const protectedSource=isProtectedPhoto(src);
   const [loaded,setLoaded]=useState<{src:string;actor?:string;url?:string}>();
@@ -20,7 +27,10 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
     async function load() {
       const headers={'x-rota-media-mode':request ? native ? 'native':'legacy-driver':'operator'};
       let result:{src:string};
-      if (request) result=await request(src,{headers,signal:controller.signal});
+      if (inStaff) {
+        if (!staffSource || !request) throw new Error('photo unavailable');
+        result=await request(staffSource,{signal:controller.signal});
+      } else if (request) result=await request(src,{headers,signal:controller.signal});
       else {
         if (!user) return;
         const response=await fetch(src,{headers:{...headers,Authorization:'Bearer '+await user.getIdToken()},
@@ -36,7 +46,7 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
     }
     void load().catch(()=>{if(!controller.signal.aborted) setLoaded({src,actor});});
     return ()=>{controller.abort();if(objectUrl) URL.revokeObjectURL(objectUrl);};
-  },[actor,native,protectedSource,request,src,user]);
+  },[actor,native,protectedSource,request,src,staffSource,inStaff,user]);
 
   const current=loaded?.src===src && loaded.actor===actor ? loaded:undefined;
   const url=protectedSource ? current?.url:src;
