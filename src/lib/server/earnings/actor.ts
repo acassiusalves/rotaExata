@@ -18,6 +18,7 @@ const actorSchema = z.object({
   revision: z.number().int().nonnegative().safe(),
   policyRevision: z.number().int().nonnegative().safe(),
   sourceUid: z.string().min(1).max(128).optional(),
+  sourceKind:z.enum(['firebase','native']).optional(),
   role: z.enum(['admin', 'socio', 'gestor', 'driver']),
   application: z.enum(['lunna', 'driver']),
 });

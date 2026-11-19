@@ -1,6 +1,7 @@
 
 'use client';
 
+import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import * as React from 'react';
 import Link from 'next/link';
 import { Route as RouteIcon, Truck, MapPin, Milestone, Clock, User, Loader2, UserCog, MoreVertical, Trash2, Pencil, Copy, ChevronDown, AlertCircle, CheckCircle, Check, FileEdit, Sun, Sunset, Moon } from 'lucide-react';
@@ -214,6 +215,7 @@ export default function RoutesPage() {
       const driversData: Driver[] = [];
       snapshot.forEach(doc => {
         const data = doc.data();
+        if (!isSourceDriverAssignable(data)) return;
         driversData.push({
           id: doc.id,
           name: data.displayName || data.name || 'Motorista sem nome',

@@ -424,7 +424,7 @@ export default function DriversPage() {
               <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
               {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
             </Button>
-            {nativeDriverEnabled ? <Button asChild><Link href="/driver/admin/accounts">Segurança das contas</Link></Button> : <Button onClick={() => setIsAddDialogOpen(true)}>
+            {nativeDriverEnabled ? <Button asChild><Link href="/driver/admin/accounts#novo-motorista">Cadastrar e gerenciar contas</Link></Button> : <Button onClick={() => setIsAddDialogOpen(true)}>
               <PlusCircle className="mr-2 h-4 w-4" />
               Adicionar Motorista
             </Button>}

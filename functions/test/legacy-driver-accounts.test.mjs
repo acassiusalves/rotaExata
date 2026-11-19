@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { blocksLegacyDriverAccountAction } from '../lib/legacy-driver-accounts.js';
+import { blocksLegacyDriverAccountAction,sourceDriverAssignable } from '../lib/legacy-driver-accounts.js';
 
 const phase={mode:'supabase',driverUids:['synthetic-driver']};
 
@@ -102,4 +102,18 @@ test('escritores operacionais passam pela verificação de credencial e perfil a
   uid='synthetic-operator';
   await assert.rejects(exports.deleteRoute(request()),/arrival at operational store/);
   assert.equal(door,1);
+});
+
+
+test('a projeção nativa bloqueia operações legadas e permite despacho só quando pronta e sem bloqueio',()=>{
+  const id='11111111-1111-4111-8111-111111111111';
+  const marker={nativeDriverProvisioningId:'synthetic-command'};
+  assert.equal(blocksLegacyDriverAccountAction(phase,{uid:id},marker),true);
+  assert.equal(blocksLegacyDriverAccountAction({mode:'firebase'},{uid:id},marker),true);
+  assert.equal(sourceDriverAssignable(id,undefined),false);
+  assert.equal(sourceDriverAssignable(id,marker),false);
+  const ready={...marker,role:'driver',nativeDriverReady:true,nativeDriverDispatchEnabled:true};
+  assert.equal(sourceDriverAssignable(id,ready),true);
+  assert.equal(sourceDriverAssignable(id,{...ready,nativeDriverDispatchEnabled:false}),false);
+  assert.equal(sourceDriverAssignable('legacy-source-id',undefined),true);
 });

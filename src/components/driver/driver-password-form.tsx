@@ -14,7 +14,7 @@ const errors:Record<string,string> = {
   driver_password_rate_limited:'Aguarde alguns minutos antes de tentar novamente.',
 };
 
-export function DriverPasswordForm({onUpdated}:{onUpdated:()=>void}) {
+export function DriverPasswordForm({onUpdated,firstAccess=false}:{onUpdated:()=>void;firstAccess?:boolean}) {
   const {request,signOut}=useEarnings();
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
@@ -28,7 +28,8 @@ export function DriverPasswordForm({onUpdated}:{onUpdated:()=>void}) {
     }
     setBusy(true); setError('');
     try {
-      await request('/api/driver/password',{method:'POST',body:JSON.stringify({password})});
+      await request(firstAccess?'/api/driver/onboarding':'/api/driver/password',{method:'POST',
+        body:JSON.stringify(firstAccess?{action:'password',password}:{password})});
       onUpdated();
       await signOut();
     } catch (error) {

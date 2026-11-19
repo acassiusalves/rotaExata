@@ -135,3 +135,30 @@ test('corte nativo fecha o SDK Firebase para motoristas e preserva operações d
     context.firestore().doc('rotaAuthTransition/driver').update({mode:'firebase'}));
   await assertSucceeds(db('a').doc('routes/route-a').get());
 });
+
+test('staff only dispatches a new native UUID after its server-owned projection is enabled',async()=>{
+  const id='11111111-1111-4111-8111-111111111111';
+  const target=db('admin').doc('routes/source-dispatch');
+  await assertFails(target.set({driverId:id,status:'dispatched'}));
+  await assertFails(db('admin').doc('users/'+id).set({role:'driver'}));
+  await assertSucceeds(db('admin').doc('users/'+id).set({role:'usuario'}));
+  await assertFails(db('admin').doc('users/'+id).update({role:'driver'}));
+  await env.withSecurityRulesDisabled(async context=>{
+    await context.firestore().doc('users/'+id).set({nativeDriverProvisioningId:'owned',nativeDriverReady:false,nativeDriverDispatchEnabled:false});
+  });
+  await assertFails(target.set({driverId:id,status:'dispatched'}));
+  await assertFails(db('admin').doc('users/'+id).update({nativeDriverReady:true,role:'driver'}));
+  await assertFails(db('admin').doc('users/'+id).delete());
+  await env.withSecurityRulesDisabled(async context=>{
+    await context.firestore().doc('users/'+id).update({nativeDriverReady:true,nativeDriverDispatchEnabled:true,role:'driver'});
+  });
+  await assertSucceeds(target.set({driverId:id,status:'dispatched'}));
+  await assertSucceeds(db('admin').doc('routes/route-a').update({driverId:id}));
+  await env.withSecurityRulesDisabled(async context=>{
+    await context.firestore().doc('users/'+id).update({nativeDriverDispatchEnabled:false});
+  });
+  await assertFails(db('admin').doc('routes/second-dispatch').set({driverId:id,status:'dispatched'}));
+  await assertFails(db('admin').doc('users/'+id).update({nativeDriverDispatchEnabled:true}));
+  await assertSucceeds(target.update({driverInfo:{name:'Atualização existente'}}));
+  await assertSucceeds(target.update({driverId:'a'})); // UID legado preservado
+});

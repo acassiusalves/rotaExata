@@ -1,6 +1,7 @@
 
 'use client';
 
+import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import * as React from 'react';
 import {
   Card,
@@ -927,6 +928,7 @@ export default function ServiceAcompanharPage() {
       const driversData: Driver[] = [];
       snapshot.forEach(doc => {
         const data = doc.data();
+        if (!isSourceDriverAssignable(data)) return;
         driversData.push({
           id: doc.id,
           name: data.displayName || data.name || 'Motorista sem nome',

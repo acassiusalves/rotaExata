@@ -3,7 +3,9 @@ export type LegacyDriverAccountAction = {role:string} | {uid:string};
 export function blocksLegacyDriverAccountAction(
   phase: {mode?:unknown;driverUids?:unknown} | undefined,
   action: LegacyDriverAccountAction,
+  profile?: {nativeDriverProvisioningId?:unknown},
 ) {
+  if ("uid" in action && typeof profile?.nativeDriverProvisioningId==="string" && profile.nativeDriverProvisioningId) return true;
   if (phase?.mode!=="supabase") return false;
   if ("role" in action) return action.role==="driver";
 
@@ -11,4 +13,16 @@ export function blocksLegacyDriverAccountAction(
   // Uma fase nativa incompleta não permite identificar com segurança a
   // autoridade de uma alteração de credencial ou de cadastro.
   return !Array.isArray(uids) || uids.length===0 || uids.some(uid=>typeof uid!=="string") || uids.includes(action.uid);
+}
+
+
+export function isNativeDriverUuid(uid:unknown):uid is string {
+  return typeof uid==="string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uid);
+}
+
+export function sourceDriverAssignable(
+  uid:unknown,profile:{role?:unknown;nativeDriverProvisioningId?:unknown;nativeDriverReady?:unknown;nativeDriverDispatchEnabled?:unknown}|undefined,
+) {
+  return !isNativeDriverUuid(uid) || (profile?.role==="driver" && (!profile.nativeDriverProvisioningId ||
+    (profile.nativeDriverReady===true && profile.nativeDriverDispatchEnabled===true)));
 }

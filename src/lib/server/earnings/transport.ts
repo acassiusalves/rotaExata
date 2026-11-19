@@ -63,12 +63,37 @@ export async function updateSupabasePassword(token: string, userId: string, pass
   if (user?.id!==userId) throw new EarningsError(503,'earnings_unavailable');
 }
 
+function earningsServiceHeaders() {
+  const key=process.env.SUPABASE_EARNINGS_SECRET_KEY;
+  if (!key) throw new EarningsError(503,'earnings_unavailable');
+  const headers:Record<string,string>={apikey:key};
+  if (!key.startsWith('sb_secret_')) headers.authorization='Bearer '+key;
+  return headers;
+}
+
+export async function findSupabaseDriverAuth(id:string) {
+  const response=await request('/auth/v1/admin/users/'+encodeURIComponent(id),earningsServiceHeaders());
+  if (response.status===404) return null;
+  if (!response.ok) throw new EarningsError(503,'earnings_unavailable');
+  return response.json();
+}
+
+export async function createSupabaseDriverAuth(id:string,email:string,commandId:string) {
+  const response=await request('/auth/v1/admin/users',earningsServiceHeaders(),{
+    id,email,email_confirm:false,app_metadata:{rota_driver_provisioning:commandId},
+  });
+  if (!response.ok) {
+    const payload=await response.json().catch(()=>null);
+    const code=payload?.error_code ?? payload?.code;
+    if (code==='email_exists' || code==='user_already_exists') throw new EarningsError(409,'driver_provision_email_exists');
+    throw new EarningsError(503,'earnings_unavailable');
+  }
+  return response.json();
+}
+
 export async function earningsRpc<Result = unknown>(name: string, params: Record<string, unknown>): Promise<Result> {
-  const key = process.env.SUPABASE_EARNINGS_SECRET_KEY;
-  if (!key || !/^[a-z][a-z_]+$/.test(name)) throw new EarningsError(503, 'earnings_unavailable');
-  const headers: Record<string, string> = { apikey: key };
-  if (!key.startsWith('sb_secret_')) headers.authorization = 'Bearer ' + key;
-  const response = await request('/rest/v1/rpc/' + name, headers, params);
+  if (!/^[a-z][a-z_]+$/.test(name)) throw new EarningsError(503, 'earnings_unavailable');
+  const response = await request('/rest/v1/rpc/' + name, earningsServiceHeaders(), params);
   if (!response.ok) throw new EarningsError(503, 'earnings_unavailable');
   try {
     return await response.json() as Result;

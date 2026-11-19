@@ -5,7 +5,7 @@ import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { PlaceValue, RouteInfo, LunnaService } from '@/lib/types';
 import { logRouteCreatedAdmin, logPointsCreatedAdmin, logRouteDispatchedAdmin } from '@/lib/firebase/activity-log-admin';
-import { InvalidDispatchDriverError, resolveDispatchDriver } from '@/lib/dispatch-driver';
+import { InvalidDispatchDriverError, isNativeSourceUuid, resolveDispatchDriver } from '@/lib/dispatch-driver';
 
 // Função para gerar código de rota dentro de um serviço (LN-XXXX-A, LN-XXXX-B, etc.)
 function generateRouteCodeForService(serviceCode: string, routeIndex: number): string {
@@ -146,7 +146,13 @@ export async function POST(
         (routeData as any).driverInfo = { name: driver.name, vehicle: driver.vehicle };
       }
 
-      const routeRef = await adminDb.collection('routes').add(routeData);
+      const routeRef = database.collection('routes').doc();
+      if (typeof routeConfig.driverId==='string' && isNativeSourceUuid(routeConfig.driverId)) {
+        await database.runTransaction(async tx=>{
+          await resolveDispatchDriver(routeConfig.driverId,async id=>(await tx.get(database.collection('users').doc(id))).data() ?? null);
+          tx.create(routeRef,routeData);
+        });
+      } else await routeRef.create(routeData);
       routeIds.push(routeRef.id);
 
       createdRoutes.push({

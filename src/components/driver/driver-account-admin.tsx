@@ -4,6 +4,7 @@ import { useCallback,useEffect,useRef,useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { EarningsRequestError,EarningsShell,earningsMessage,useEarnings } from '@/components/earnings/earnings-shell';
+import { DriverProvisioning } from './driver-provisioning';
 import { useConfirm } from '@/hooks/use-confirm';
 import type { DriverAccount,DriverAccountCommand } from '@/lib/driver/account-contract';
 
@@ -70,6 +71,7 @@ function DriverAccountControls() {
         <h1 className="mt-2 text-2xl font-semibold">Contas de motoristas</h1></div>
       <Button variant="outline" onClick={()=>void signOut()}>Sair da conta Lunna</Button>
     </header>
+    <DriverProvisioning />
     {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
     {message && <p className="text-sm" role="status">{message}</p>}
     {!rows && !error && <p role="status">Carregando contas…</p>}
@@ -88,7 +90,7 @@ function DriverAccountControls() {
         <Button size="sm" variant="outline" disabled={pending || !account.active} onClick={()=>void run(account,'require_password_change')}>Exigir troca de senha</Button>
       </div>
     </article>)}
-    <p className="text-sm text-muted-foreground">Convites e exclusões de contas de motoristas estão indisponíveis durante a transição.</p>
+    <p className="text-sm text-muted-foreground">Use o bloqueio de acesso para retirar uma conta da operação.</p>
   </main>;
 }
 

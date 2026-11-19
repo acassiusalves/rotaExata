@@ -97,6 +97,7 @@ function SignIn({ client,portal }: { client: SupabaseClient;portal:boolean }) {
     <Button className="w-full" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</Button>
     {portal && unverified && <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={()=>void resend()}>Reenviar confirmação</Button>}
     <Link href={"/driver/conta?next="+encodeURIComponent(returnPath)} className="block text-center text-sm text-muted-foreground underline">Esqueci minha senha</Link>
+    {portal && <Link href="/driver/conta?primeiro=1" className="block text-center text-sm text-muted-foreground underline">Primeiro acesso do motorista</Link>}
     {portal && <Link href="/login?admin=1" className="block text-center text-sm text-muted-foreground underline">Acesso administrativo</Link>}
   </form>;
 }

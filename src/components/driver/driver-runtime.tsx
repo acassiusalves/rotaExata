@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 
 import { createContext,useCallback,useContext,useEffect,useMemo,useRef,useState,type ReactNode } from 'react';
 import { usePathname,useRouter } from 'next/navigation';
@@ -105,6 +106,7 @@ function RuntimeProfile({request,userId,email,signOut,native,children}:{
   if (passwordRequired) return <main className="px-4 py-6"><DriverPasswordForm onUpdated={()=>setPasswordRequired(false)} /></main>;
   if (error) return <div className="mx-auto max-w-sm space-y-3 p-6" role="alert"><p>{error}</p>
     <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button>
+    {native && <Button asChild variant="link"><Link href="/driver/conta?primeiro=1">Retomar primeiro acesso</Link></Button>}
     <Button variant="ghost" onClick={()=>void out()}>Sair</Button></div>;
   if (!value && stale) return <div className="space-y-3 p-6" role="status"><p>O acesso está sendo verificado.</p>
     <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button></div>;

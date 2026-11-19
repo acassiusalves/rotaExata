@@ -13,6 +13,12 @@ export async function driverAuthority(request: Request, phase:'native'|'legacy',
         process.env.FIREBASE_PROJECT_ID!==process.env.ROTA_EARNINGS_SOURCE_PROJECT) {
       throw new EarningsError(503,'route_unavailable');
     }
+    if (actor.sourceKind==='native') {
+      const profile=(await adminDb.collection('users').doc(actor.sourceUid!).get()).data();
+      if (!profile?.nativeDriverProvisioningId || profile.nativeDriverReady!==true || profile.role!=='driver') {
+        throw new EarningsError(403,'route_access_denied');
+      }
+    }
     return { sourceUid:actor.sourceUid!,userId:actor.userId,scopeId:actor.scopeId,sessionId:actor.sessionId,native:true };
   }
   if (nativeDriverEnabled) throw new EarningsError(403,'route_access_denied');

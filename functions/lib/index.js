@@ -79,8 +79,10 @@ async function assertAuthorizedRole(uid, errorMessage) {
 async function assertLegacyDriverAccountAllowed(action) {
     if ("role" in action && action.role !== "driver")
         return;
-    const phase = await (0, firestore_2.getFirestore)().doc("rotaAuthTransition/driver").get();
-    if ((0, legacy_driver_accounts_1.blocksLegacyDriverAccountAction)(phase.data(), action)) {
+    const db = (0, firestore_2.getFirestore)();
+    const phase = await db.doc("rotaAuthTransition/driver").get();
+    const profile = "uid" in action && (0, legacy_driver_accounts_1.isNativeDriverUuid)(action.uid) ? (await db.collection("users").doc(action.uid).get()).data() : undefined;
+    if ((0, legacy_driver_accounts_1.blocksLegacyDriverAccountAction)(phase.data(), action, profile)) {
         throw new https_1.HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
     }
 }
@@ -397,7 +399,6 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
         throw new https_1.HttpsError("invalid-argument", "uid e displayName são obrigatórios");
     }
     const db = (0, firestore_2.getFirestore)();
-    const auth = (0, auth_1.getAuth)();
     const userRef = db.collection("users").doc(uid);
     const userDoc = await userRef.get();
     if (!userDoc.exists) {
@@ -411,9 +412,8 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
         type: vehicleType || "N/A",
         plate: vehiclePlate || "N/A",
     };
-    await auth.updateUser(uid, {
-        displayName,
-    });
+    if (!userData.nativeDriverProvisioningId)
+        await (0, auth_1.getAuth)().updateUser(uid, { displayName });
     await userRef.set({
         displayName,
         name: displayName,
@@ -514,25 +514,32 @@ exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
     try {
         const db = (0, firestore_2.getFirestore)();
         const routeRef = db.collection("routes").doc(routeId);
-        // Buscar a rota atual para verificar o status
-        const routeDoc = await routeRef.get();
-        const routeData = routeDoc.data();
-        const currentStatus = routeData?.status;
-        // Se a rota não está em um status ativo, mudar para dispatched ao receber motorista
-        const updateData = {
-            driverId,
-            driverInfo
-        };
-        // Status que precisam ser convertidos para 'dispatched' quando um motorista é atribuído
-        const inactiveStatuses = ['draft', 'pending'];
-        if (inactiveStatuses.includes(currentStatus)) {
-            updateData.status = 'dispatched';
-            console.log(`📦 Rota ${routeId} mudando de ${currentStatus} para dispatched`);
-        }
-        await routeRef.update(updateData);
+        await db.runTransaction(async (tx) => {
+            const profile = (0, legacy_driver_accounts_1.isNativeDriverUuid)(driverId) ? (await tx.get(db.collection("users").doc(driverId))).data() : undefined;
+            if (!(0, legacy_driver_accounts_1.sourceDriverAssignable)(driverId, profile))
+                throw new https_1.HttpsError("failed-precondition", "O motorista selecionado está indisponível para despacho.");
+            // Buscar a rota atual para verificar o status
+            const routeDoc = await tx.get(routeRef);
+            const routeData = routeDoc.data();
+            const currentStatus = routeData?.status;
+            // Se a rota não está em um status ativo, mudar para dispatched ao receber motorista
+            const updateData = {
+                driverId,
+                driverInfo
+            };
+            // Status que precisam ser convertidos para 'dispatched' quando um motorista é atribuído
+            const inactiveStatuses = ['draft', 'pending'];
+            if (inactiveStatuses.includes(currentStatus)) {
+                updateData.status = 'dispatched';
+                console.log(`📦 Rota ${routeId} mudando de ${currentStatus} para dispatched`);
+            }
+            tx.update(routeRef, updateData);
+        });
         return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
     }
     catch (error) {
+        if (error instanceof https_1.HttpsError)
+            throw error;
         const msg = error.message || "Falha ao atualizar o motorista da rota.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -572,11 +579,20 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
             // Alterar source para 'rota-exata' já que não faz mais parte do serviço Luna
             newRouteData.source = "rota-exata";
         }
-        // Criar um novo documento
-        await db.collection("routes").add(newRouteData);
+        // Preserve the assignment only while its native projection permits dispatch.
+        const target = db.collection("routes").doc();
+        await db.runTransaction(async (tx) => {
+            const driverId = newRouteData.driverId;
+            const profile = (0, legacy_driver_accounts_1.isNativeDriverUuid)(driverId) ? (await tx.get(db.collection("users").doc(driverId))).data() : undefined;
+            if (!(0, legacy_driver_accounts_1.sourceDriverAssignable)(driverId, profile))
+                throw new https_1.HttpsError("failed-precondition", "O motorista selecionado está indisponível para despacho.");
+            tx.create(target, newRouteData);
+        });
         return { ok: true, message: `Rota duplicada com sucesso.` };
     }
     catch (error) {
+        if (error instanceof https_1.HttpsError)
+            throw error;
         const msg = error.message || "Falha ao duplicar a rota.";
         throw new https_1.HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -1033,6 +1049,7 @@ exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southa
         if (driverData?.role !== "driver") {
             throw new https_1.HttpsError("invalid-argument", "O usuário especificado não é um motorista");
         }
+        await assertLegacyDriverAccountAllowed({ uid: driverId });
         // Criar custom token para o motorista
         const customToken = await auth.createCustomToken(driverId);
         // Registrar ação de impersonação para auditoria
@@ -1059,6 +1076,8 @@ exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southa
     }
     catch (err) {
         const error = err;
+        if (error instanceof https_1.HttpsError)
+            throw error;
         const msg = error.message || "Falha ao gerar token de impersonação";
         console.error("❌ Erro ao gerar token de impersonação:", error);
         throw new https_1.HttpsError("internal", msg);
