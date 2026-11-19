@@ -64,3 +64,6 @@ A homologação integrada repetiu a emissão de **R$ 37,00**, a aprovação, a b
 O comprovante novo foi gravado no Storage emulado e lido pela API privada. O titular leu a imagem, a outra conta recebeu 404 e o token revogado recebeu 401. A validação de push aceitou somente a associação da sessão ativa e recusou a prova após revogação. Os testes do emissor e do worker usaram mensagens sintéticas, inclusive entrega atrasada após troca de conta.
 
 No Chrome, uma falha 503 preservou a foto e a observação da confirmação e bloqueou a escrita até a revalidação. O motorista saiu de Meus ganhos offline, recarregou e permaneceu desconectado após reconectar. O operador sintético recuperou a senha via Mailpit e PKCE e voltou ao painel original. A senha da conta de teste foi restaurada.
+
+
+A migração de controles de conta foi aplicada ao Sistema Lunna como `20261119005719_rota_driver_account_controls.sql`, com o SHA-256 `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. As três funções remotas corresponderam às definições homologadas. A importação de identidades e a liberação da PWA dependem das etapas operacionais do corte.
