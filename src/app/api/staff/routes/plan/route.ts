@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { assertEditorResources,requireStaffEditor } from '@/lib/server/staff/editor-access';
 import { staffEditorSurfaceSchema } from '@/lib/staff/access';
-import { applyStaffPlanBatch } from '@/lib/server/staff/route-plan';
+import { applyStaffPlanBatch,isStaffPlanReplay } from '@/lib/server/staff/route-plan';
 import { projectStaffEvidencePlace } from '@/lib/server/staff/route-projection';
 import { staffPlanBatchSchema } from '@/lib/staff/route-plan-contract';
 import { EarningsError,earningsErrorResponse,readJsonBody } from '@/lib/server/earnings/transport';
@@ -17,7 +17,8 @@ export async function POST(request:Request) {
     const {actor,db}=await requireStaffEditor(request,surface);
     await assertEditorResources(db,actor,surface,{
       routeIds:body.existingPlans.map(plan=>plan.routeId),serviceId:body.serviceLink?.serviceId ?? body.unlink?.serviceId,
-      creating:!!body.newRoutes?.length,
+      creating:!!body.newRoutes?.length,draftId:body.draftDispatch?.routeId,
+      replayedDraft:()=>isStaffPlanReplay(db,actor,body),
     });
     const result=await applyStaffPlanBatch(db,actor,body);
     return privateJson({

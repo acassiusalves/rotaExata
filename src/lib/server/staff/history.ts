@@ -3,6 +3,7 @@ import { EarningsError } from '../earnings/transport.ts';
 import { projectStaffRoute } from './route-projection.ts';
 import { staffRouteRevision } from './route-commands.ts';
 import { driverTimestamp } from '../../driver/runtime-contract.ts';
+import { getStopIdentityKey } from '../../route-stop-utils.ts';
 
 const pageSize=100;
 const completeStatuses=['completed','completed_auto'];
@@ -71,7 +72,8 @@ export async function readStaffRouteRemovals(db:Firestore,routeId:string) {
   const entries=await db.collection('activity_log').where('routeId','==',routeId)
     .orderBy('timestamp','desc').limit(200).get();
   const stops=route.get('stops');
-  const activeStopIds=new Set((Array.isArray(stops) ? stops:[]).filter(stop=>stop && !stop.unlinkedAt).map(stop=>stop.id));
+  const activeStopIds=new Set((Array.isArray(stops) ? stops:[]).filter(stop=>stop && !stop.unlinkedAt)
+    .flatMap(stop=>[stop.id,stop.pointCode,stop.orderNumber,stop.placeId,getStopIdentityKey(stop)].filter(Boolean)));
   const removals=entries.docs.filter(entry=>entry.get('eventType')==='point_removed_from_route' &&
     !activeStopIds.has(entry.get('pointId') ?? entry.get('entityId'))).slice(0,50);
   const removed=await Promise.all(removals.map(async entry=>{

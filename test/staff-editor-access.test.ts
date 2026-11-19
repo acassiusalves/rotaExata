@@ -15,3 +15,9 @@ test('editor follows the explicit leaf and actual dynamic path rather than only 
   assert.deepEqual(staffEditorSurface('/routes/service/s-1/organize'),{view:'service-organize',anchor:'s-1'});
   assert.equal(staffEditorPath({view:'route-follow',anchor:'../r-1'}),null);
 });
+
+test('plan authorization includes the consumed draft',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const api=readFileSync('src/app/api/staff/routes/plan/route.ts','utf8');
+  assert.match(api,/assertEditorResources\(db,actor,surface,\{[\s\S]*?draftId:body\.draftDispatch\?\.routeId/);
+});

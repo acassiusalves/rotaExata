@@ -33,11 +33,14 @@ export function editorCanReadService(actor:StaffActor,surface:StaffEditorSurface
 }
 
 export async function assertEditorResources(db:Firestore,actor:StaffActor,surface:StaffEditorSurface,refs:{
-  routeIds?:string[];serviceId?:string;creating?:boolean;draftId?:string;
+  routeIds?:string[];serviceId?:string;creating?:boolean;draftId?:string;replayedDraft?:()=>Promise<boolean>;
 }) {
   const routeIds=[...new Set([...(refs.routeIds ?? []),...(refs.draftId ? [refs.draftId]:[])])];
   const docs=routeIds.length ? await db.getAll(...routeIds.map(id=>db.collection('routes').doc(id))):[];
-  if (docs.some(doc=>!doc.exists || !editorCanReadRoute(actor,surface,editorRouteTarget(doc)))) {
+  for (const doc of docs) {
+    if (doc.exists && editorCanReadRoute(actor,surface,editorRouteTarget(doc))) continue;
+    if (!doc.exists && doc.id===refs.draftId && editorCanReadRoute(actor,surface,{id:doc.id,status:'draft'}) &&
+        await refs.replayedDraft?.()) continue;
     throw new EarningsError(403,'staff_access_denied');
   }
   if (refs.serviceId && !editorCanReadService(actor,surface,refs.serviceId)) {

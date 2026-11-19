@@ -92,10 +92,21 @@ export function projectStaffRoute(id:string,data:Fields,revision?:string):StaffR
 }
 
 const serviceDates=['plannedDate','createdAt','updatedAt','completedAt'] as const;
+const serviceSearchFields=['customerName','address','phone','orderNumber'] as const;
+export type StaffServiceSearchStop=Partial<Record<typeof serviceSearchFields[number],string>>;
+
+function projectServiceSearchStop(value:unknown):StaffServiceSearchStop {
+  const stop=row(value);
+  return Object.fromEntries(serviceSearchFields.flatMap(field=>{
+    const item=stop[field];
+    return typeof item==='string' || typeof item==='number' ? [[field,String(item)]]:[];
+  }));
+}
+
 export type StaffService = Pick<LunnaService,'code'|'name'|'source'|'status'> &
   Partial<Record<typeof serviceDates[number],string|null>> & {
     id:string; revision?:string; origin:StaffPlace; routeIds:string[]; lunnaOrderIds:string[];
-    stats?:LunnaService['stats'];allStops?:StaffPlace[];
+    stats?:LunnaService['stats'];allStops?:StaffPlace[];searchStops?:StaffServiceSearchStop[];
   };
 export function projectStaffService(id:string,data:Fields,includeStops:boolean,revision?:string):StaffService {
   const stats=row(data.stats);
@@ -113,6 +124,7 @@ export function projectStaffService(id:string,data:Fields,includeStops:boolean,r
       ...project(stats,['totalRoutes','completedRoutes','totalDeliveries','completedDeliveries','failedDeliveries']),
     }}:{}),
     ...(includeStops ? {allStops:Array.isArray(data.allStops) ? data.allStops.map(projectStaffPlace):[]}:{}),
+    ...(!includeStops && Array.isArray(data.allStops) ? {searchStops:data.allStops.filter(stop=>!stop?.unlinkedAt).map(projectServiceSearchStop)}:{}),
   };
 }
 

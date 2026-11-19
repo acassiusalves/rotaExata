@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import {
   Search,
   Download,
@@ -257,13 +258,14 @@ export default function NumbersListPage() {
     }
   };
 
-  if (nativeStaffEnabled && nativeReport.error) return <div className="space-y-2 p-6" role="alert">
+  if (nativeStaffEnabled && nativeReport.error && !nativeReport.data) return <div className="space-y-2 p-6" role="alert">
     <p>{reportErrorMessage(nativeReport.error)}</p>
     <Button variant="outline" onClick={nativeReport.refresh}>Tentar novamente</Button>
   </div>;
 
   return (
     <div className="space-y-6 p-6">
+      {nativeStaffEnabled && !!nativeReport.error && <StaffRefreshNotice retry={nativeReport.refresh} />}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

@@ -39,3 +39,10 @@ test('uses distinct service list and planning projections without private fields
   assert.equal(planned.stats?.totalRoutes,2);
   assert.equal(JSON.stringify(planned).includes('private'),false);
 });
+
+test('service board projects only the pre-dispatch fields needed by search',()=>{
+  const service=projectStaffService('A',{allStops:[
+    {customerName:'Cliente',address:'Rua',phone:'62910000000',orderNumber:'PED900',notes:'private',items:[{id:'item'}]},
+  ]},false);
+  assert.deepEqual(service.searchStops,[{customerName:'Cliente',address:'Rua',phone:'62910000000',orderNumber:'PED900'}]);
+});

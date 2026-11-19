@@ -40,11 +40,12 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { collectStaffPages,loadStaffPageList,staffPageUrl } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 import type { StaffRouteCommand } from '@/lib/staff/route-contract';
-import type { RouteInfo, Driver, LunnaService } from '@/lib/types';
+import type { RouteInfo, Driver, LunnaService, PlaceValue } from '@/lib/types';
 import { ServiceCard } from '@/components/routes/service-card';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -110,7 +111,7 @@ const getRoutePeriod = (date: Date): { label: string; color: string; icon: React
 
 // Type for Luna Service with its routes
 type ServiceWithRoutes = {
-  service: LunnaService & { id: string;revision:string };
+  service: LunnaService & { id: string;revision:string;searchStops?:Partial<Pick<PlaceValue,'customerName'|'address'|'phone'|'orderNumber'>>[] };
   routes: RouteDocument[];
 };
 
@@ -496,7 +497,7 @@ export default function RoutesPage() {
       }
 
       // Buscar nos stops do serviço
-      if (s.service.allStops?.some((stop) => {
+      if ((s.service.searchStops ?? s.service.allStops)?.some((stop) => {
         return (
           stop.customerName?.toLowerCase().includes(normalizedQuery) ||
           stop.address?.toLowerCase().includes(normalizedQuery) ||
@@ -542,10 +543,11 @@ export default function RoutesPage() {
       );
   }
 
-  if (routes.length === 0) {
+  if (routes.length === 0 && services.length === 0) {
       return (
         <Card className="min-h-[400px] flex items-center justify-center border-dashed">
             <CardContent className="text-center pt-6">
+          {!!boardError && <StaffRefreshNotice retry={refresh} />}
                 <RouteIcon className="mx-auto h-12 w-12 text-muted-foreground" />
             <h3 className="mt-4 text-lg font-semibold">Nenhuma Rota Ativa</h3>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -613,6 +615,7 @@ export default function RoutesPage() {
   return (
     <>
       <div className="space-y-4">
+      {!!boardError && <StaffRefreshNotice retry={refresh} />}
         {/* Seção de Serviços Luna */}
         {filteredServices.length > 0 && (
           <div className="space-y-4 mb-6">

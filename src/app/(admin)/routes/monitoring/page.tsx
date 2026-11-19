@@ -29,6 +29,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
@@ -202,6 +203,7 @@ export default function MonitoringPage() {
     return (
       <Card className="min-h-[400px] flex items-center justify-center border-dashed">
         <CardContent className="text-center pt-6">
+          {!!error && <StaffRefreshNotice retry={refresh} />}
           <RouteIcon className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold">
             Nenhuma Rota para Monitorar
@@ -217,6 +219,7 @@ export default function MonitoringPage() {
   return (
     <>
       <div className="space-y-4">
+      {!!error && <StaffRefreshNotice retry={refresh} />}
         <div className="rounded-md border bg-card text-card-foreground shadow-sm">
           {/* Header */}
           <div className="grid grid-cols-12 gap-4 border-b px-4 py-2 font-medium text-muted-foreground">

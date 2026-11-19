@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { staffRoles } from './access.ts';
+import { routeRevisionSchema } from './route-contract.ts';
 
 const uuid=z.string().uuid();
 const revision=z.number().int().nonnegative().safe();
@@ -9,7 +10,9 @@ export const staffProfileFields=z.object({name:z.string().trim().min(2).max(150)
 export const staffDirectoryCommandSchema=z.union([
   z.object({...commandFields,action:z.enum(staffSecurityActions)}).strict(),
   z.object({...commandFields,action:z.literal('set_role'),role:z.enum(staffRoles)}).strict(),
-  z.object({...commandFields,action:z.literal('edit_profile'),profile:staffProfileFields}).strict(),
+  z.object({...commandFields,action:z.literal('edit_profile'),profile:staffProfileFields,
+    phoneRevision:revision,sourceRevision:routeRevisionSchema.nullable()}).strict(),
+  z.object({action:z.literal('cancel_metadata'),commandId:uuid}).strict(),
 ]);
 export type StaffDirectoryCommand=z.infer<typeof staffDirectoryCommandSchema>;
 
@@ -18,10 +21,14 @@ export const staffAccountSchema=z.object({
   role:z.enum(staffRoles),active:z.boolean(),legacyDisabled:z.boolean(),mustChangePassword:z.boolean(),
   revision,createdAt:z.string(),lastSignInAt:z.string().nullable(),
   phone:z.string().nullish(),
-  pendingProfile:z.object({commandId:uuid,profile:staffProfileFields,revision}).nullish(),
+  phoneRevision:revision,sourceRevision:routeRevisionSchema.nullable(),
+  pendingProfile:z.object({commandId:uuid,profile:staffProfileFields,revision,
+    phoneRevision:revision,sourceRevision:routeRevisionSchema.nullable()}).nullish(),
   pendingRole:z.object({commandId:uuid,role:z.enum(staffRoles),revision}).nullish(),
 });
 export type StaffAccount=z.infer<typeof staffAccountSchema>;
+export const pendingStaffMetadataSchema=z.object({commandId:uuid,name:z.string()});
+export type PendingStaffMetadata=z.infer<typeof pendingStaffMetadataSchema>;
 
 export const staffProvisionCommandSchema=z.discriminatedUnion('action',[
   z.object({action:z.literal('reserve'),commandId:uuid,name:z.string().trim().min(2).max(150),

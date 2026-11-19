@@ -200,7 +200,11 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
       });
       return result;
     } catch(error) {
-      if (error instanceof EarningsRequestError && error.status===409) throw new RouteStructureConflictError();
+      if (error instanceof EarningsRequestError && error.status===409) {
+        throw new RouteStructureConflictError(error.code==='staff_stop_execution_exists'
+          ? 'Paradas com visita ou entrega registrada devem permanecer na rota original.'
+          : undefined);
+      }
       throw error;
     }
   }

@@ -5,6 +5,7 @@ import { getFirestore,Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 import { applyStaffPlanBatch } from '../src/lib/server/staff/route-plan.ts';
 import { getStopIdentityKey } from '../src/lib/route-stop-utils.ts';
+import { readStaffRouteRemovals } from '../src/lib/server/staff/history.ts';
 
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
 
@@ -132,7 +133,9 @@ test('unlink removes just the specified Source-order linkage in the same retriab
   const db=getFirestore(app);
   const route=db.collection('routes').doc();
   const service=db.collection('services').doc();
-  const order=db.collection('orders').doc();
+  const order=db.collection('orders').doc('zz-'+randomUUID());
+  const collisions=Array.from({length:4},()=>db.collection('orders').doc('aa-'+randomUUID()));
+  const duplicate=db.collection('orders').doc('zz-'+randomUUID());
   const commandId=randomUUID();
   const actor={userId:'10000000-0000-4000-8000-000000000001',name:'Operador teste'};
   const stop={id:'one',placeId:'one',orderNumber:'S-'+order.id,address:'Rua teste',lat:-16.6,lng:-49.2};
@@ -143,9 +146,13 @@ test('unlink removes just the specified Source-order linkage in the same retriab
       route.create({status:'in_progress',serviceId:service.id,lunnaOrderIds:[stop.orderNumber],stops:[stop]}),
       service.create({status:'in_progress',routeIds:[route.id],allStops:[stop,other],stats:{totalDeliveries:2}}),
       order.create({number:stop.orderNumber,rotaExataServiceId:service.id,rotaExataRouteId:route.id}),
+      ...collisions.map(ref=>ref.create({number:stop.orderNumber})),
+      duplicate.create({number:stop.orderNumber,rotaExataServiceId:service.id,rotaExataRouteId:route.id}),
     ]);
     const plan={commandId,existingPlans:[{routeId:route.id,baseStops:[stop],plannedStops:[]}],
       unlink:{routeId:route.id,routeRevision:rev(await route.get()),serviceId:service.id,serviceRevision:rev(await service.get()),stopKey:'order:'+stop.orderNumber.toLowerCase()}};
+    await assert.rejects(applyStaffPlanBatch(db,actor,plan),{status:409});
+    await duplicate.delete();
     await order.update({rotaExataRouteId:'another-route'});
     await assert.rejects(applyStaffPlanBatch(db,actor,plan),{status:409});
     assert.equal((await route.get()).get('stops').length,1);
@@ -163,16 +170,17 @@ test('unlink removes just the specified Source-order linkage in the same retriab
     assert.equal((await order.get()).get('rotaExataRouteId'),null);
     assert.equal((await applyStaffPlanBatch(db,actor,plan)).replayed,true);
   } finally {
-    await Promise.all([route,service,order,db.doc('rotaStaffCommands/'+commandId),db.doc('activity_log/staff-'+commandId)].map(ref=>ref.delete()));
+    await Promise.all([route,service,order,duplicate,...collisions,db.doc('rotaStaffCommands/'+commandId),db.doc('activity_log/staff-'+commandId)].map(ref=>ref.delete()));
     await deleteApp(app);
   }
 });
 
-test('a transfer keeps execution evidence and writes a linked event for each side exactly once',async()=>{
+test('a transfer denies evidence loss and duplicate consumption, then audits one pending transfer',async()=>{
   const app=initializeApp({projectId:'demo-rotaexata-staff-transfer'},'staff-plan-transfer');
   const db=getFirestore(app);
   const source=db.collection('routes').doc();
   const target=db.collection('routes').doc();
+  const another=db.collection('routes').doc();
   const audit=db.collection('activity_log');
   const commandId=randomUUID();
   const actor={userId:randomUUID(),scopeId:randomUUID(),name:'Operador teste'};
@@ -185,12 +193,21 @@ test('a transfer keeps execution evidence and writes a linked event for each sid
   ],transferIntents:[{sourceRouteId:source.id,targetRouteId:target.id,stopKey:getStopIdentityKey(stop)}]};
   try {
     await Promise.all([source.create({status:'in_progress',stops:[{...stop,deliveryStatus:'completed',photoUrl:proof,completedAt}]}),
-      target.create({status:'in_progress',stops:[]})]);
+      target.create({status:'in_progress',stops:[]}),another.create({status:'in_progress',stops:[]})]);
+    await assert.rejects(applyStaffPlanBatch(db,actor,plan),{status:409,code:'staff_stop_execution_exists'});
+    assert.equal((await source.get()).get('stops')[0].photoUrl,proof);
+    assert.deepEqual((await target.get()).get('stops'),[]);
+    await source.update({stops:[{...stop,arrivedAt:completedAt}]});
+    await assert.rejects(applyStaffPlanBatch(db,actor,plan),{status:409,code:'staff_stop_execution_exists'});
+    await source.update({stops:[stop]});
+    await assert.rejects(applyStaffPlanBatch(db,actor,{...plan,
+      existingPlans:[...plan.existingPlans,{routeId:another.id,baseStops:[],plannedStops:[stop]}],
+      transferIntents:[...plan.transferIntents,{...plan.transferIntents[0],targetRouteId:another.id}],
+    }),/duplicate_stop_transfer/);
     await applyStaffPlanBatch(db,actor,plan);
     assert.equal((await applyStaffPlanBatch(db,actor,plan)).replayed,true);
     const stored=(await target.get()).get('stops')[0];
-    assert.equal(stored.photoUrl,proof);
-    assert.equal(stored.completedAt.isEqual(completedAt),true);
+    assert.equal(stored.id,stop.id);
     const events=(await audit.where('staffAuditOperationId','==',commandId).get()).docs;
     assert.deepEqual(events.map(doc=>doc.get('eventType')).sort(),['point_added_to_route','point_removed_from_route','point_transferred']);
     const transferred=events.find(doc=>doc.get('eventType')==='point_transferred');
@@ -199,7 +216,33 @@ test('a transfer keeps execution evidence and writes a linked event for each sid
     assert.equal(transferred.get('staffScopeId'),actor.scopeId);
   } finally {
     const logged=(await audit.where('staffAuditOperationId','==',commandId).get()).docs;
-    await Promise.all([source,target,db.doc('rotaStaffCommands/'+commandId),audit.doc('staff-'+commandId),...logged.map(doc=>doc.ref)].map(ref=>ref.delete()));
+    await Promise.all([source,target,another,db.doc('rotaStaffCommands/'+commandId),audit.doc('staff-'+commandId),...logged.map(doc=>doc.ref)].map(ref=>ref.delete()));
+    await deleteApp(app);
+  }
+});
+
+test('coordinate-only removals write auditable stop IDs',async()=>{
+  const app=initializeApp({projectId:'demo-rotaexata-staff-transfer'},'staff-stop-coordinates');
+  const db=getFirestore(app);
+  const route=db.collection('routes').doc();
+  const commandId=randomUUID();
+  const actor={userId:randomUUID(),scopeId:randomUUID(),name:'Operador teste'};
+  const stop={lat:-16.5,lng:-49.25};
+  const audit=db.collection('activity_log');
+  try {
+    await route.create({status:'in_progress',stops:[stop]});
+    await applyStaffPlanBatch(db,actor,{commandId,existingPlans:[{routeId:route.id,baseStops:[stop],plannedStops:[]}]});
+    const events=(await audit.where('staffAuditOperationId','==',commandId).get()).docs;
+    assert.equal(events.length,1);
+    assert.equal(events[0].get('pointId'),getStopIdentityKey(stop));
+    assert.equal(events[0].get('entityId'),getStopIdentityKey(stop));
+    await route.update({status:'completed'});
+    assert.equal((await readStaffRouteRemovals(db,route.id)).removed[0].pointId,getStopIdentityKey(stop));
+    await route.update({stops:[stop]});
+    assert.deepEqual((await readStaffRouteRemovals(db,route.id)).removed,[]);
+  } finally {
+    const logged=(await audit.where('staffAuditOperationId','==',commandId).get()).docs;
+    await Promise.all([route,db.doc('rotaStaffCommands/'+commandId),audit.doc('staff-'+commandId),...logged.map(doc=>doc.ref)].map(ref=>ref.delete()));
     await deleteApp(app);
   }
 });

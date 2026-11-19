@@ -1,5 +1,6 @@
 'use client';
 
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
 
 import * as React from 'react';
@@ -1248,7 +1249,7 @@ export default function ReportsPage() {
     }
   };
 
-  if (nativeStaffEnabled && nativeReport.error) {
+  if (nativeStaffEnabled && nativeReport.error && !nativeReport.data) {
     return <div className="space-y-2" role="alert">
       <p>{reportErrorMessage(nativeReport.error)}</p>
       <Button variant="outline" onClick={nativeReport.refresh}>Tentar novamente</Button>
@@ -1257,6 +1258,7 @@ export default function ReportsPage() {
   if (nativeStaffEnabled ? nativeReport.loading : isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
+      {nativeStaffEnabled && !!nativeReport.error && <StaffRefreshNotice retry={nativeReport.refresh} />}
         <div className="text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4"></div>
           <p className="text-muted-foreground">Carregando relatórios...</p>

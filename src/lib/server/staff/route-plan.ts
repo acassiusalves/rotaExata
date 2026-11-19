@@ -71,13 +71,12 @@ function canonicalServiceStops<T extends {orderNumber?:string}>(stops:T[],servic
 }
 
 const executed=(stop:PlaceValue)=>stop.deliveryStatus==='completed' || stop.deliveryStatus==='failed' ||
-  !!(stop.completedAt || stop.photoUrl || stop.attemptPhotoUrl || stop.signatureUrl || stop.wentToLocation ||
+  !!(stop.arrivedAt || stop.completedAt || stop.photoUrl || stop.attemptPhotoUrl || stop.signatureUrl || stop.wentToLocation ||
     stop.payments?.length || stop.deliveredItemIds?.length);
 
-function preserveRemovedExecution(batch:StaffPlanBatch,result:SavedRoutePlanBatch) {
+function preserveRemovedExecution(result:SavedRoutePlanBatch) {
   for (const route of result.existingRoutes) {
-    const moves=new Set(batch.transferIntents?.filter(intent=>intent.sourceRouteId===route.routeId).map(intent=>intent.stopKey));
-    if (route.removedStops.some(stop=>executed(stop) && !moves.has(getStopIdentityKey(stop) ?? ''))) {
+    if (route.removedStops.some(executed)) {
       throw new EarningsError(409,'staff_stop_execution_exists');
     }
   }
@@ -285,10 +284,20 @@ async function applyUnlink(
     }));
   }
   if (!stop.orderNumber) return;
-  const docs=await tx.get(db.collection('orders').where('number','==',stop.orderNumber).limit(3));
+  const sameNumber=db.collection('orders').where('number','==',stop.orderNumber);
+  const linked=service ? sameNumber.where('rotaExataServiceId','==',service.id)
+    : sameNumber.where('rotaExataRouteId','==',route!.id);
+  const docs=await tx.get(linked.select('rotaExataServiceId','rotaExataRouteId'));
   const matches=docs.docs.filter(doc=>(doc.get('rotaExataServiceId') || undefined)===service?.id &&
-    (!doc.get('rotaExataRouteId') || doc.get('rotaExataRouteId')===route?.id));
-  if (matches.length>1 || (!matches.length && docs.docs.some(doc=>doc.get('rotaExataServiceId') || doc.get('rotaExataRouteId')))) {
+    (!doc.get('rotaExataRouteId') || doc.get('rotaExataRouteId')===route?.id)).slice(0,2);
+  if (!matches.length) {
+    // The Source writer may have cleared the link already. Check all matching link fields before accepting that case.
+    const remaining=docs.empty ? await tx.get(sameNumber.select('rotaExataServiceId','rotaExataRouteId')):docs;
+    if (remaining.docs.some(doc=>doc.get('rotaExataServiceId') || doc.get('rotaExataRouteId'))) {
+      throw new EarningsError(409,'staff_order_service_conflict');
+    }
+  }
+  if (matches.length>1) {
     throw new EarningsError(409,'staff_order_service_conflict');
   }
   const order=matches[0];
@@ -299,11 +308,11 @@ async function applyUnlink(
 }
 
 function auditStopChanges(db:Firestore,tx:Transaction,actor:Operator,batch:StaffPlanBatch,result:SavedRoutePlanBatch) {
-  const writes=new Map<string,{eventType:string;routeId:string;stop:PlaceValue;targetRouteId?:string}>();
+  const writes=new Map<string,{eventType:string;routeId:string;stop:PlaceValue;identity:string;targetRouteId?:string}>();
   const put=(eventType:string,routeId:string,stop:PlaceValue,targetRouteId?:string)=>{
     const identity=getStopIdentityKey(stop);
     if (identity) writes.set(factsHash({eventType,routeId,identity,targetRouteId:targetRouteId ?? null}),
-      {eventType,routeId,stop,targetRouteId});
+      {eventType,routeId,stop,identity,targetRouteId});
   };
   for (const route of result.existingRoutes) {
     for (const stop of route.removedStops) {
@@ -317,8 +326,8 @@ function auditStopChanges(db:Firestore,tx:Transaction,actor:Operator,batch:Staff
     }
   }
   for (const route of result.createdRoutes) for (const stop of route.stops) put('point_added_to_route',route.routeId,stop);
-  for (const [key,{eventType,routeId,stop,targetRouteId}] of writes) {
-    const pointId=stop.id || stop.pointCode || stop.orderNumber || stop.placeId;
+  for (const [key,{eventType,routeId,stop,identity,targetRouteId}] of writes) {
+    const pointId=stop.id || stop.pointCode || stop.orderNumber || stop.placeId || identity;
     tx.create(db.collection('activity_log').doc('staff-'+batch.commandId+'-'+key),{
       timestamp:FieldValue.serverTimestamp(),staffAuditVersion:1,staffAuditOperationId:batch.commandId,
       staffScopeId:actor.scopeId ?? null,canonicalUserId:actor.userId,
@@ -359,7 +368,7 @@ export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unkn
       const writes:Array<()=>void>=[];
       const plans=await canonicalPlan(db,tx,batch,by,writes);
       const result=await transactionGateway(db,tx,writes).saveRoutePlanBatchAtomically(plans);
-      preserveRemovedExecution(batch,result);
+      preserveRemovedExecution(result);
       if (batch.unlink) await applyUnlink(db,tx,batch.unlink,result,writes);
       await applyDispatchLinks(db,tx,batch,result,plans,writes);
       for (const write of writes) write();
@@ -397,4 +406,9 @@ export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unkn
     if (error instanceof InvalidDispatchDriverError) throw new EarningsError(409,'staff_driver_unavailable');
     throw error;
   }
+}
+
+export async function isStaffPlanReplay(db:Firestore,actor:Operator,batch:StaffPlanBatch) {
+  const receipt=await db.collection('rotaStaffCommands').doc(batch.commandId).get();
+  return receipt.get('fingerprint')===factsHash({actor:actor.userId,batch});
 }

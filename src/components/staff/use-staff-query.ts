@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback,useEffect,useState } from 'react';
+import { retainAuthorizedStaffData } from '@/lib/staff/query-refresh';
 
 export function useStaffQuery<T>(load:(signal:AbortSignal)=>Promise<T>,interval=10_000) {
   const [data,setData]=useState<T>();
@@ -24,7 +25,7 @@ export function useStaffQuery<T>(load:(signal:AbortSignal)=>Promise<T>,interval=
         failures=0;
       } catch (err) {
         if (controller.signal.aborted) return;
-        setData(undefined);
+        if (!retainAuthorizedStaffData(err,navigator.onLine)) setData(undefined);
         setError(err);
         failures++;
       } finally {

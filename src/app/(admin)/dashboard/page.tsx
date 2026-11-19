@@ -51,6 +51,7 @@ import {
 } from '@/components/ui/tabs';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { Button } from '@/components/ui/button';
@@ -417,6 +418,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 space-y-4">
+      {!!error && <StaffRefreshNotice retry={refresh} />}
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
         <p className="text-sm text-muted-foreground">

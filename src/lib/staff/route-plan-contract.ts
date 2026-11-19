@@ -52,6 +52,11 @@ export const staffPlanBatchSchema=z.object({
   if (batch.existingPlans.some(plan=>plan.metadata?.status==='dispatched' &&
       (!plan.metadata.driverId || !['draft','pending'].includes(plan.expectedStatus ?? '')))) issue('invalid_dispatch_plan');
   if (created.some(route=>route.data.status==='dispatched' && !route.data.driverId)) issue('unassigned_dispatch');
+  const transfers=batch.transferIntents ?? [];
+  if (new Set(transfers.map(move=>JSON.stringify([move.sourceRouteId,move.stopKey]))).size!==transfers.length ||
+      new Set(transfers.map(move=>JSON.stringify([move.targetRouteId,move.stopKey]))).size!==transfers.length) {
+    issue('duplicate_stop_transfer');
+  }
   if (batch.unlink) {
     const {routeId,routeRevision,serviceId,serviceRevision}=batch.unlink;
     if ((!routeId && !serviceId) || Boolean(routeId)!==Boolean(routeRevision) || Boolean(serviceId)!==Boolean(serviceRevision) ||

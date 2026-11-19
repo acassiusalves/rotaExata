@@ -4568,7 +4568,7 @@ export default function RouteAcompanharPage() {
         toast({
           variant: 'destructive',
           title: 'A rota mudou durante a edição',
-          description: 'Recarregue as rotas e tente transferir a parada novamente.',
+          description: error.message,
         });
         return;
       }

@@ -2,6 +2,7 @@
 'use client';
 
 import * as React from 'react';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import {
   Card,
   CardContent,
@@ -138,15 +139,17 @@ export default function HistoryPage() {
     setIsDetailsOpen(true);
   };
 
-  if (nativeStaffEnabled && nativeDrivers.error) return <div className="space-y-2" role="alert">
+  if (nativeStaffEnabled && nativeDrivers.error && !nativeDrivers.data) return <div className="space-y-2" role="alert">
     <p>{reportErrorMessage(nativeDrivers.error)}</p>
     <Button variant="outline" onClick={nativeDrivers.refresh}>Tentar novamente</Button>
   </div>;
 
   return (
     <>
+      {nativeStaffEnabled && !!nativeDrivers.error && <StaffRefreshNotice retry={nativeDrivers.refresh} />}
       <div className="flex-1 space-y-4">
-        {selectedDriverId && nativeRoutes.error ? <div className="space-y-2" role="alert">
+        {selectedDriverId && nativeRoutes.data && !!nativeRoutes.error && <StaffRefreshNotice retry={nativeRoutes.refresh} />}
+        {selectedDriverId && nativeRoutes.error && !nativeRoutes.data ? <div className="space-y-2" role="alert">
           <p>{reportErrorMessage(nativeRoutes.error)}</p>
           <Button variant="outline" onClick={nativeRoutes.refresh}>Tentar novamente</Button>
         </div>:null}
@@ -195,7 +198,7 @@ export default function HistoryPage() {
             </div>
         )}
 
-        {!loadingRoutes && !nativeRoutes.error && selectedDriverId && driverRoutes.length === 0 && (
+        {!loadingRoutes && (!nativeRoutes.error || nativeRoutes.data) && selectedDriverId && driverRoutes.length === 0 && (
           <Card className="min-h-[400px] flex items-center justify-center border-dashed">
               <CardContent className="text-center pt-6">
                   <History className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -207,7 +210,7 @@ export default function HistoryPage() {
           </Card>
         )}
 
-        {!loadingRoutes && !nativeRoutes.error && driverRoutes.length > 0 && (
+        {!loadingRoutes && (!nativeRoutes.error || nativeRoutes.data) && driverRoutes.length > 0 && (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {pagination.pageRows.map(route => (
                   <Card key={route.id} className="flex flex-col">

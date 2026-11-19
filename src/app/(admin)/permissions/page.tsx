@@ -50,16 +50,17 @@ import {
 import { StaffProvisioning } from '@/components/staff/staff-provisioning';
 import { useStaff } from '@/components/staff/staff-session';
 import { useConfirm } from '@/hooks/use-confirm';
-import type { StaffAccount,StaffDirectoryCommand } from '@/lib/staff/directory-contract';
+import type { PendingStaffMetadata,StaffAccount,StaffDirectoryCommand } from '@/lib/staff/directory-contract';
 import type { StaffRole } from '@/lib/staff/access';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 
-type SecurityAction=Exclude<StaffDirectoryCommand['action'],'set_role'|'edit_profile'>;
+type SecurityAction=Exclude<StaffDirectoryCommand['action'],'set_role'|'edit_profile'|'cancel_metadata'>;
 type AppUser=StaffAccount & {chosenRole:StaffRole};
 type PolicyState={permissions:Record<string,string[]>;inactivePages:string[];revision:string|null};
 
 export default function PermissionsPage() {
   const [users, setUsers] = React.useState<AppUser[]>([]);
+  const [pendingCommands,setPendingCommands]=React.useState<PendingStaffMetadata[]>([]);
   const [permissions, setPermissions] = React.useState<Record<string, string[]>>(defaultPagePermissions);
   const [inactivePages, setInactivePages] = React.useState<Set<string>>(new Set());
   const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
@@ -86,11 +87,12 @@ export default function PermissionsPage() {
     setIsLoading(true);
     setDataError(false);
     Promise.all([request<PolicyState>('/api/staff/permissions',input),
-      request<{accounts:StaffAccount[]}>('/api/staff/directory',input)]).then(([policy,directory])=>{
+      request<{accounts:StaffAccount[];pendingCommands:PendingStaffMetadata[]}>('/api/staff/directory',input)]).then(([policy,directory])=>{
       if (controller.signal.aborted) return;
       setPermissions(policy.permissions);
       setInactivePages(new Set(policy.inactivePages));
       setPolicyRevision(policy.revision);
+      setPendingCommands(directory.pendingCommands);
       setUsers(directory.accounts.map(user=>({...user,chosenRole:user.role})));
     }).catch(()=>{if (!controller.signal.aborted) setDataError(true);})
       .finally(()=>{if (!controller.signal.aborted) setIsLoading(false);});
@@ -230,10 +232,12 @@ export default function PermissionsPage() {
     const {account,name,phone}=profileEditor;
     const profile={name:name.trim(),phone:phone.trim()};
     const pending=account.pendingProfile;
-    const fingerprint=JSON.stringify({id:account.userId,profile,revision:pending?.revision ?? account.revision});
+    const revisions={revision:pending?.revision ?? account.revision,phoneRevision:pending?.phoneRevision ?? account.phoneRevision,
+      sourceRevision:pending ? pending.sourceRevision:account.sourceRevision};
+    const fingerprint=JSON.stringify({id:account.userId,profile,...revisions});
     const remembered=commands.current.get(fingerprint);
     const command:StaffDirectoryCommand=remembered ?? {
-      action:'edit_profile',targetId:account.userId,profile,revision:pending?.revision ?? account.revision,
+      action:'edit_profile',targetId:account.userId,profile,...revisions,
       commandId:pending?.commandId ?? crypto.randomUUID(),
     };
     commands.current.set(fingerprint,command);
@@ -245,6 +249,17 @@ export default function PermissionsPage() {
       toast({title:'Perfil atualizado'});
     } catch {
       toast({variant:'destructive',title:'Não foi possível salvar o perfil',description:'Confira o cadastro e retome uma alteração pendente.'});
+    } finally {setAccountBusy(false);refresh();}
+  }
+
+  async function cancelMetadata(commandId:string) {
+    setAccountBusy(true);
+    try {
+      const command:StaffDirectoryCommand={action:'cancel_metadata',commandId};
+      await request('/api/staff/directory',{method:'POST',body:JSON.stringify(command)});
+      toast({title:'Pendência encerrada'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível encerrar a pendência'});
     } finally {setAccountBusy(false);refresh();}
   }
 
@@ -503,6 +518,17 @@ export default function PermissionsPage() {
           </Button>
         </CardFooter>
       </Card>
+      {pendingCommands.length>0 && <Card>
+        <CardHeader><CardTitle>Alterações pendentes</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {pendingCommands.map(command=><div key={command.commandId} className="flex items-center justify-between gap-3">
+            <span>{command.name}</span>
+            <Button variant="outline" disabled={accountBusy} onClick={()=>void cancelMetadata(command.commandId)}>
+              Encerrar pendência
+            </Button>
+          </div>)}
+        </CardContent>
+      </Card>}
       <StaffProvisioning onReady={refresh} />
       <Dialog open={!!profileEditor} onOpenChange={open=>{if(!open&&!accountBusy) setProfileEditor(undefined);}}>
         <DialogContent>

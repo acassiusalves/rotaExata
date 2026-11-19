@@ -1,5 +1,6 @@
 'use client';
 
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { csvCell, reportErrorMessage, useStaffReportData } from '@/components/reports/use-staff-report-data';
@@ -218,7 +219,7 @@ export default function ActivityPage() {
     URL.revokeObjectURL(link.href);
   };
 
-  if (nativeStaffEnabled && nativeActivity.error) return <div className="space-y-2" role="alert">
+  if (nativeStaffEnabled && nativeActivity.error && !nativeActivity.data) return <div className="space-y-2" role="alert">
     <p>{reportErrorMessage(nativeActivity.error)}</p>
     <Button variant="outline" onClick={nativeActivity.refresh}>Tentar novamente</Button>
   </div>;
@@ -226,6 +227,7 @@ export default function ActivityPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-7xl space-y-6">
+      {nativeStaffEnabled && !!nativeActivity.error && <StaffRefreshNotice retry={nativeActivity.refresh} />}
       {/* Cabeçalho */}
       <div>
         <div className="flex items-center gap-2 mb-2">

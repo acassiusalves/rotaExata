@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import {
   Card,
   CardContent,
@@ -294,13 +295,14 @@ export default function HistoryRoutesPage() {
 
   const isLoading=nativeStaffEnabled ? nativeHistory.loading:isLegacyLoading;
 
-  if (nativeStaffEnabled && nativeHistory.error) return <div className="space-y-2" role="alert">
+  if (nativeStaffEnabled && nativeHistory.error && !nativeHistory.data) return <div className="space-y-2" role="alert">
     <p>{reportErrorMessage(nativeHistory.error)}</p>
     <Button variant="outline" onClick={nativeHistory.refresh}>Tentar novamente</Button>
   </div>;
 
   return (
     <>
+      {nativeStaffEnabled && !!nativeHistory.error && <StaffRefreshNotice retry={nativeHistory.refresh} />}
       <div className="flex-1 space-y-4">
         <div className="flex items-start justify-between">
           <div>

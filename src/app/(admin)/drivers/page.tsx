@@ -13,6 +13,7 @@ import { staffDriverAssignments,type StaffDriverAssignment } from '@/lib/staff/d
 import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { useToast } from '@/hooks/use-toast';
 import type { Driver } from '@/lib/types';
 
@@ -62,6 +63,7 @@ export default function DriversPage() {
         </Button>}
       </div>
     </div>
+    {data && !!error && <StaffRefreshNotice retry={refresh} />}
     <Card><CardContent className="pt-6">
       {error && !data ? <div className="space-y-3">
         <p role="alert">Não foi possível carregar os motoristas.</p>
