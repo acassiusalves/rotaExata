@@ -38,6 +38,7 @@ const issuesLabels: Record<string,string> = {
   missing_distance_rates: 'Informe os quatro valores da modalidade por distância.',
   missing_attempt_policy: 'Informe o percentual para tentativa com visita.',
   missing_origin: 'Informe as coordenadas de saída da rota.',
+  city_uf_conflict: 'Confira a UF. As informações do município indicam estados diferentes.',
   unmatched_zone: 'A parada está fora das zonas cadastradas.',
   missing_stop_coordinates: 'Informe as coordenadas da parada.',
   missing_planned_distance: 'Informe a distância planejada.',
@@ -180,7 +181,7 @@ export default function RulesPage() {
             return <fieldset key={index} className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
               <legend className="px-1 text-sm font-medium">Zona {index+1}</legend>
               <RateField id={'zone-label-'+index} label="Nome" value={zone.label} onChange={value => edit({label:value})} />
-              <RateField id={'zone-cities-'+index} label="Cidades separadas por vírgula, com UF opcional" value={zone.cities} onChange={value => edit({cities:value})} />
+              <RateField id={'zone-cities-'+index} label="Cidades separadas por vírgula. UF opcional como em Goiânia/GO" value={zone.cities} onChange={value => edit({cities:value})} />
               <RateField id={'zone-price-'+index} label="Valor por entrega (R$)" value={zone.price} onChange={value => edit({price:value})} />
               <RateField id={'zone-radius-'+index} label="Raio máximo em metros (opcional)" value={zone.radius} onChange={value => edit({radius:value})} />
               <Button variant="ghost" size="sm" className="w-fit" onClick={() => update({zones:draft.zones.filter((_,key) => key !== index)})}><Trash2 aria-hidden="true" className="mr-1 size-4" />Remover zona</Button>

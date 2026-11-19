@@ -92,6 +92,17 @@ function fold(value: string) {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function municipalityIdentity(value: string, state?: string | null) {
+  const city = fold(value);
+  const qualified = /^(.+?) - (?:(?:([a-z]{2}) - )?goias|go)$/.exec(city);
+  const declaredState = state ? fold(state) : undefined;
+  const explicitUf = declaredState === 'goias' ? 'go' : declaredState || undefined;
+  const suffixUf = qualified ? 'go' : undefined;
+  const conflict = !!((qualified?.[2] && qualified[2] !== suffixUf) ||
+    (suffixUf && explicitUf && explicitUf !== suffixUf));
+  return { name: qualified?.[1] ?? city, uf: explicitUf ?? suffixUf, conflict };
+}
+
 export function normalizeRule(input: unknown): EarningsRule | EarningsIssue[] {
   const result = ruleSchema.safeParse(input);
   if (!result.success) return result.error.issues.map(issue => ({ code: 'invalid_rule:' + issue.path.join('.') }));
@@ -106,17 +117,19 @@ export function normalizeRule(input: unknown): EarningsRule | EarningsIssue[] {
       rule.multipliers.some(multiplier => multiplier.period !== 'weekend' && multiplier.startHour >= multiplier.endHour)) {
     return [{ code: 'conflicting_brackets' }];
   }
+  let conflictingCityUf = false;
   const normalizedZones = (zones ?? []).map(zone => ({
     ...zone,
     cities: zone.cities.map(city => {
-      if (typeof city !== 'string') {
-        const uf = city.uf ?? city.fullName?.match(/,\s*([A-Za-z]{2})$/)?.[1];
-        return { name: fold(city.name), ...(uf ? { uf: fold(uf) } : {}) };
-      }
-      const [name, uf] = city.split(/\s*[\/-]\s*(?=[A-Za-z]{2}$)/);
-      return { name: fold(name), ...(uf ? { uf: fold(uf) } : {}) };
+      const [name, state] = typeof city === 'string'
+        ? city.split(/\s*[\/-]\s*(?=[A-Za-z]{2}$)/)
+        : [city.name, city.uf ?? city.fullName?.match(/,\s*([A-Za-z]{2})$/)?.[1]];
+      const normalized = municipalityIdentity(name, state);
+      conflictingCityUf ||= normalized.conflict;
+      return { name: normalized.name, ...(normalized.uf ? { uf: normalized.uf } : {}) };
     }),
   }));
+  if (conflictingCityUf) return [{ code: 'city_uf_conflict' }];
   if (normalizedZones.some(zone => zone.cities.some(city => !city.name))) return [{ code: 'invalid_city' }];
   return { ...rule, zones: normalizedZones, excludedCategories: rule.excludedCategories.map(fold) };
 }
@@ -148,10 +161,10 @@ function straightLineMeters(lat1: number, lng1: number, lat2: number, lng2: numb
 
 function zoneRate(stop: EarningsFacts['stops'][number], origin: EarningsFacts['origin'], rule: EarningsRule): number | EarningsIssue {
   const code = (value: string) => ({ code: value, stopId: stop.id });
-  const city = stop.city ? fold(stop.city) : '';
-  const uf = stop.state ? fold(stop.state) : '';
+  const city = municipalityIdentity(stop.city ?? '', stop.state);
+  if (city.conflict) return code('city_uf_conflict');
   for (const zone of rule.zones) {
-    if (!zone.cities.some(place => place.name === city && (!place.uf || place.uf === uf))) continue;
+    if (!zone.cities.some(place => place.name === city.name && (!place.uf || place.uf === city.uf))) continue;
     if (!zone.radiusMeters) return zone.priceCents;
     if (!origin) return code('missing_origin');
     if (stop.lat == null || stop.lng == null) return code('missing_stop_coordinates');

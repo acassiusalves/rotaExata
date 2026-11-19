@@ -70,3 +70,30 @@ test('review is explicit when facts or a commercial rule do not support issuance
   assert.ok(Array.isArray(normalizeRouteFacts({ ...base, workedAt: '2026-02-31T00:00:00Z' })));
   assert.ok(Array.isArray(quote({ ...base, stops: [{ ...base.stops[0], city: 'Recife' }] }, zone)));
 });
+
+test('normalizes only explicit Goiás suffixes on source municipalities',()=>{
+  const cases=['Goiânia - GO','Goiania - Goiás','GOIÂNIA - GO - GOIÁS'];
+  for (const city of cases) {
+    const quoted=quote({...base,stops:[{...base.stops[0],city,state:null}]},zone);
+    assert.ok(!Array.isArray(quoted),city);
+    assert.equal(quoted.totalCents,500,city);
+  }
+  assert.deepEqual(quote({...base,stops:[{...base.stops[0],city:'Goiânia - GO - Goiás',state:'MG'}]},zone),
+    [{code:'city_uf_conflict',stopId:'1'}]);
+  assert.deepEqual(quote({...base,stops:[{...base.stops[0],city:'Goiânia - MG - Goiás',state:null}]},zone),
+    [{code:'city_uf_conflict',stopId:'1'}]);
+  assert.deepEqual(quote({...base,stops:[{...base.stops[0],city:'Rua Goiânia - GO',state:null}]},zone),
+    [{code:'unmatched_zone',stopId:'1'}]);
+  assert.deepEqual(quote({...base,stops:[{...base.stops[0],city:'Goiânia',state:null}]},zone),
+    [{code:'unmatched_zone',stopId:'1'}]);
+});
+
+test('the rule editor accepts observed Goiás labels and reopens their canonical city/UF form',()=>{
+  const definition=(cities:unknown)=>normalizeRule({mode:'zone',zones:[{cities,priceCents:500}]});
+  const saved=definition('Goiânia - GO - Goiás, Aparecida de Goiânia - Goiás');
+  const readBack=definition('Goiania/GO, Aparecida de Goiania/GO');
+  assert.ok(!Array.isArray(saved));
+  assert.deepEqual(saved,readBack);
+  assert.deepEqual(saved.zones[0].cities,[{name:'goiania',uf:'go'},{name:'aparecida de goiania',uf:'go'}]);
+  assert.deepEqual(definition([{name:'Goiânia - GO',uf:'MG'}]),[{code:'city_uf_conflict'}]);
+});
