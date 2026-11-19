@@ -37,16 +37,27 @@ const newRoute=z.object({
 export const staffPlanBatchSchema=z.object({
   commandId:z.string().uuid(),existingPlans:z.array(existing).max(40),newRoutes:z.array(newRoute).max(40).optional(),
   transferIntents:z.array(z.object({sourceRouteId:routeDocumentId,targetRouteId:routeDocumentId,stopKey:z.string().max(400)}).strict()).optional(),
+  unlink:z.object({
+    routeId:routeDocumentId.optional(),routeRevision:routeRevisionSchema.optional(),
+    serviceId:routeDocumentId.optional(),serviceRevision:routeRevisionSchema.optional(),
+    stopKey:z.string().min(1).max(400),
+  }).strict().optional(),
   draftDispatch:z.object({routeId:routeDocumentId,revision:routeRevisionSchema,key:z.string().regex(/^[A-Z]{1,3}$/)}).strict().optional(),
   serviceLink:z.object({serviceId:routeDocumentId,routeIds:z.array(routeDocumentId).min(1),requireUnplanned:z.literal(true).optional()}).strict().optional(),
 }).strict().superRefine((batch,ctx)=>{
   const created=batch.newRoutes ?? [];
   const ids=[...batch.existingPlans.map(plan=>plan.routeId),...created.map(route=>route.routeId)];
   const issue=(message:string)=>ctx.addIssue({code:z.ZodIssueCode.custom,message});
-  if (!ids.length || new Set(ids).size!==ids.length) issue('duplicate_or_empty_route_plan');
+  if ((!ids.length && !batch.unlink) || new Set(ids).size!==ids.length) issue('duplicate_or_empty_route_plan');
   if (batch.existingPlans.some(plan=>plan.metadata?.status==='dispatched' &&
       (!plan.metadata.driverId || !['draft','pending'].includes(plan.expectedStatus ?? '')))) issue('invalid_dispatch_plan');
   if (created.some(route=>route.data.status==='dispatched' && !route.data.driverId)) issue('unassigned_dispatch');
+  if (batch.unlink) {
+    const {routeId,routeRevision,serviceId,serviceRevision}=batch.unlink;
+    if ((!routeId && !serviceId) || Boolean(routeId)!==Boolean(routeRevision) || Boolean(serviceId)!==Boolean(serviceRevision) ||
+        ids.length!==(routeId ? 1:0) || (routeId && !batch.existingPlans.some(plan=>plan.routeId===routeId)) ||
+        batch.transferIntents?.length || batch.draftDispatch || batch.serviceLink) issue('invalid_unlink');
+  }
   if (batch.draftDispatch && (created.length!==1 || created[0].data.status!=='dispatched' ||
       batch.serviceLink || ids.includes(batch.draftDispatch.routeId))) issue('invalid_draft_dispatch');
   if (batch.serviceLink && (new Set(batch.serviceLink.routeIds).size!==created.length ||

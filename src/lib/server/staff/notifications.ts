@@ -1,9 +1,6 @@
-import {createHash} from 'node:crypto';
 import {FieldPath,FieldValue,type DocumentData,type Firestore,type QueryDocumentSnapshot} from 'firebase-admin/firestore';
-import type {TokenMessage} from 'firebase-admin/messaging';
 import {z} from 'zod';
-import {driverPushMessage} from '../../../../functions/src/driver-push';
-import {sendPushWithOutcome} from '../../../../functions/src/push-outcome';
+import {activeStaffPushDriver as activeDriver,publishStaffDriverPush,type StaffPushSender} from './push-delivery';
 import {serializeReportDate,validReportId} from '../../reporting/report-contract';
 import type {
   StaffNotification,StaffNotificationChange,StaffNotificationCreate,StaffNotificationDriver,StaffNotificationDrivers,
@@ -14,7 +11,7 @@ import {EarningsError} from '../earnings/transport';
 import {cursorFor,cursorTimestamp,readSupportCursor,revisionOf,supportCursor,supportHash} from './support-revision';
 
 type Actor=Pick<StaffActor,'userId'|'scopeId'|'name'|'sourceUid'>;
-type Sender={validateBinding:(bindingId:string,proof:string)=>Promise<boolean>;send:(message:TokenMessage)=>Promise<string>};
+type Sender=StaffPushSender;
 type Delivery=StaffNotificationReceipt['deliveries'][number];
 type PushResult=Omit<Delivery,'id'>;
 type Target={driverId:string;id:string};
@@ -25,11 +22,6 @@ const listCursor=z.object({filter:z.string(),inbox:supportCursor.optional(),rout
 const pageSize=50;
 const scanSize=150;
 const string=(value:unknown,max=500)=>typeof value==='string' ? value.slice(0,max):undefined;
-
-function activeDriver(profile:DocumentData|undefined) {
-  return profile?.role==='driver' && profile.active!==false && profile.disabled!==true && !profile.deletedAt &&
-    (!profile.nativeDriverProvisioningId || (profile.nativeDriverReady===true && profile.nativeDriverDispatchEnabled===true));
-}
 
 function staffVisible(data:DocumentData,actor:Actor) {
   return data.staffScopeId===undefined || data.staffScopeId===actor.scopeId;
@@ -169,16 +161,9 @@ export async function changeStaffNotifications(db:Firestore,actor:Actor,command:
   return {ok:true};
 }
 
-const knownSendRejections=new Set([
-  'messaging/invalid-argument','messaging/invalid-registration-token','messaging/registration-token-not-registered',
-  'messaging/mismatched-credential','messaging/invalid-payload','messaging/message-rate-exceeded',
-]);
-
 async function dispatch(db:Firestore,command:StaffNotificationCreate,actor:Actor,target:Target,sender:Sender):Promise<Delivery> {
   const job=db.collection('rotaStaffNotificationCommands').doc(command.commandId).collection('deliveries').doc(target.driverId);
   const notice=db.collection('notifications').doc(target.id);
-  const profile=db.collection('users').doc(target.driverId);
-  const preference=profile.collection('settings').doc('preferences');
   const belongs=(data:DocumentData|undefined)=>data?.staffNotificationCommandId===command.commandId &&
     data.staffScopeId===actor.scopeId && data.staffAuthorId===actor.userId && data.driverId===target.driverId;
   const claimed=await db.runTransaction(async tx=>{
@@ -200,29 +185,17 @@ async function dispatch(db:Firestore,command:StaffNotificationCreate,actor:Actor
   if (claimed!=='claimed') return {id:target.id,...claimed};
 
   async function dispatchOnce():Promise<PushResult> {
-    const [driver,prefs]=await db.getAll(profile,preference);
-    const data=driver.data();
-    const token=data?.fcmToken;
-    if (!activeDriver(data)) return {push:'skipped',pushReason:'recipient_unavailable'};
-    if (prefs.get('notifications')!==true) return {push:'skipped',pushReason:'consent_missing'};
-    if (typeof token!=='string' || !token) return {push:'skipped',pushReason:'token_missing'};
-    const owner=db.collection('driverPushTokenBindings').doc(createHash('sha256').update(token).digest('hex'));
-    if ((await owner.get()).get('uid')!==target.driverId) return {push:'skipped',pushReason:'token_unlinked'};
-    const payload=await driverPushMessage(db,target.driverId,data,{
-      token,data:{type:command.type,priority:command.priority,customNotification:'true',title:command.title,body:command.message,
-        notificationTitle:command.title,notificationBody:command.message},
-      android:{priority:command.priority==='high'?'high':'normal'},
-      webpush:{notification:{title:command.title,body:command.message,icon:'/icons/pwa-192.png',badge:'/icons/pwa-192.png',
-        tag:'custom-'+target.id,requireInteraction:command.priority==='high'},fcmOptions:{link:'/driver/notifications'}},
-    },sender.validateBinding);
-    if (!payload) return {push:'skipped',pushReason:'binding_invalid'};
-    const [newDriver,newPrefs,newOwner,row]=await db.getAll(profile,preference,owner,notice);
-    if (!belongs(row.data()) || !activeDriver(newDriver.data()) || newDriver.get('fcmToken')!==token ||
-        newDriver.get('fcmSessionBindingId')!==data?.fcmSessionBindingId ||
-        newPrefs.get('notifications')!==true || newOwner.get('uid')!==target.driverId) return {push:'skipped',pushReason:'destination_changed'};
-    const result=await sendPushWithOutcome(true,()=>sender.send(payload));
-    return {push:result.outcome==='accepted' ? 'accepted'
-      :result.outcome==='failed' && knownSendRejections.has(result.errorCode) ? 'failed':'uncertain'};
+    const {delivery,reason}=await publishStaffDriverPush(db,{
+      driverId:target.driverId,stillCurrent:async()=>belongs((await notice.get()).data()),
+      build:token=>({
+        token,data:{type:command.type,priority:command.priority,customNotification:'true',title:command.title,body:command.message,
+          notificationTitle:command.title,notificationBody:command.message},
+        android:{priority:command.priority==='high'?'high':'normal'},
+        webpush:{notification:{title:command.title,body:command.message,icon:'/icons/pwa-192.png',badge:'/icons/pwa-192.png',
+          tag:'custom-'+target.id,requireInteraction:command.priority==='high'},fcmOptions:{link:'/driver/notifications'}},
+      }),
+    },sender);
+    return delivery.outcome==='skipped_no_token' ? {push:'skipped',...(reason ? {pushReason:reason}:{})}:{push:delivery.outcome};
   }
   let result:PushResult={push:'failed'};
   try { result=await dispatchOnce(); }

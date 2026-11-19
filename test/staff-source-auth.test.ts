@@ -49,3 +49,23 @@ test('rechecks authority and Source on one revision conflict; closed on unresolv
   assert.equal(count,2);
   await assert.rejects(refreshStaffSource(identity,authority({apply:async()=>({errorCode:'platform_version_conflict'})})),{status:503});
 });
+
+test('Firebase authority reads and verifies the exact native staff Source projection',async()=>{
+  const provisionId='40000000-0000-4000-8000-000000000001';
+  const native={...ready,sourceUid:undefined,sourceDocumentId:identity.userId,sourceProvisionId:provisionId};
+  const read=async (uid?:string)=>{
+    assert.equal(uid,identity.userId);
+    return {...await authority().read(),profile:{role:'gestor',active:true,nativeStaffProvisioningId:provisionId}};
+  };
+  let submitted:Record<string,unknown>|undefined;
+  await refreshStaffSource(identity,authority({context:async()=>native,read,
+    apply:async body=>{submitted=body;return {ok:true};}}));
+  assert.equal(submitted?.sourceDocumentId,identity.userId);
+  assert.equal(submitted?.role,'gestor');
+  await assert.rejects(refreshStaffSource(identity,authority({context:async()=>native,read:async()=>({
+    ...await read(identity.userId),profile:{role:'admin',active:false,nativeStaffProvisioningId:provisionId},
+  })})),{status:403});
+  await assert.rejects(refreshStaffSource(identity,authority({context:async()=>native,read:async()=>({
+    ...await read(identity.userId),profile:{role:'admin',active:true,nativeStaffProvisioningId:'other'},
+  })})),{status:403});
+});

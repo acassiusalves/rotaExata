@@ -1,16 +1,17 @@
 'use client';
 
-import { createContext,useContext,useEffect,useRef,useState,type ReactNode } from 'react';
+import { createContext,useCallback,useContext,useEffect,useRef,useState,type ReactNode } from 'react';
 import { usePathname,useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { EarningsRequestError,EarningsShell,useEarnings } from '@/components/earnings/earnings-shell';
+import { useNativeSession } from '@/components/providers/native-session-provider';
 import { Button } from '@/components/ui/button';
-import { staffPageForPath,type StaffPage,type StaffRole } from '@/lib/staff/access';
+import { type StaffPage,type StaffRole } from '@/lib/staff/access';
 import { clearStaffWorkspace,staffWorkspaceKey } from '@/lib/staff/workspace';
 import { DriverPasswordForm } from '@/components/driver/driver-password-form';
 import { useAuth } from '@/hooks/auth-context';
 
-type Summary={userId:string;scopeId:string;name:string;role:StaffRole;paths:StaffPage[];revision:number;policyRevision:number};
+type Summary={userId:string;scopeId:string;name:string;role:StaffRole;paths:StaffPage[];revision:number;policyRevision:number;pathAllowed?:boolean;rotaPolicyRevision?:string|null};
 type StaffSession=Summary & ReturnType<typeof useEarnings>;
 const Context=createContext<StaffSession|null>(null);
 
@@ -45,49 +46,82 @@ export function StaffGate({children}:{children:ReactNode}) {
   const pathname=usePathname();
   const earnings=useEarnings();
   const {request,signOut}=earnings;
-  const [result,setResult]=useState<{actor?:Summary;status?:number;code?:string}>();
+  const reauthenticate=useNativeSession()!.reauthenticate;
+  const [result,setResult]=useState<{path:string;actor?:Summary;status?:number;code?:string}>();
   const [retry,setRetry]=useState(0);
+  const [offline,setOffline]=useState(false);
   const knownActor=useRef<Summary>();
+  const renderedLifetime=useRef<AbortController>();
+  const pageRequest=useCallback(<T,>(path:string,init?:RequestInit)=>{
+    const lifetime=renderedLifetime.current;
+    if (!lifetime || lifetime.signal.aborted) return Promise.reject(new EarningsRequestError(503,'staff_unavailable'));
+    const signal=init?.signal ? AbortSignal.any([lifetime.signal,init.signal]):lifetime.signal;
+    return request<T>(path,{...init,signal});
+  },[request]);
 
   useEffect(()=>{
-    let controller:AbortController|undefined;
+    let checking:AbortController|undefined;
+    const hide=()=>{
+      renderedLifetime.current?.abort();
+      renderedLifetime.current=undefined;
+    };
+    function disconnected() {
+      checking?.abort();
+      checking=undefined;
+      hide();
+      setOffline(true);
+      setResult(undefined);
+    }
     async function read() {
-      if (controller) return;
+      if (!navigator.onLine) {disconnected();return;}
+      if (checking) return;
       const operation=new AbortController();
-      controller=operation;
+      checking=operation;
       try {
-        const actor=await request<Summary>('/api/staff/session',{signal:operation.signal});
+        const actor=await request<Summary>('/api/staff/session?path='+encodeURIComponent(pathname),{signal:operation.signal});
         if (!operation.signal.aborted) {
           knownActor.current=actor;
-          setResult({actor});
+          if (actor.pathAllowed) renderedLifetime.current ??=new AbortController();
+          else hide();
+          setResult({path:pathname,actor});
+          setOffline(false);
         }
       } catch (err) {
         if (operation.signal.aborted) return;
+        hide();
         const status=err instanceof EarningsRequestError ? err.status : 503;
         const code=err instanceof EarningsRequestError ? err.code : undefined;
-        if (status===401) void signOut();
-        if (status===403 && knownActor.current && code!=='platform_password_change_required') {
+        const discard=status===403 && code!=='platform_password_change_required' || status===401 && code==='staff_unauthorized';
+        if (discard && knownActor.current) {
           clearStaffWorkspace(window.localStorage,knownActor.current.userId);
           clearStaffWorkspace(window.sessionStorage,knownActor.current.userId);
           knownActor.current=undefined;
         }
-        setResult(previous=>status===401 || status===403 ? {status,code} : {...previous,status,code});
+        if (status===401) void (discard ? signOut():reauthenticate());
+        setResult({path:pathname,status,code});
+        setOffline(false);
       } finally {
-        if (controller===operation) controller=undefined;
+        if (checking===operation) checking=undefined;
       }
     }
     const foreground=()=>{if(document.visibilityState==='visible') void read();};
     void read();
     const timer=window.setInterval(foreground,20_000);
     document.addEventListener('visibilitychange',foreground);
+    window.addEventListener('offline',disconnected);
+    window.addEventListener('online',foreground);
     return ()=>{
-      controller?.abort();
+      checking?.abort();
+      hide();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange',foreground);
+      window.removeEventListener('offline',disconnected);
+      window.removeEventListener('online',foreground);
     };
-  },[request,pathname,retry,signOut]);
+  },[request,pathname,retry,signOut,reauthenticate]);
 
-  const page=staffPageForPath(pathname);
+  if (offline) return <p className="p-6" role="status">Sem conexão. O painel será liberado depois de conferir o seu acesso.</p>;
+  if (result?.path!==pathname) return <p className="p-6" role="status">Conferindo acesso ao painel…</p>;
   if (!result) return <p className="p-6" role="status">Conferindo acesso ao painel…</p>;
 
   if (!result.actor && result.code==='platform_password_change_required') {
@@ -105,13 +139,13 @@ export function StaffGate({children}:{children:ReactNode}) {
     </div>;
   }
 
-  if (!page || !result.actor.paths.includes(page)) return <div className="mx-auto max-w-md space-y-4 p-6">
+  if (!result.actor.pathAllowed) return <div className="mx-auto max-w-md space-y-4 p-6">
     <p role="alert">Sua conta não tem acesso a esta página.</p>
     {result.actor.paths.length>0 && <Link className="underline" href={result.actor.paths[0]}>Abrir página disponível</Link>}
     <Button variant="ghost" onClick={()=>void signOut()}>Sair</Button>
   </div>;
 
-  return <Context.Provider value={{...earnings,...result.actor}}>
+  return <Context.Provider value={{...earnings,...result.actor,request:pageRequest}}>
     {result.status && <p className="border-b p-2 text-sm" role="status">A verificação de acesso será repetida em instantes.</p>}
     {children}
   </Context.Provider>;
@@ -127,9 +161,9 @@ function ChooseDestination({next,staffOnly,driverNext}:{next:string|null;staffOn
     const controller=new AbortController();
     async function resolve() {
       try {
-        const session=await request<Summary>('/api/staff/session',{signal:controller.signal});
-        const destination=next && session.paths.some(page=>page===staffPageForPath(new URL(next,window.location.origin).pathname)) ?
-          next : session.paths[0];
+        const desired=next ? new URL(next,window.location.origin).pathname:null;
+        const session=await request<Summary>('/api/staff/session'+(desired ? '?path='+encodeURIComponent(desired):''),{signal:controller.signal});
+        const destination=next && session.pathAllowed ? next:session.paths[0];
         if (!destination) setError('Sua conta não tem páginas disponíveis no painel.');
         else if (!controller.signal.aborted) router.replace(destination);
       } catch (err) {

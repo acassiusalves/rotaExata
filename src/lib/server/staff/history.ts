@@ -52,7 +52,9 @@ export function projectActivity(doc:DocumentSnapshot) {
   return {
     ...Object.fromEntries(fields.filter(key=>['string','boolean','number'].includes(typeof source[key]))
       .map(key=>[key,safeAuditValue(source[key])])),
-    id:doc.id,eventType:typeof source.eventType==='string' ? source.eventType:'unknown',
+    id:doc.id,actorProvenance:source.staffAuditVersion===1 && doc.id.startsWith('staff-') &&
+      typeof source.staffScopeId==='string' && typeof source.canonicalUserId==='string' ? 'rota-native':'source-reported',
+    eventType:typeof source.eventType==='string' ? source.eventType:'unknown',
     action:typeof source.action==='string' ? source.action.slice(0,4000):'',timestamp:driverTimestamp(source.timestamp),
     changes,metadata:safeAuditValue(source.metadata),
   };
@@ -78,7 +80,8 @@ export async function readStaffRouteRemovals(db:Firestore,routeId:string) {
     if (typeof pointId!=='string') return project;
     const [moves,adds]=await Promise.all(['point_transferred','point_added_to_route'].map(eventType=>
       db.collection('activity_log').where('eventType','==',eventType).where('pointId','==',pointId).limit(50).get()));
-    const transfer=moves.docs.filter(doc=>newest(doc,entry)<=0 && (doc.get('routeId')===routeId ||
+    const operation=entry.get('staffAuditOperationId');
+    const transfer=moves.docs.filter(doc=>(operation ? doc.get('staffAuditOperationId')===operation : newest(doc,entry)<=0) && (doc.get('routeId')===routeId ||
       doc.get('metadata.sourceRouteId')===routeId)).sort(newest)[0];
     if (transfer && (transfer.get('metadata.targetRouteName') || transfer.get('metadata.targetRouteId'))) {
       return {...project,related:{eventType:transfer.get('eventType'),routeId:transfer.get('routeId'),

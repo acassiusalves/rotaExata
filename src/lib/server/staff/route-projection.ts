@@ -106,8 +106,10 @@ export function projectStaffService(id:string,data:Fields,includeStops:boolean,r
     origin:projectStaffPlace(data.origin),
     routeIds:strings(data.routeIds),
     lunnaOrderIds:includeStops ? strings(data.lunnaOrderIds):[],
-    ...(data.stats ? {stats:{
-      totalRoutes:0,completedRoutes:0,totalDeliveries:0,completedDeliveries:0,failedDeliveries:0,
+    ...(data.stats || Array.isArray(data.allStops) ? {stats:{
+      totalRoutes:0,completedRoutes:0,
+      totalDeliveries:Array.isArray(data.allStops) ? data.allStops.filter(stop=>!stop?.unlinkedAt).length:0,
+      completedDeliveries:0,failedDeliveries:0,
       ...project(stats,['totalRoutes','completedRoutes','totalDeliveries','completedDeliveries','failedDeliveries']),
     }}:{}),
     ...(includeStops ? {allStops:Array.isArray(data.allStops) ? data.allStops.map(projectStaffPlace):[]}:{}),

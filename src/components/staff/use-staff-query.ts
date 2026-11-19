@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback,useEffect,useState } from 'react';
-import { EarningsRequestError } from '@/lib/earnings/session-request';
 
 export function useStaffQuery<T>(load:(signal:AbortSignal)=>Promise<T>,interval=10_000) {
   const [data,setData]=useState<T>();
@@ -25,7 +24,7 @@ export function useStaffQuery<T>(load:(signal:AbortSignal)=>Promise<T>,interval=
         failures=0;
       } catch (err) {
         if (controller.signal.aborted) return;
-        if (err instanceof EarningsRequestError && (err.status===401 || err.status===403)) setData(undefined);
+        setData(undefined);
         setError(err);
         failures++;
       } finally {

@@ -29,6 +29,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
@@ -147,7 +148,7 @@ const Rotograma: React.FC<{
 
 export default function MonitoringPage() {
   const {request}=useStaff();
-  const load=React.useCallback((signal:AbortSignal)=>request<{routes:RouteDocument[]}>('/api/staff/routes/monitoring',{signal}),[request]);
+  const load=React.useCallback((signal:AbortSignal)=>loadStaffPageList<RouteDocument,'routes'>(request,'/api/staff/routes/monitoring','routes',signal).then(routes=>({routes})),[request]);
   const {data,error,loading:isLoading,refresh}=useStaffQuery(load,8000);
   const routes=React.useMemo(()=>staffRouteDates<RouteDocument[]>(data?.routes ?? [])
     .sort((a,b)=>(b.plannedDate?.valueOf() ?? 0)-(a.plannedDate?.valueOf() ?? 0)),[data]);

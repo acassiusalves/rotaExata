@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
-import { requireStaffActor } from '@/lib/server/staff/actor';
-import { staffSourceDb } from '@/lib/server/staff/source';
+import { requireStaffEditor } from '@/lib/server/staff/editor-access';
+import { staffEditorSurfaceSchema } from '@/lib/staff/access';
 import { EarningsError,earningsErrorResponse,readJsonBody } from '@/lib/server/earnings/transport';
 import { NextResponse } from 'next/server';
 import type { PlaceValue } from '@/lib/types';
@@ -34,11 +34,10 @@ const nativeInput=z.object({origin:coordinate,stops:z.array(coordinate).max(400)
 
 async function readRouteInput(request:Request) {
   if (!nativeStaffEnabled) return await request.json() as {origin:PlaceValue;stops:PlaceValue[]};
-  const actor=await requireStaffActor(request,'route:edit');
-  staffSourceDb(actor);
-  const body=nativeInput.safeParse(await readJsonBody(request,80_000));
+  const body=z.object({surface:staffEditorSurfaceSchema,body:nativeInput}).strict().safeParse(await readJsonBody(request,80_000));
   if (!body.success) throw new EarningsError(422,'staff_invalid_map_route');
-  return body.data as {origin:PlaceValue;stops:PlaceValue[]};
+  await requireStaffEditor(request,body.data.surface);
+  return body.data.body as {origin:PlaceValue;stops:PlaceValue[]};
 }
 
 export async function POST(req: Request) {

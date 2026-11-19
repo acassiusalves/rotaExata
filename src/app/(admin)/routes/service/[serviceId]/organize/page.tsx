@@ -1,12 +1,18 @@
 'use client';
 
 import * as React from 'react';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import ServiceAcompanharPage from '../acompanhar/page';
 import { editorDate,useRouteEditor, routeRef as editorRoute, serviceRef as editorService, editorTime as serverTimestamp, serviceRoutes, ordersByNumber } from '@/components/staff/use-route-editor';
 import { useRouter, useParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import type { LunnaService, PlaceValue } from '@/lib/types';
 
 export default function ServiceOrganizePage() {
+  return nativeStaffEnabled ? <ServiceAcompanharPage />:<LegacyServiceOrganizePage />;
+}
+
+function LegacyServiceOrganizePage() {
   const { readDocument:getDoc, readList:getDocs, update:updateDoc, draftKey } = useRouteEditor();
   const router = useRouter();
   const params = useParams();

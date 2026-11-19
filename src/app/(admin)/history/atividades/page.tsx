@@ -373,7 +373,7 @@ function ActivityCard({
                   {activity.userName?.charAt(0).toUpperCase() || 'U'}
                 </div>
                 <div>
-                  <span className="font-semibold text-sm">{activity.userName || 'Usuário'}</span>
+                  <span className="font-semibold text-sm">{activity.userName || 'Usuário'}{activity.actorProvenance==='source-reported' && ' (origem)'}</span>
                   <span className="text-xs text-muted-foreground block">
                     {formatTimestamp(activity.timestamp)}
                   </span>

@@ -212,3 +212,11 @@ test('corte de staff impede escritas Rota exclusivas e preserva a integração L
   await assertSucceeds(admin.doc('counters/serviceCode').set({count:1}));
   await assertSucceeds(admin.doc('orders/lunna-direct').set({number:'SYNTHETIC'}));
 });
+
+test('Luna activity can append legacy logs but cannot claim a canonical Rota actor',async()=>{
+  const operator=db('admin');
+  const row={eventType:'point_removed_from_route',userId:'admin',routeId:'route-a'};
+  await assertSucceeds(operator.doc('activity_log/lunna-legacy').set(row));
+  await assertFails(operator.doc('activity_log/spoofed-native').set({...row,staffAuditVersion:1,canonicalUserId:'canonical-user'}));
+  await assertFails(operator.doc('activity_log/staff-spoofed').set(row));
+});

@@ -5,6 +5,7 @@ import {useOptionalDriverRuntime} from '@/components/driver/driver-runtime';
 import {useAuth} from '@/hooks/auth-context';
 import {usePathname} from 'next/navigation';
 import {useOptionalStaff} from '@/components/staff/staff-session';
+import {staffEditorSurface} from '@/lib/staff/access';
 import {staffPhotoViewForPath} from '@/lib/staff/media-policy';
 import {isStaffPhotoReference} from '@/lib/staff/photo-reference';
 import {nativeStaffEnabled} from '@/lib/staff/mode';
@@ -14,14 +15,17 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
   const runtime=useOptionalDriverRuntime();
   const staff=useOptionalStaff();
   const inStaff=!!staff;
-  const staffView=staffPhotoViewForPath(usePathname());
+  const pathname=usePathname();
+  const staffView=staffPhotoViewForPath(pathname);
+  const editor=staffEditorSurface(pathname);
   const {user}=useAuth();
   const request=staff?.request ?? runtime?.request;
   const actor=staff?.userId ?? runtime?.userId ?? user?.uid;
   const bridged=isStaffPhotoReference(src);
   const protectedSource=isProtectedPhoto(src) || bridged;
   const staffSource=staff && staffView && protectedSource ?
-    (bridged ? src : '/api/staff/media/'+src.slice(protectedPhotoPrefix.length))+'?view='+staffView:null;
+    (bridged ? src : '/api/staff/media/'+src.slice(protectedPhotoPrefix.length))+'?view='+staffView+
+      (editor ? '&editor='+encodeURIComponent(JSON.stringify(editor)):''):null;
   const native=runtime?.native;
   const [loaded,setLoaded]=useState<{src:string;actor?:string;url?:string}>();
   useEffect(()=>{

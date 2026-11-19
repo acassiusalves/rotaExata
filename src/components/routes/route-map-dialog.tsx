@@ -11,6 +11,7 @@ import { usePathname } from 'next/navigation';
 import type { Timestamp } from 'firebase/firestore';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { collectStaffPages,staffPageUrl } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -63,9 +64,14 @@ function StaffRouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
   const routeId=route.id;
   const load=React.useCallback(async(signal:AbortSignal)=>{
     if (!isOpen) return null;
-    const result=await request<{selected:RouteDocument;routes:RouteDocument[]}>(
-      '/api/staff/routes/'+encodeURIComponent(routeId)+'/map?view='+view,{signal});
-    return staffRouteDates<typeof result>(result);
+    let selected:RouteDocument|undefined;
+    const endpoint='/api/staff/routes/'+encodeURIComponent(routeId)+'/map?view='+view;
+    const routes=await collectStaffPages<RouteDocument>(async cursor=>{
+      const page=await request<{selected:RouteDocument;routes:RouteDocument[];cursor:string|null}>(staffPageUrl(endpoint,cursor),{signal});
+      selected ??= page.selected;
+      return {items:page.routes,cursor:page.cursor};
+    });
+    return selected ? staffRouteDates<{selected:RouteDocument;routes:RouteDocument[]}>({selected,routes}):null;
   },[request,isOpen,routeId,view]);
   const {data,error}=useStaffQuery(load,8000);
   const current=data?.selected.id===routeId ? data.selected:route;

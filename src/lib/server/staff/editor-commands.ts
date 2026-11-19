@@ -10,8 +10,8 @@ const activeStatuses=['draft','pending','dispatched','in_progress'];
 
 export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,value:unknown) {
   const command:StaffEditorCommand=staffEditorCommandSchema.parse(value);
-  const collection='routeId' in command ? 'routes' : 'serviceId' in command ? 'services' : 'orders';
-  const entityId='routeId' in command ? command.routeId : 'serviceId' in command ? command.serviceId : command.orderId;
+  const collection='routes';
+  const entityId=command.routeId;
   const target=db.collection(collection).doc(entityId);
   const receipt=db.collection('rotaStaffCommands').doc(command.commandId);
   const fingerprint=factsHash({actor:actor.userId,command});
@@ -47,13 +47,6 @@ export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,val
         tx.update(target,{unassignedStops:command.stops,updatedAt:stamp()});
         break;
       }
-      case 'prune-service-pool': {
-        if (data.status==='completed') throw new EarningsError(409,'staff_service_closed');
-        const removed=new Set(command.removed);
-        const allStops=(Array.isArray(data.allStops) ? data.allStops:[]).filter(stop=>!removed.has(String(stop?.id ?? stop?.placeId)));
-        tx.update(target,{allStops,'stats.totalDeliveries':allStops.length,updatedAt:stamp()});
-        break;
-      }
       case 'delete-draft': {
         if (data.status!=='draft') throw new EarningsError(409,'staff_route_conflict');
         const serviceId=routeDocumentId.safeParse(data.serviceId);
@@ -68,27 +61,12 @@ export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,val
         tx.delete(target);
         break;
       }
-      case 'detach-order': {
-        const serviceId=routeDocumentId.safeParse(data.rotaExataServiceId);
-        const routeId=routeDocumentId.safeParse(data.rotaExataRouteId);
-        const route=routeId.success ? await tx.get(db.collection('routes').doc(routeId.data)):null;
-        const service=serviceId.success ? await tx.get(db.collection('services').doc(serviceId.data)):null;
-        const siblings=serviceId.success ? await tx.get(db.collection('routes').where('serviceId','==',serviceId.data)):null;
-        const linked=[
-          ...[route?.get('stops'),service?.get('allStops')],
-          ...(siblings?.docs.map(doc=>doc.get('stops')) ?? []),
-        ].some(stops=>Array.isArray(stops) && stops.some(stop=>stop?.orderNumber===data.number && !stop?.unlinkedAt));
-        if (linked) throw new EarningsError(409,'staff_order_still_on_route');
-        tx.update(target,{logisticsStatus:null,rotaExataServiceId:null,rotaExataServiceCode:null,
-          rotaExataRouteId:null,rotaExataRouteCode:null,updatedAt:stamp()});
-        break;
-      }
     }
     tx.create(receipt,{fingerprint,actorId:actor.userId,entityId,kind:command.kind,createdAt:stamp()});
     tx.create(db.collection('activity_log').doc('staff-'+command.commandId),{
       timestamp:stamp(),userId:actor.sourceUid ?? actor.userId,canonicalUserId:actor.userId,userName:actor.name,
       eventType:command.kind==='delete-draft' ? 'route_deleted':'route_updated',
-      entityType:collection==='routes' ? 'route':collection==='services' ? 'service':'order',entityId,
+      entityType:'route',entityId,
       action:command.kind,
     });
     return {ok:true,replayed:false};

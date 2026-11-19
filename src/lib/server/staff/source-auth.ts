@@ -16,11 +16,13 @@ const contextSchema=z.object({
   authority:z.enum(['firebase','supabase']),
   userId:uuid,sessionId:uuid,scopeId:uuid,
   sourceProject:z.string(),sourceUid:z.string().min(1).max(128).refine(value=>!value.includes('/')).optional(),
+  sourceDocumentId:z.string().min(1).max(128).refine(value=>!value.includes('/')).optional(),
+  sourceProvisionId:uuid.optional(),
   revision:z.number().int().nonnegative().safe(),policyRevision:z.number().int().nonnegative().safe(),
 });
 const role=z.enum(['admin','socio','gestor','vendedor','estoquista','financeiro','marketing','usuario','manager','partner','user'])
   .transform(value=>value==='manager'?'gestor':value==='partner'?'socio':value==='user'?'usuario':value);
-const sourceProfile=z.object({role,active:z.boolean().optional(),disabled:z.boolean().optional()});
+const sourceProfile=z.object({role,active:z.boolean().optional(),disabled:z.boolean().optional(),nativeStaffProvisioningId:uuid.optional(),displayName:z.unknown(),name:z.unknown(),phone:z.unknown()});
 const path=z.string().max(500).startsWith('/');
 const sourcePolicy=z.object({pagePermissions:z.record(path,z.array(role)),inactivePages:z.array(path).default([])});
 
@@ -67,21 +69,32 @@ export async function refreshStaffSource(identity:Identity,authority:SourceAutho
     }
     if (context.authority==='supabase') return;
 
+    const documentId=context.sourceDocumentId ?? context.sourceUid;
+    if (!documentId ||
+        (context.sourceUid && (documentId!==context.sourceUid || context.sourceProvisionId)) ||
+        (!context.sourceUid && (documentId!==identity.userId || !context.sourceProvisionId))) {
+      throw new EarningsError(403,'staff_access_denied');
+    }
+
     let rows:SourceRows;
-    try {rows=await authority.read(context.sourceUid);}
+    try {rows=await authority.read(documentId);}
     catch {throw new EarningsError(503,'staff_unavailable');}
     const policy=sourcePolicy.safeParse(rows.settings);
     if (!policy.success || !rows.policyRevision) throw new EarningsError(503,'staff_unavailable');
 
     const profile=sourceProfile.safeParse(rows.profile);
-    if (context.sourceUid && (!profile.success || !rows.profileRevision ||
-        profile.data.active===false || profile.data.disabled===true)) {
+    if (!profile.success || !rows.profileRevision || profile.data.active===false || profile.data.disabled===true ||
+        profile.data.nativeStaffProvisioningId!==context.sourceProvisionId) {
       throw new EarningsError(403,'staff_access_denied');
     }
 
+    const profileName=typeof profile.data.displayName==='string' ? profile.data.displayName:profile.data.name;
     const command={
       project:context.sourceProject,sourceUid:context.sourceUid ?? null,
-      ...(context.sourceUid && profile.success ? {role:profile.data.role,sourceProfileRevision:rows.profileRevision}:{}),
+      ...(context.sourceDocumentId ? {sourceDocumentId:documentId}:{}),
+      ...(typeof profileName==='string' && profileName.trim() ? {profileName:profileName.trim().slice(0,150)}:{}),
+      ...(typeof profile.data.phone==='string' ? {profilePhone:profile.data.phone.trim().slice(0,40)}:{}),
+      role:profile.data.role,sourceProfileRevision:rows.profileRevision,
       policy:policy.data,sourcePolicyRevision:rows.policyRevision,profileRevision:context.revision,policyRevision:context.policyRevision,
     };
     const changed=await authority.apply(command) as {ok?:boolean;errorCode?:string}|null;

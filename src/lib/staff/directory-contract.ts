@@ -5,9 +5,11 @@ const uuid=z.string().uuid();
 const revision=z.number().int().nonnegative().safe();
 const commandFields={targetId:uuid,revision,commandId:uuid};
 export const staffSecurityActions=['revoke_sessions','set_active','set_inactive','require_password_change'] as const;
+export const staffProfileFields=z.object({name:z.string().trim().min(2).max(150),phone:z.string().trim().max(40)}).strict();
 export const staffDirectoryCommandSchema=z.union([
   z.object({...commandFields,action:z.enum(staffSecurityActions)}).strict(),
   z.object({...commandFields,action:z.literal('set_role'),role:z.enum(staffRoles)}).strict(),
+  z.object({...commandFields,action:z.literal('edit_profile'),profile:staffProfileFields}).strict(),
 ]);
 export type StaffDirectoryCommand=z.infer<typeof staffDirectoryCommandSchema>;
 
@@ -15,6 +17,8 @@ export const staffAccountSchema=z.object({
   userId:uuid,name:z.string(),email:z.string().nullable(),emailVerified:z.boolean(),
   role:z.enum(staffRoles),active:z.boolean(),legacyDisabled:z.boolean(),mustChangePassword:z.boolean(),
   revision,createdAt:z.string(),lastSignInAt:z.string().nullable(),
+  phone:z.string().nullish(),
+  pendingProfile:z.object({commandId:uuid,profile:staffProfileFields,revision}).nullish(),
   pendingRole:z.object({commandId:uuid,role:z.enum(staffRoles),revision}).nullish(),
 });
 export type StaffAccount=z.infer<typeof staffAccountSchema>;

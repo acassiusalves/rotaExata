@@ -267,10 +267,10 @@ export default function HistoryRoutesPage() {
       if (nativeStaffEnabled) {
         if (!staff || !canResend || !routeToResend.revision) throw new Error('Reenvio indisponível.');
         const command={routeId:routeToResend.id,revision:routeToResend.revision};
-        const result=await staff.request<{push:'accepted'|'skipped_no_token'|'failed'}>('/api/staff/history/resend',{
+        const result=await staff.request<{push:'accepted'|'skipped_no_token'|'failed'|'uncertain'}>('/api/staff/history/resend',{
           method:'POST',body:JSON.stringify({...command,commandId:commandId(command)}),
         });
-        toast({title:'Rota reenviada',description:result.push==='accepted' ?
+        toast({title:'Rota reenviada',description:result.push==='uncertain' ? 'A rota foi reenviada. O envio do aviso não pôde ser confirmado.' : result.push==='accepted' ?
           'A rota voltou ao app e o envio da notificação foi aceito.' :
           'A rota voltou ao app. O envio da notificação não foi confirmado.'});
       } else {

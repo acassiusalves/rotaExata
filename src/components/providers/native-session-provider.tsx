@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { clearLegacyRotaIndexedDb,clearLegacyRotaWebStorage } from '@/lib/staff/legacy-browser-session';
-import { clearStaffWorkspace } from '@/lib/staff/workspace';
+import { claimStaffWorkspace,receiveWorkspaceOwnerChange,staffWorkspaceOwnerKey } from '@/lib/staff/workspace';
 import { clearDevicePushGrant } from '@/lib/driver/push-device';
 import { earningsBrowserClient,signOutNativeLocally } from '@/lib/earnings/client';
 import { requiredEarningsFactors,type EarningsFactor } from '@/lib/earnings/mfa';
@@ -21,6 +21,7 @@ type SessionState = {
   factors:EarningsFactor[];
   exitError:boolean;
   leave:()=>Promise<void>;
+  reauthenticate:()=>Promise<void>;
   request:<T>(path:string,init?:RequestInit)=>Promise<T>;
 };
 
@@ -62,10 +63,7 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
     const nextId=localSessionId(next?.access_token);
     if (!lifetime.current || previousId!==nextId || previous?.user.id!==next?.user.id) {
       lifetime.current?.abort();
-      if (nativeStaffEnabled) {
-        clearStaffWorkspace(window.localStorage,previous?.user.id);
-        clearStaffWorkspace(window.sessionStorage,previous?.user.id);
-      }
+      if (nativeStaffEnabled && next) claimStaffWorkspace(window.localStorage,window.sessionStorage,next.user.id);
       lifetime.current=new AbortController();
       approved.current=undefined;
       setAssurance(undefined);
@@ -90,6 +88,9 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
       setLoading(false);
     });
     const retire=(event:StorageEvent)=>{
+      if (nativeStaffEnabled && event.key===staffWorkspaceOwnerKey) {
+        receiveWorkspaceOwnerChange(window.sessionStorage,event.oldValue,event.newValue);
+      }
       const current=localSessionId(currentSession.current?.access_token);
       if (current && event.key===logoutMarker(current)) acceptSession(null);
     };
@@ -103,9 +104,10 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
     };
   },[acceptSession,enabled]);
 
-  const leave=useCallback(async()=>{
+  const end=useCallback(async(keepWorkspace:boolean)=>{
     if (!client) return;
     const previous=currentSession.current;
+    if (nativeStaffEnabled && !keepWorkspace) claimStaffWorkspace(window.localStorage,window.sessionStorage,null);
     retiring.current=true;
     lifetime.current?.abort();
     try {
@@ -116,6 +118,9 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
       setExitError(true);
     }
   },[acceptSession,client]);
+
+  const leave=useCallback(()=>end(false),[end]);
+  const reauthenticate=useCallback(()=>end(true),[end]);
 
   const request=useCallback(<T,>(path:string,init?:RequestInit):Promise<T>=>{
     const activeLifetime=lifetime.current;
@@ -138,6 +143,6 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
   return <Context.Provider value={{
     client,session,sessionId,loading,ready:reusableAssurance(assurance,sessionId,userId),
     failed:!!token && failedToken===token,factors:assurance?.token===token ? assurance?.factors ?? [] : [],
-    exitError,leave,request,
+    exitError,leave,reauthenticate,request,
   }}>{children}</Context.Provider>;
 }

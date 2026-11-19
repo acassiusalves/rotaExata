@@ -58,6 +58,7 @@ export type PlaceValue = {
   // Campos de rastreamento
   deliveryStatus?: DeliveryStatus;
   arrivedAt?: Timestamp | Date;
+  unlinkedAt?: Timestamp | Date | string;
   completedAt?: Timestamp | Date;
   photoUrl?: string;
   signatureUrl?: string;
@@ -617,6 +618,7 @@ export type ActivityLogEntry = {
   eventType: ActivityEventType;
   category?: ActivityCategory;
   userId: string;
+  actorProvenance?: 'rota-native'|'source-reported';
   userName?: string;
   userRole?: string;
   origin?: EventOrigin;

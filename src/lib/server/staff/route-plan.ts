@@ -1,4 +1,4 @@
-import { FieldValue,Timestamp,type DocumentReference,type Firestore,type Transaction } from 'firebase-admin/firestore';
+import { FieldValue,Timestamp,type DocumentSnapshot,type DocumentReference,type Firestore,type Transaction } from 'firebase-admin/firestore';
 import { factsHash } from '../../../../functions/src/earnings-source-adapter.ts';
 import { InvalidDispatchDriverError,resolveDispatchDriver } from '../../dispatch-driver.ts';
 import {
@@ -7,10 +7,11 @@ import {
 import { RouteStructureConflictError } from '../../route-stop-reconciliation.ts';
 import { staffPlanBatchSchema,type StaffPlanBatch } from '../../staff/route-plan-contract.ts';
 import { staffRouteRevision } from './route-commands.ts';
+import type { PlaceValue } from '../../types';
 import { getStopIdentityKey } from '../../route-stop-utils.ts';
 import { EarningsError } from '../earnings/transport.ts';
 
-type Operator={userId:string;name:string;sourceUid?:string};
+type Operator={userId:string;name:string;sourceUid?:string;scopeId?:string};
 type Receipt={
   fingerprint:string;
   existingRoutes: Omit<SavedRoutePlanBatch['existingRoutes'][number],'stops'|'removedStops'|'changes'>[];
@@ -18,21 +19,68 @@ type Receipt={
 };
 
 function transactionGateway(db:Firestore,tx:Transaction,writes:Array<()=>void>) {
+  const archived=new Map<string,PlaceValue[]>();
   return createRouteStopMutationGateway({
     db,
     doc:(_db,collection,id)=>db.collection(collection).doc(id),
     runTransaction:(_db,work)=>work({
       get:async document=>{
-        const snapshot=await tx.get(document as DocumentReference);
-        return {exists:()=>snapshot.exists,data:()=>snapshot.data() ?? {}};
+        const ref=document as DocumentReference;
+        const snapshot=await tx.get(ref);
+        const data=snapshot.data() ?? {};
+        if (ref.parent.id==='routes' && Array.isArray(data.stops)) {
+          archived.set(ref.path,data.stops.filter(stop=>stop?.unlinkedAt));
+          data.stops=data.stops.filter(stop=>!stop?.unlinkedAt);
+        }
+        return {exists:()=>snapshot.exists,data:()=>data};
       },
-      update:(document,data)=>{writes.push(()=>tx.update(document as DocumentReference,data));},
+      update:(document,data)=>{
+        const ref=document as DocumentReference;
+        const history=archived.get(ref.path);
+        const next=history?.length && Array.isArray(data.stops) ? {...data,stops:[...data.stops,...history]}:data;
+        writes.push(()=>tx.update(ref,next));
+      },
       set:(document,data)=>{writes.push(()=>tx.create(document as DocumentReference,data));},
     }),
     serverTimestamp:FieldValue.serverTimestamp,
     now:()=>Timestamp.now(),
     increment:FieldValue.increment,
   });
+}
+
+const serviceStopFields=['expectedValue','items','hasExchangeItems','operationType','lunnaClientCode'] as const;
+
+function canonicalServiceStops<T extends {orderNumber?:string}>(stops:T[],service:DocumentSnapshot) {
+  const all=service.get('allStops');
+  const byNumber=new Map<string,Record<string,unknown>[]>();
+  for (const stop of Array.isArray(all) ? all : []) {
+    if (typeof stop?.orderNumber==='string') {
+      const rows=byNumber.get(stop.orderNumber) ?? [];
+      rows.push(stop);
+      byNumber.set(stop.orderNumber,rows);
+    }
+  }
+  return stops.map(stop=>{
+    if (!stop.orderNumber) return stop;
+    const found=byNumber.get(stop.orderNumber);
+    if (found?.length!==1) throw new EarningsError(409,'staff_order_service_conflict');
+    const facts=Object.fromEntries(serviceStopFields.filter(field=>Object.hasOwn(found[0],field))
+      .map(field=>[field,found[0][field]]));
+    return {...stop,...facts};
+  });
+}
+
+const executed=(stop:PlaceValue)=>stop.deliveryStatus==='completed' || stop.deliveryStatus==='failed' ||
+  !!(stop.completedAt || stop.photoUrl || stop.attemptPhotoUrl || stop.signatureUrl || stop.wentToLocation ||
+    stop.payments?.length || stop.deliveredItemIds?.length);
+
+function preserveRemovedExecution(batch:StaffPlanBatch,result:SavedRoutePlanBatch) {
+  for (const route of result.existingRoutes) {
+    const moves=new Set(batch.transferIntents?.filter(intent=>intent.sourceRouteId===route.routeId).map(intent=>intent.stopKey));
+    if (route.removedStops.some(stop=>executed(stop) && !moves.has(getStopIdentityKey(stop) ?? ''))) {
+      throw new EarningsError(409,'staff_stop_execution_exists');
+    }
+  }
 }
 
 async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by:string,writes:Array<()=>void>):Promise<RoutePlanBatchInput> {
@@ -69,9 +117,16 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
       ...(driver ? {driverId:driver.id,driverInfo:{name:driver.name,vehicle:driver.vehicle}}:{})};
   }
 
-  const serviceStops=Array.isArray(service?.get('allStops')) ? service!.get('allStops'):[];
-  const hasConsistentServiceStops=(stops: Array<{orderNumber?:string}>)=>
-    stops.every(stop=>!stop.orderNumber || serviceStops.some((found:{orderNumber?:string})=>found.orderNumber===stop.orderNumber));
+  const services=new Map<string,DocumentSnapshot>();
+  if (service) services.set(service.id,service);
+  const linkedIds=[...new Set(routeDocs.map(route=>route.get('serviceId')).filter(value=>typeof value==='string' && value && !services.has(value)))];
+  if (linkedIds.length) {
+    const linked=await tx.getAll(...linkedIds.map(id=>db.collection('services').doc(id)));
+    for (const doc of linked) {
+      if (!doc.exists) throw new EarningsError(409,'staff_route_service_conflict');
+      services.set(doc.id,doc);
+    }
+  }
   const draft=await (batch.draftDispatch ? tx.get(db.collection('routes').doc(batch.draftDispatch.routeId)):null);
   if (draft && batch.draftDispatch) {
     if (!draft.exists || draft.get('status')!=='draft' || draft.get('serviceId') ||
@@ -90,12 +145,19 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     });
   }
 
-  const existingPlans=batch.existingPlans.map(plan=>({
-    ...plan,metadata:{...fields(plan.metadata ?? {}),
+  const existingPlans=batch.existingPlans.map((plan,index)=>{
+    const linked=services.get(routeDocs[index].get('serviceId'));
+    const latest=routeDocs[index].get('stops') ?? [];
+    const knownNumbers=new Set(Array.isArray(latest) ? latest.map(stop=>stop?.orderNumber):[]);
+    const plannedStops=linked ? plan.plannedStops.map(stop=>{
+      if (!stop.orderNumber || knownNumbers.has(stop.orderNumber)) return stop;
+      return canonicalServiceStops([stop],linked)[0];
+    }):plan.plannedStops;
+    return {...plan,plannedStops,metadata:{...fields(plan.metadata ?? {}),
       ...(plan.unassignedStops ? {unassignedStops:plan.unassignedStops}:{}),
       ...(plan.metadata?.status==='dispatched' ? {dispatchedAt:FieldValue.serverTimestamp()}:{}),
-    },
-  })) as unknown as ExistingRoutePlan[];
+    }};
+  }) as unknown as ExistingRoutePlan[];
   const newInput=batch.newRoutes ?? [];
   const standaloneCount=service ? 0:newInput.length;
   const counter=db.doc('counters/routeCode');
@@ -108,7 +170,7 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
   const childCodes=new Set(existingChildren?.docs.map(doc=>doc.get('code')));
   const newRoutes=newInput.map(({routeId,data,plannedStops},index)=>{
     const {status,routeKey,...other}=data;
-    if (service && !hasConsistentServiceStops(plannedStops)) throw new EarningsError(409,'staff_order_service_conflict');
+    const canonicalStops=service ? canonicalServiceStops(plannedStops,service):plannedStops;
     const serviceCode=service?.get('code') ?? '';
     let code='RT-'+String(currentCount+index+1).padStart(4,'0');
     if (service) {
@@ -118,7 +180,7 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
       while (childCodes.has(code)) code=base+'-'+String(++suffix);
       childCodes.add(code);
     }
-    return {routeId,plannedStops,data:{...fields(other),status,code,createdAt:FieldValue.serverTimestamp(),createdBy:by,
+    return {routeId,plannedStops:canonicalStops,data:{...fields(other),status,code,createdAt:FieldValue.serverTimestamp(),createdBy:by,
       ...(status==='dispatched' ? {dispatchedAt:FieldValue.serverTimestamp()}:{}),
       ...(service ? {serviceId:service.id,serviceCode,source:'lunna'}:{source:'rota-exata'}),
     }};
@@ -184,10 +246,96 @@ async function applyDispatchLinks(
   }
 }
 
+async function applyUnlink(
+  db:Firestore,tx:Transaction,unlink:NonNullable<StaffPlanBatch['unlink']>,result:SavedRoutePlanBatch,writes:Array<()=>void>,
+) {
+  const route=unlink.routeId ? await tx.get(db.collection('routes').doc(unlink.routeId)):null;
+  const service=unlink.serviceId ? await tx.get(db.collection('services').doc(unlink.serviceId)):null;
+  if ((route && (staffRouteRevision(route.updateTime)!==unlink.routeRevision ||
+      (route.get('serviceId') ?? undefined)!==service?.id)) ||
+      (service && (staffRouteRevision(service.updateTime)!==unlink.serviceRevision || service.get('status')==='completed'))) {
+    throw new EarningsError(409,'staff_route_conflict');
+  }
+  const all=Array.isArray(service?.get('allStops')) ? service!.get('allStops') as PlaceValue[]:[];
+  const fromService=all.filter(stop=>!stop.unlinkedAt && getStopIdentityKey(stop)===unlink.stopKey);
+  const removed=route ? result.existingRoutes[0].removedStops:fromService;
+  if (removed.length!==1 || fromService.length>1 || getStopIdentityKey(removed[0])!==unlink.stopKey || executed(removed[0])) {
+    throw new EarningsError(409,'staff_route_conflict');
+  }
+  const stop=removed[0];
+  if (service) {
+    const siblings=await tx.get(db.collection('routes').where('serviceId','==',service.id));
+    if (siblings.docs.some(doc=>doc.id!==route?.id && (doc.get('stops') ?? []).some((item:PlaceValue)=>
+        !item.unlinkedAt && getStopIdentityKey(item)===unlink.stopKey))) throw new EarningsError(409,'staff_order_still_on_route');
+    const next=all.filter(item=>item.unlinkedAt || getStopIdentityKey(item)!==unlink.stopKey);
+    const orderIds=service.get('lunnaOrderIds');
+    writes.push(()=>tx.update(service.ref,{
+      allStops:next,'stats.totalDeliveries':next.filter(item=>!item.unlinkedAt).length,
+      ...(Array.isArray(orderIds) ? {lunnaOrderIds:orderIds.filter(id=>id!==stop.orderNumber)}:{}),
+      updatedAt:FieldValue.serverTimestamp(),
+    }));
+  }
+  if (route) {
+    const orderIds=route.get('lunnaOrderIds');
+    const available=route.get('unassignedStops');
+    writes.push(()=>tx.update(route.ref,{
+      ...(Array.isArray(orderIds) ? {lunnaOrderIds:orderIds.filter(id=>id!==stop.orderNumber)}:{}),
+      ...(Array.isArray(available) ? {unassignedStops:available.filter(item=>getStopIdentityKey(item)!==unlink.stopKey)}:{}),
+      updatedAt:FieldValue.serverTimestamp(),
+    }));
+  }
+  if (!stop.orderNumber) return;
+  const docs=await tx.get(db.collection('orders').where('number','==',stop.orderNumber).limit(3));
+  const matches=docs.docs.filter(doc=>(doc.get('rotaExataServiceId') || undefined)===service?.id &&
+    (!doc.get('rotaExataRouteId') || doc.get('rotaExataRouteId')===route?.id));
+  if (matches.length>1 || (!matches.length && docs.docs.some(doc=>doc.get('rotaExataServiceId') || doc.get('rotaExataRouteId')))) {
+    throw new EarningsError(409,'staff_order_service_conflict');
+  }
+  const order=matches[0];
+  if (order && (order.get('rotaExataServiceId') || order.get('rotaExataRouteId'))) {
+    writes.push(()=>tx.update(order.ref,{logisticsStatus:null,rotaExataServiceId:null,rotaExataServiceCode:null,
+      rotaExataRouteId:null,rotaExataRouteCode:null,updatedAt:FieldValue.serverTimestamp()}));
+  }
+}
+
+function auditStopChanges(db:Firestore,tx:Transaction,actor:Operator,batch:StaffPlanBatch,result:SavedRoutePlanBatch) {
+  const writes=new Map<string,{eventType:string;routeId:string;stop:PlaceValue;targetRouteId?:string}>();
+  const put=(eventType:string,routeId:string,stop:PlaceValue,targetRouteId?:string)=>{
+    const identity=getStopIdentityKey(stop);
+    if (identity) writes.set(factsHash({eventType,routeId,identity,targetRouteId:targetRouteId ?? null}),
+      {eventType,routeId,stop,targetRouteId});
+  };
+  for (const route of result.existingRoutes) {
+    for (const stop of route.removedStops) {
+      put('point_removed_from_route',route.routeId,stop);
+      const move=batch.transferIntents?.find(item=>item.sourceRouteId===route.routeId && item.stopKey===getStopIdentityKey(stop));
+      if (move) put('point_transferred',route.routeId,stop,move.targetRouteId);
+    }
+    const additions=new Set(route.changes.filter(change=>change.changeType==='added').map(change=>change.stopKey));
+    for (const stop of route.stops) if (additions.has(getStopIdentityKey(stop) ?? '')) {
+      put('point_added_to_route',route.routeId,stop);
+    }
+  }
+  for (const route of result.createdRoutes) for (const stop of route.stops) put('point_added_to_route',route.routeId,stop);
+  for (const [key,{eventType,routeId,stop,targetRouteId}] of writes) {
+    const pointId=stop.id || stop.pointCode || stop.orderNumber || stop.placeId;
+    tx.create(db.collection('activity_log').doc('staff-'+batch.commandId+'-'+key),{
+      timestamp:FieldValue.serverTimestamp(),staffAuditVersion:1,staffAuditOperationId:batch.commandId,
+      staffScopeId:actor.scopeId ?? null,canonicalUserId:actor.userId,
+      userId:actor.sourceUid ?? actor.userId,userName:actor.name,
+      eventType,category:'LOGISTICS',entityType:'point',entityId:pointId,pointId,routeId,
+      action:eventType==='point_removed_from_route' ? 'Ponto removido da rota':
+        eventType==='point_transferred' ? 'Ponto transferido entre rotas':'Ponto adicionado à rota',
+      metadata:{address:stop.address ?? '',orderNumber:stop.orderNumber ?? null,deliveryStatus:stop.deliveryStatus ?? null,
+        ...(targetRouteId ? {sourceRouteId:routeId,targetRouteId}:{})},
+    });
+  }
+}
+
 async function replayPlan(db:Firestore,tx:Transaction,prior:Receipt) {
   const ids=[...prior.existingRoutes.map(route=>route.routeId),...prior.createdRoutes];
-  const docs=await tx.getAll(...ids.map(id=>db.collection('routes').doc(id)));
-  const stopsById=new Map(docs.map(doc=>[doc.id,doc.get('stops') ?? []]));
+  const docs=ids.length ? await tx.getAll(...ids.map(id=>db.collection('routes').doc(id))):[];
+  const stopsById=new Map(docs.map(doc=>[doc.id,(doc.get('stops') ?? []).filter((stop:PlaceValue)=>!stop.unlinkedAt)]));
   return {
     existingRoutes:prior.existingRoutes.map(route=>({...route,stops:stopsById.get(route.routeId),removedStops:[],changes:[]})),
     createdRoutes:prior.createdRoutes.map(routeId=>({routeId,stops:stopsById.get(routeId)})),
@@ -211,8 +359,11 @@ export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unkn
       const writes:Array<()=>void>=[];
       const plans=await canonicalPlan(db,tx,batch,by,writes);
       const result=await transactionGateway(db,tx,writes).saveRoutePlanBatchAtomically(plans);
+      preserveRemovedExecution(batch,result);
+      if (batch.unlink) await applyUnlink(db,tx,batch.unlink,result,writes);
       await applyDispatchLinks(db,tx,batch,result,plans,writes);
       for (const write of writes) write();
+      auditStopChanges(db,tx,actor,batch,result);
       for (const route of result.existingRoutes) {
         if (!route.driverId || !route.changes.length || !['dispatched','in_progress'].includes(route.status)) continue;
         const noticeId=factsHash({commandId:batch.commandId,routeId:route.routeId});
@@ -236,7 +387,7 @@ export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unkn
       tx.create(receipt,{fingerprint,actorId:actor.userId,existingRoutes,createdRoutes,createdAt:FieldValue.serverTimestamp()});
       tx.create(db.collection('activity_log').doc('staff-'+batch.commandId),{
         timestamp:FieldValue.serverTimestamp(),eventType:'route_updated',entityType:'route',entityId:batch.commandId,
-        userId:by,canonicalUserId:actor.userId,userName:actor.name,action:'Plano de rotas atualizado',
+        userId:by,canonicalUserId:actor.userId,userName:actor.name,staffAuditVersion:1,staffScopeId:actor.scopeId ?? null,action:'Plano de rotas atualizado',
         metadata:{routeIds:existingRoutes.map(route=>route.routeId),createdRoutes},
       });
       return {...result,replayed:false};

@@ -363,7 +363,7 @@ const EditableRouteName: React.FC<{
 };
 
 export default function OrganizeRoutePage() {
-  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, notify:createEditorNotification, draftKey, native } = useRouteEditor();
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, unlinkStop, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, notify:createEditorNotification, draftKey, native } = useRouteEditor();
   const router = useRouter();
   const { toast } = useToast();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
@@ -1086,7 +1086,7 @@ export default function OrganizeRoutePage() {
                     }
                   }
 
-                  if (unlinkedOrders.size > 0) {
+                  if (!native && unlinkedOrders.size > 0) {
                     console.log(`🧹 [loadRouteData] Pedidos desvinculados detectados:`, Array.from(unlinkedOrders));
                     const origLen = allStops.length;
                     allStops = allStops.filter((s: PlaceValue) => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
@@ -1283,7 +1283,7 @@ export default function OrganizeRoutePage() {
               }));
 
               // Auto-cleanup: verificar pedidos desvinculados no Luna
-              if (assignedOrderNumbers.size > 0) {
+              if (!native && assignedOrderNumbers.size > 0) {
                 try {
                   const orderNums = Array.from(assignedOrderNumbers);
                   const unlinkedOrders = new Set<string>();
@@ -1300,7 +1300,7 @@ export default function OrganizeRoutePage() {
                     }
                   }
 
-                  if (unlinkedOrders.size > 0) {
+                  if (!native && unlinkedOrders.size > 0) {
                     console.log(`🧹 [loadRouteData:service] Pedidos desvinculados:`, Array.from(unlinkedOrders));
                     for (const sr of serviceExistingRoutes!) {
                       const origLen = sr.stops.length;
@@ -3772,6 +3772,25 @@ export default function OrganizeRoutePage() {
     const targetRoute = getRoute(routeKey);
     if (!targetRoute) return;
 
+    if (native) {
+      const routeId=getFirestoreRouteId(routeKey) ?? undefined;
+      if (routeId || routeData.serviceId) {
+        try {
+          const baseStops=targetRoute.stops;
+          const result=await unlinkStop({routeId,serviceId:routeData.serviceId,
+            stop,baseStops,origin:routeData.origin});
+          setRoute(routeKey,previous=>previous ? {...previous,...result.metrics,
+            stops:result.saved?.stops ?? previous.stops.filter(item=>String(item.id ?? item.placeId)!==String(stop.id ?? stop.placeId))}:null);
+          setPendingEdits(previous=>({...previous,[routeKey]:null}));
+          toast({title:'Ponto desvinculado'});
+        } catch {
+          toast({variant:'destructive',title:'Não foi possível desvincular o ponto',
+            description:'Confira se a rota, o serviço ou a confirmação da entrega mudou.'});
+        }
+        return;
+      }
+    }
+
     // Usar pendingEdits se existirem (o index vem da timeline que mostra pendingEdits)
     const currentStops = pendingEdits[routeKey] || targetRoute.stops;
     const newStops = currentStops.filter((_, i) => i !== index);
@@ -3869,7 +3888,7 @@ export default function OrganizeRoutePage() {
     }
 
     // Também remover do allStops do serviço (exclusão permanente)
-    if (routeData.isService && routeData.serviceId && stop.orderNumber) {
+    if (!native && routeData.isService && routeData.serviceId && stop.orderNumber) {
       try {
         const serviceRef = editorService(routeData.serviceId);
         const serviceSnap = await getDoc(serviceRef);
@@ -3892,7 +3911,7 @@ export default function OrganizeRoutePage() {
     }
 
     // Desvincular pedido no Firestore (orders) para que o Luna saiba que foi removido
-    if (stop.orderNumber) {
+    if (!native && stop.orderNumber) {
       try {
         const ordersSnap = await getDocs(
           ordersByNumber(stop.orderNumber)

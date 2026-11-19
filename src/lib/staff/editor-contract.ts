@@ -35,8 +35,6 @@ export const staffEditorCommandSchema=z.discriminatedUnion('kind',[
   z.object({...staffWriteFields,kind:z.literal('arrange'),routeId:routeDocumentId,
     routes:z.array(staffArrangementSchema).max(40)}).strict(),
   z.object({...staffWriteFields,kind:z.literal('route-pool'),routeId:routeDocumentId,stops:z.array(place).max(400)}).strict(),
-  z.object({...staffWriteFields,kind:z.literal('prune-service-pool'),serviceId:routeDocumentId,removed:z.array(routeDocumentId).min(1).max(400)}).strict(),
   z.object({...staffWriteFields,kind:z.literal('delete-draft'),routeId:routeDocumentId}).strict(),
-  z.object({...staffWriteFields,kind:z.literal('detach-order'),orderId:routeDocumentId}).strict(),
 ]);
 export type StaffEditorCommand=z.infer<typeof staffEditorCommandSchema>;

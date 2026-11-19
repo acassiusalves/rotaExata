@@ -830,7 +830,9 @@ service cloud.firestore {
     }
 
     match /activity_log/{logId} {
-      allow read, create: if isAuthed();
+      allow read: if isAuthed();
+      allow create: if isAuthed() && !logId.matches('^staff-.*')
+        && !request.resource.data.keys().hasAny(['canonicalUserId','staffAuditVersion','staffScopeId','staffAuditOperationId']);
       allow update, delete: if false;
     }
   }

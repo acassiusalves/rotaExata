@@ -1,6 +1,6 @@
 import { FieldPath, FieldValue, type DocumentData, type Firestore } from 'firebase-admin/firestore';
 import { factsHash } from '../../../../functions/src/earnings-source-adapter.ts';
-import type { PushOutcome } from '../../../../functions/src/push-outcome';
+import type { StaffPushOutcome } from './push-delivery';
 import type { HistoryRepairSelection, HistoryResendSelection } from '../../staff/history-contract.ts';
 import { routeDocumentId } from '../../staff/route-contract.ts';
 import { isSourceDriverAssignable } from '../../dispatch-driver.ts';
@@ -12,7 +12,7 @@ type ResendDelivery={routeId:string;driverId:string;profile:DocumentData};
 const finalStatuses=['completed','completed_auto'];
 
 export async function resendStaffHistoryRoute(db:Firestore,actor:Operator,command:HistoryResendSelection,
-  send:(input:ResendDelivery)=>Promise<PushOutcome>) {
+  send:(input:ResendDelivery)=>Promise<StaffPushOutcome>) {
   const routeRef=db.collection('routes').doc(command.routeId);
   const commandRef=db.collection('rotaStaffHistoryResends').doc(command.commandId);
   const fingerprint=factsHash({actorId:actor.userId,command});
@@ -68,8 +68,8 @@ export async function resendStaffHistoryRoute(db:Firestore,actor:Operator,comman
 
   const claim=await db.runTransaction(async tx=>{
     const [log,route]=await tx.getAll(commandRef,routeRef);
-    if (log.get('outcome')) return {outcome:log.get('outcome') as PushOutcome};
-    if (log.get('state')==='dispatching') return {outcome:{outcome:'failed',errorCode:'staff_resend_dispatch_uncertain'} as PushOutcome};
+    if (log.get('outcome')) return {outcome:log.get('outcome') as StaffPushOutcome};
+    if (log.get('state')==='dispatching') return {outcome:{outcome:'uncertain'} as StaffPushOutcome};
     const driverId=log.get('driverId') as string;
     const driver=(await tx.get(db.collection('users').doc(driverId))).data();
     if (route.get('staffHistoryResendId')!==command.commandId || route.get('driverId')!==driverId ||
@@ -84,13 +84,14 @@ export async function resendStaffHistoryRoute(db:Firestore,actor:Operator,comman
   });
 
   if (claim.outcome) return {ok:true,replayed,push:claim.outcome.outcome};
-  let outcome:PushOutcome;
+  let outcome:StaffPushOutcome;
   try {
     outcome=await send(claim.delivery);
   } catch {
-    outcome={outcome:'failed',errorCode:'staff_resend_dispatch_failed'};
+    outcome={outcome:'uncertain'};
   }
-  await commandRef.update({state:'settled',outcome,settledAt:FieldValue.serverTimestamp()});
+  try {await commandRef.update({state:'settled',outcome,settledAt:FieldValue.serverTimestamp()});}
+  catch {return {ok:true,replayed,push:'uncertain' as const};}
   return {ok:true,replayed,push:outcome.outcome};
 }
 

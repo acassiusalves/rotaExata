@@ -21,7 +21,7 @@ function metadata(data:Record<string,unknown>) {
   };
 }
 
-export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {draftDispatch?:unknown}) {
+export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {draftDispatch?:unknown;unlink?:unknown}) {
   return staffPlanBatchSchema.parse({
     commandId,
     existingPlans:input.existingPlans.map(plan=>({
@@ -38,6 +38,6 @@ export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {d
       data:{...metadata(route.data),routeKey:route.data.routeKey,encodedPolyline:route.data.encodedPolyline,
         distanceMeters:route.data.distanceMeters,duration:route.data.duration},
     })),
-    transferIntents:input.transferIntents,serviceLink:input.serviceLink,draftDispatch:input.draftDispatch,
+    transferIntents:input.transferIntents,serviceLink:input.serviceLink,draftDispatch:input.draftDispatch,unlink:input.unlink,
   });
 }

@@ -1,4 +1,4 @@
-import {timingSafeEqual} from 'node:crypto';
+import {createHash,timingSafeEqual} from 'node:crypto';
 import {FieldValue} from 'firebase-admin/firestore';
 import {z} from 'zod';
 import {adminDb} from '@/lib/firebase/admin';
@@ -45,7 +45,12 @@ export async function POST(request:Request) {
       });
       return privateJson({ok:true});
     }
-    const profile=(await user.get()).data();
+    const owner=db.collection('driverPushTokenBindings').doc(createHash('sha256').update(binding.token).digest('hex'));
+    const [userDoc,preferences,linked]=await db.getAll(user,user.collection('settings').doc('preferences'),owner);
+    const profile=userDoc.data();
+    if (preferences.get('notifications')!==true || linked.get('uid')!==binding.sourceUid) {
+      throw new EarningsError(404,'push_unavailable');
+    }
     if (profile?.fcmSessionBindingId!==bindingId || profile.fcmToken!==binding.token ||
         !await earningsRpc<boolean>('rota_driver_push_session_valid',{
           p_user_id:binding.userId,p_session_id:binding.sessionId,p_scope_id:earningsScopeId(),p_source_uid:binding.sourceUid,

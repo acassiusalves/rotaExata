@@ -1,3 +1,4 @@
+import { readStaffCursor } from '@/lib/server/staff/query-page';
 import { requireStaffActor } from '@/lib/server/staff/actor';
 import { applyStaffServiceClose } from "@/lib/server/staff/route-commands";
 import { readStaffService } from '@/lib/server/staff/route-board';
@@ -11,7 +12,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
     const actor=await requireStaffActor(request,'service:read');
     const id=routeDocumentId.safeParse((await params).id);
     if (!id.success) throw new EarningsError(404,'staff_service_not_found');
-    return privateJson(await readStaffService(staffSourceDb(actor),id.data));
+    return privateJson(await readStaffService(staffSourceDb(actor),id.data,readStaffCursor(request)));
   } catch(error) {return earningsErrorResponse(error);}
 }
 

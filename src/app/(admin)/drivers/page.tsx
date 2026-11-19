@@ -9,6 +9,8 @@ import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import { DriverTable } from '@/components/drivers/driver-table';
 import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
 import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
+import { staffDriverAssignments,type StaffDriverAssignment } from '@/lib/staff/driver-assignments';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
 import { useToast } from '@/hooks/use-toast';
@@ -24,8 +26,12 @@ export default function DriversPage() {
   const [detailsId,setDetailsId]=useState<string|null>(null);
   const [edited,setEdited]=useState<StaffDriver|null>(null);
   const load=useCallback(async(signal:AbortSignal)=>{
-    const {drivers}=await request<{drivers:WireDriver[]}>('/api/staff/drivers',{signal});
-    return drivers.map(driver=>({...driver,lastSeenAt:new Date(driver.lastSeenAt ?? 0)}));
+    const [drivers,assignments]=await Promise.all([
+      loadStaffPageList<WireDriver,'drivers'>(request,'/api/staff/drivers','drivers',signal),
+      loadStaffPageList<StaffDriverAssignment,'assignments'>(request,'/api/staff/drivers?view=assignments','assignments',signal),
+    ]);
+    const counts=staffDriverAssignments(drivers,assignments);
+    return drivers.map(driver=>({...driver,...counts.get(driver.id),lastSeenAt:new Date(driver.lastSeenAt ?? 0)}));
   },[request]);
   const {data,error,loading,refresh}=useStaffQuery(load);
   const rows=data ?? [];

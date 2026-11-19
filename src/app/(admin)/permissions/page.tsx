@@ -10,6 +10,9 @@ import {
   AlertCircle,
   KeyRound,
 } from 'lucide-react';
+import { Dialog,DialogContent,DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -51,6 +54,7 @@ import type { StaffAccount,StaffDirectoryCommand } from '@/lib/staff/directory-c
 import type { StaffRole } from '@/lib/staff/access';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 
+type SecurityAction=Exclude<StaffDirectoryCommand['action'],'set_role'|'edit_profile'>;
 type AppUser=StaffAccount & {chosenRole:StaffRole};
 type PolicyState={permissions:Record<string,string[]>;inactivePages:string[];revision:string|null};
 
@@ -61,6 +65,7 @@ export default function PermissionsPage() {
   const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
   const [isSavingUsers, setIsSavingUsers] = React.useState(false);
   const [policyRevision,setPolicyRevision]=React.useState<string|null>();
+  const [profileEditor,setProfileEditor]=React.useState<{account:AppUser;name:string;phone:string}>();
   const [accountBusy,setAccountBusy]=React.useState(false);
   const [dataError,setDataError]=React.useState(false);
   const [reload,setReload]=React.useState(0);
@@ -171,7 +176,7 @@ export default function PermissionsPage() {
     }
   };
 
-  async function applyCommand(user:AppUser,action:StaffDirectoryCommand['action'],targetRole?:StaffRole) {
+  async function applyCommand(user:AppUser,action:SecurityAction|'set_role',targetRole?:StaffRole) {
     const fingerprint=JSON.stringify({id:user.userId,action,revision:user.revision,targetRole});
     const remembered=commands.current.get(fingerprint);
     const pending=action==='set_role' && user.pendingRole?.role===targetRole ? user.pendingRole:undefined;
@@ -204,7 +209,7 @@ export default function PermissionsPage() {
         description:saved ? saved+' mudança(s) concluída(s). Confira as funções e retome a que ficou pendente.':'Confira as funções e tente novamente.'});
     } finally {
       setIsSavingUsers(false);
-      if (saved===updated.length) refresh();
+      refresh();
     }
   }
 
@@ -219,7 +224,31 @@ export default function PermissionsPage() {
     } finally {setAccountBusy(false);refresh();}
   }
 
-  async function accountAction(user:AppUser,action:Exclude<StaffDirectoryCommand['action'],'set_role'>) {
+  async function saveProfile(event:React.FormEvent) {
+    event.preventDefault();
+    if (!profileEditor) return;
+    const {account,name,phone}=profileEditor;
+    const profile={name:name.trim(),phone:phone.trim()};
+    const pending=account.pendingProfile;
+    const fingerprint=JSON.stringify({id:account.userId,profile,revision:pending?.revision ?? account.revision});
+    const remembered=commands.current.get(fingerprint);
+    const command:StaffDirectoryCommand=remembered ?? {
+      action:'edit_profile',targetId:account.userId,profile,revision:pending?.revision ?? account.revision,
+      commandId:pending?.commandId ?? crypto.randomUUID(),
+    };
+    commands.current.set(fingerprint,command);
+    setAccountBusy(true);
+    try {
+      await request('/api/staff/directory',{method:'POST',body:JSON.stringify(command)});
+      commands.current.delete(fingerprint);
+      setProfileEditor(undefined);
+      toast({title:'Perfil atualizado'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível salvar o perfil',description:'Confira o cadastro e retome uma alteração pendente.'});
+    } finally {setAccountBusy(false);refresh();}
+  }
+
+  async function accountAction(user:AppUser,action:SecurityAction) {
     const label={
       require_password_change:'Exigir troca de senha',revoke_sessions:'Encerrar sessões',
       set_active:'Reativar acesso',set_inactive:'Bloquear acesso',
@@ -433,6 +462,11 @@ export default function PermissionsPage() {
                           {user.pendingRole && <Button variant="outline" size="sm" disabled={accountBusy} onClick={()=>void resumeRole(user)}>
                             Retomar mudança de função
                           </Button>}
+                          <Button variant="outline" size="sm" disabled={accountBusy || (user.role==='admin' && userRole!=='admin')}
+                            onClick={()=>setProfileEditor({account:user,name:user.pendingProfile?.profile.name ?? user.name,
+                              phone:user.pendingProfile?.profile.phone ?? user.phone ?? ''})}>
+                            {user.pendingProfile ? 'Retomar edição do perfil':'Editar perfil'}
+                          </Button>
                           <Button variant="outline" size="sm" onClick={()=>void accountAction(user,'require_password_change')}
                             disabled={accountBusy || user.userId===userId || (user.role==='admin' && userRole!=='admin')}>
                             <KeyRound className="mr-1 size-4" />Exigir troca de senha
@@ -470,6 +504,22 @@ export default function PermissionsPage() {
         </CardFooter>
       </Card>
       <StaffProvisioning onReady={refresh} />
+      <Dialog open={!!profileEditor} onOpenChange={open=>{if(!open&&!accountBusy) setProfileEditor(undefined);}}>
+        <DialogContent>
+          <DialogTitle>{profileEditor?.account.pendingProfile?'Retomar edição do perfil':'Editar perfil'}</DialogTitle>
+          {profileEditor && <form className="space-y-3" onSubmit={saveProfile}>
+            <div className="space-y-1"><Label htmlFor="staff-profile-name">Nome</Label>
+              <Input id="staff-profile-name" value={profileEditor.name} minLength={2} maxLength={150} required
+                disabled={accountBusy || !!profileEditor.account.pendingProfile}
+                onChange={event=>setProfileEditor({...profileEditor,name:event.target.value})} /></div>
+            <div className="space-y-1"><Label htmlFor="staff-profile-phone">Telefone</Label>
+              <Input id="staff-profile-phone" type="tel" value={profileEditor.phone} maxLength={40}
+                disabled={accountBusy || !!profileEditor.account.pendingProfile}
+                onChange={event=>setProfileEditor({...profileEditor,phone:event.target.value})} /></div>
+            <Button disabled={accountBusy}>{profileEditor.account.pendingProfile?'Retomar alteração':'Salvar perfil'}</Button>
+          </form>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

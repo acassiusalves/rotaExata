@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { earningsScopeId, verifyNativeSession, type ActorAuthority } from '../earnings/actor.ts';
+import { firestoreRevision } from '../../../../functions/src/earnings-source-adapter.ts';
 import { EarningsError, earningsRpc, earningsSupabaseUrl, verifySupabaseUser } from '../earnings/transport.ts';
 import { refreshStaffSource,staffDirectoryError } from './source-auth.ts';
 import { defaultStaffPolicy, staffOperationAllowed, staffPolicySchema, staffRoles, type StaffOperation, type StaffPolicy } from '../../staff/access.ts';
@@ -16,10 +17,12 @@ const identitySchema=z.object({
   policyRevision:z.number().int().nonnegative().safe(),
   policy:staffPolicySchema,
   sourceProject:z.string().regex(/^[a-z0-9-]{3,63}$/),
+  sourceDocumentId:z.string().min(1).max(128).optional(),
+  sourceProvisionId:uuid.optional(),
   sourceUid:z.string().min(1).max(128).refine(value=>!value.includes('/')).optional(),
 });
 
-export type StaffActor = z.infer<typeof identitySchema> & { rotaPolicy: StaffPolicy };
+export type StaffActor = z.infer<typeof identitySchema> & { rotaPolicy: StaffPolicy; rotaPolicyRevision?:string|null };
 export type StaffAuthority = Pick<ActorAuthority,'issuer'|'scopeId'|'now'|'verify'> & {
   sourceProject:string;
   resolve:(identity:{ userId:string; sessionId:string; scopeId:string })=>Promise<unknown>;
@@ -44,7 +47,8 @@ function defaultAuthority():StaffAuthority {
       if (!adminDb || adminApp?.options.projectId!==sourceProject) throw new EarningsError(503,'staff_unavailable');
       const snap=await adminDb.doc('settings/permissions').get();
       const data=snap.data();
-      return data ? { pagePermissions:data.permissions, inactivePages:data.inactivePages ?? [] } : defaultStaffPolicy;
+      return {policy:data ? {pagePermissions:data.permissions,inactivePages:data.inactivePages ?? []}:defaultStaffPolicy,
+        revision:snap.updateTime ? firestoreRevision(snap.updateTime):null};
     },
   };
 }
@@ -76,12 +80,16 @@ export async function resolveStaffActor(
   }
 
   let rotaPolicy:StaffPolicy;
+  let rotaPolicyRevision:string|null=null;
   try {
-    rotaPolicy=staffPolicySchema.parse(await auth.readPolicy());
+    const read=await auth.readPolicy();
+    const envelope=z.object({policy:staffPolicySchema,revision:z.string().nullable()}).safeParse(read);
+    rotaPolicy=envelope.success ? envelope.data.policy:staffPolicySchema.parse(read);
+    rotaPolicyRevision=envelope.success ? envelope.data.revision:null;
   } catch {
     throw new EarningsError(503,'staff_unavailable');
   }
-  const authorized={...actor,rotaPolicy};
+  const authorized={...actor,rotaPolicy,rotaPolicyRevision};
   if (!staffOperationAllowed(authorized,operation)) throw new EarningsError(403,'staff_access_denied');
   return authorized;
 }

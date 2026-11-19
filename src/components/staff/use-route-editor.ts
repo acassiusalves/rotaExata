@@ -1,17 +1,21 @@
 'use client';
 
 import { useMemo,useRef } from 'react';
+import { usePathname } from 'next/navigation';
+import { staffEditorSurface,type StaffEditorSurface } from '@/lib/staff/access';
 import { useOptionalStaff } from './staff-session';
 import { useAuth } from '@/hooks/auth-context';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 import { FALLBACK_ORIGIN } from '@/lib/default-origin';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { staffWorkspaceKey } from '@/lib/staff/workspace';
+import { collectStaffPages,staffPollDelay } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { editorStop,staffPlanPayload } from '@/lib/staff/editor-payload';
 import { staffArrangementSchema,type StaffEditorRead } from '@/lib/staff/editor-contract';
 import type { PlaceValue,RouteInfo } from '@/lib/types';
-import type { ExistingRoutePlan,RoutePlanBatchInput,SavedRoutePlanBatch } from '@/lib/route-stop-mutations';
+import { resolveRoutePlanMetrics,type RouteMetrics,type ExistingRoutePlan,type RoutePlanBatchInput,type SavedRoutePlanBatch } from '@/lib/route-stop-mutations';
+import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { RouteStructureConflictError } from '@/lib/route-stop-reconciliation';
 import type { OptimizeDeliveryRoutesInput,OptimizeDeliveryRoutesOutput } from '@/ai/flows/optimize-delivery-routes';
 
@@ -20,12 +24,12 @@ type ServiceRef={kind:'service';id:string};
 type OrderRef={kind:'order';id:string;revision?:string};
 type LocationRef={kind:'location';id:string};
 export type EditorRef=RouteRef|ServiceRef|OrderRef|LocationRef;
-type PlanInput=RoutePlanBatchInput & {draftDispatch?:unknown};
+type PlanInput=RoutePlanBatchInput & {draftDispatch?:unknown;unlink?:unknown};
 type PendingDispatch=Map<string,PlanInput>;
 type EditorRow=Record<string,any>;
 type EditorSnapshot={id:string;ref:EditorRef;exists:()=>boolean;data:()=>EditorRow};
 type Requester=<T>(path:string,init?:RequestInit)=>Promise<T>;
-type Notice={outcome:'accepted'|'skipped_no_token'|'failed'};
+type Notice={outcome:'accepted'|'skipped_no_token'|'failed'|'uncertain'};
 const loadLegacy=()=>import('./legacy-editor-transport').then(module=>module.legacyEditor);
 const post=(body:unknown,method='POST',signal?:AbortSignal)=>({method,body:JSON.stringify(body),signal});
 const unavailable=<T>():Promise<T>=>Promise.reject(new EarningsRequestError(401,'earnings_unauthorized'));
@@ -70,7 +74,8 @@ const coordinate=({lat,lng}:Pick<PlaceValue,'lat'|'lng'>)=>({lat,lng});
 const metrics=(data:EditorRow)=>typeof data.encodedPolyline==='string' && typeof data.distanceMeters==='number' &&
   typeof data.duration==='string' ? {encodedPolyline:data.encodedPolyline,distanceMeters:data.distanceMeters,duration:data.duration}:undefined;
 
-function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string,string>,dispatches:PendingDispatch,legacyToken:()=>Promise<string|undefined>) {
+function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<string,string>,notices:Map<string,string>,dispatches:PendingDispatch,legacyToken:()=>Promise<string|undefined>) {
+  const editorBody=(body:unknown)=>({surface,body});
   const commitId=(fingerprint:string)=>{
     let id=ids.get(fingerprint);
     if (!id) {
@@ -80,9 +85,14 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     return id;
   };
 
-  async function read(query:StaffEditorRead,signal?:AbortSignal) {
-    return staffRouteDates<{record?:EditorRow|null;records?:EditorRow[]}>(await request('/api/staff/routes/editor',post(query,'POST',signal)));
+  async function read(query:StaffEditorRead,signal?:AbortSignal,cursor?:string) {
+    return staffRouteDates<{record?:EditorRow|null;records?:Array<EditorRow & {id:string}>;cursor?:string|null}>(
+      await request('/api/staff/routes/editor',post({...editorBody(query),...(cursor?{cursor}:{})},'POST',signal)));
   }
+  const listAll=(query:StaffEditorRead,signal?:AbortSignal)=>collectStaffPages(async cursor=>{
+    const data=await read(query,signal,cursor);
+    return {items:(data.records ?? []).filter(Boolean),cursor:data.cursor ?? null};
+  });
 
   async function readDocument(reference:EditorRef,server=false):Promise<EditorSnapshot> {
     if (!nativeStaffEnabled) {
@@ -98,7 +108,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
       const result=await (await loadLegacy()).select(query);
       return list(result.docs.map(doc=>snapshot(queryRef(query,doc.id),doc.data() as EditorRow)));
     }
-    return list(((await read(query)).records ?? []).filter(Boolean).map(row=>snapshot(queryRef(query,row.id,row),row)));
+    return list((await listAll(query)).map(row=>snapshot(queryRef(query,row.id,row),row)));
   }
 
   function watch(query:RouteRef|ServiceRef,apply:(value:EditorSnapshot)=>unknown,reject?:(error:Error)=>void):()=>void;
@@ -127,11 +137,17 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     let last='';
     let earlier=new Map<string,EditorSnapshot>();
     let timer:number|undefined;
+    let pending=false;
+    let failures=0;
+    const delay=query.kind==='drivers' || query.kind==='scheduled' ? 30_000:8000;
     async function refresh() {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || pending) return;
+      pending=true;
       try {
         if (document.visibilityState==='visible') {
-          const response=await read(query,controller.signal);
+          const response=query.kind==='route'||query.kind==='service' ?
+            await read(query,controller.signal) : {record:undefined,records:await listAll(query,controller.signal)};
+          failures=0;
           const next=JSON.stringify(response);
           if (next!==last && !controller.signal.aborted) {
             last=next;
@@ -150,18 +166,26 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
             }
           }
         }
-      } catch(error) {receiveError(error);}
+      } catch(error) {failures++;receiveError(error);}
       finally {
-        if (!controller.signal.aborted) timer=window.setTimeout(refresh,8000);
+        pending=false;
+        if (!controller.signal.aborted) timer=window.setTimeout(refresh,staffPollDelay(delay,failures));
       }
     }
+    const visible=()=>{
+      if (document.visibilityState==='visible' && !pending) {
+        window.clearTimeout(timer);
+        void refresh();
+      }
+    };
     void refresh();
-    return ()=>{controller.abort();window.clearTimeout(timer);};
+    document.addEventListener('visibilitychange',visible);
+    return ()=>{controller.abort();window.clearTimeout(timer);document.removeEventListener('visibilitychange',visible);};
   }
 
   async function sendNotice(noticeId:string|undefined):Promise<{push:Notice}> {
     if (!noticeId) return {push:{outcome:'skipped_no_token'}};
-    return request('/api/staff/routes/notices/'+encodeURIComponent(noticeId),post({}));
+    return request('/api/staff/routes/notices/'+encodeURIComponent(noticeId),post(surface));
   }
 
   async function saveBatch(input:PlanInput) {
@@ -169,7 +193,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     const fingerprint=JSON.stringify(input);
     const payload=staffPlanPayload(commitId(fingerprint),input);
     try {
-      const result=staffRouteDates<SavedRoutePlanBatch>(await request('/api/staff/routes/plan',post(payload)));
+      const result=staffRouteDates<SavedRoutePlanBatch>(await request('/api/staff/routes/plan',post(editorBody(payload))));
       ids.delete(fingerprint);
       result.existingRoutes.forEach(route=>{
         if (route.noticeId) notices.set(route.routeId,route.noticeId);
@@ -188,33 +212,18 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
 
   async function patch(command:EditorRow) {
     const fingerprint=JSON.stringify(command);
-    await request('/api/staff/routes/editor',post({...command,commandId:commitId(fingerprint)},'PATCH'));
+    await request('/api/staff/routes/editor',post(editorBody({...command,commandId:commitId(fingerprint)}),'PATCH'));
     ids.delete(fingerprint);
   }
 
   async function update(reference:EditorRef,data:EditorRow) {
     if (!nativeStaffEnabled) return (await loadLegacy()).update(reference,data);
-    if (reference.kind==='order') {
-      // Dispatch writes the linkage in the same transaction as the route.
-      if (data.logisticsStatus==='em_rota') return;
-      if (!reference.revision) throw new Error('O pedido foi alterado. Recarregue a rota.');
-      await patch({kind:'detach-order',orderId:reference.id,revision:reference.revision});
-      return;
+    if (reference.kind==='order' || reference.kind==='service') {
+      throw new Error('Use o comando de desvínculo da rota ou do serviço.');
     }
     const doc=await readDocument(reference);
     if (!doc.exists()) throw new Error('O registro de planejamento não existe mais.');
     const current=doc.data();
-    if (reference.kind==='service') {
-      // Linking a route and updating totals are part of the plan transaction.
-      if (!Array.isArray(data.allStops)) return;
-      const retained=new Set(data.allStops.map((stop:PlaceValue)=>String(stop.id ?? stop.placeId)));
-      const removed=(current.allStops ?? []).flatMap((stop:PlaceValue)=>{
-        const key=String(stop.id ?? stop.placeId);
-        return retained.has(key) ? []:[key];
-      });
-      if (removed.length) await patch({kind:'prune-service-pool',serviceId:reference.id,revision:current.revision,removed});
-      return;
-    }
     if (reference.kind!=='route') throw new Error('Ação de planejamento indisponível.');
     if (Array.isArray(data.organizedRoutes)) {
       await patch({kind:'arrange',routeId:reference.id,revision:current.revision,routes:data.organizedRoutes.filter((route:EditorRow)=>
@@ -271,13 +280,45 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     }
   }
 
+  async function unlinkStop(input:{routeId?:string;serviceId?:string;stop:PlaceValue;baseStops:PlaceValue[];
+    origin:PlaceValue}) {
+    const stopKey=getStopIdentityKey(input.stop);
+    if (!stopKey) throw new RouteStructureConflictError();
+    const fingerprint=JSON.stringify({operation:'unlink',stopKey,routeId:input.routeId,serviceId:input.serviceId});
+    let command=dispatches.get(fingerprint);
+    if (!command) {
+      const baseStops=input.baseStops.filter(stop=>!stop.unlinkedAt);
+      const plannedStops=baseStops.filter(stop=>getStopIdentityKey(stop)!==stopKey);
+      const [route,service,calculated]=await Promise.all([
+        input.routeId ? readDocument(routeRef(input.routeId),true):null,
+        input.serviceId ? readDocument(serviceRef(input.serviceId),true):null,
+        input.routeId ? computeRoute(input.origin,plannedStops):null,
+      ]);
+      const related=route?.data().serviceId;
+      const serviceDoc=related && related!==service?.id ? await readDocument(serviceRef(related),true):service;
+      const metrics=resolveRoutePlanMetrics(plannedStops,calculated as RouteMetrics|null);
+      command={
+        existingPlans:route ? [{routeId:route.id,baseStops,plannedStops,metrics}]:[],
+        unlink:{stopKey,routeId:route?.id,routeRevision:route?.data().revision,
+          serviceId:serviceDoc?.id,serviceRevision:serviceDoc?.data().revision},
+      };
+      dispatches.set(fingerprint,command);
+    }
+    try {
+      const result=await saveBatch(command);
+      dispatches.delete(fingerprint);
+      const saved=result.existingRoutes[0];
+      if (saved) await sendNotice(saved.noticeId).catch(()=>{});
+      return {saved,metrics:command.existingPlans[0]?.metrics};
+    } catch(error) {
+      if (error instanceof RouteStructureConflictError) dispatches.delete(fingerprint);
+      throw error;
+    }
+  }
+
   async function rename(data:EditorRow) {
     const route=(await readDocument(routeRef(data.routeId))).data();
-    const body={kind:'rename',name:data.name,revision:route.revision};
-    const fingerprint=JSON.stringify({routeId:data.routeId,body});
-    const result=await request('/api/staff/routes/'+encodeURIComponent(data.routeId),post({...body,commandId:commitId(fingerprint)},'PATCH'));
-    ids.delete(fingerprint);
-    return result;
+    return saveBatch({existingPlans:[buildPlan(routeRef(data.routeId),{name:data.name},route)]});
   }
 
   async function call(name:'notifyRouteChanges'|'updateRouteName',data:EditorRow) {
@@ -299,7 +340,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     if (!nativeStaffEnabled) return (await loadLegacy()).requestLocation(id);
     const selected=(await readList(activeRoutes)).docs.find(doc=>doc.data().driverId===id && doc.data().status==='in_progress');
     if (!selected) throw new Error('O motorista não tem rota em andamento.');
-    await request('/api/staff/routes/'+encodeURIComponent(selected.id)+'/location',post({driverId:id,view:'route'}));
+    await request('/api/staff/routes/'+encodeURIComponent(selected.id)+'/location',post({driverId:id,view:'route',surface}));
   }
 
   function batch() {
@@ -321,7 +362,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
   async function sequence(input:OptimizeDeliveryRoutesInput) {
     const path='/api/staff/maps/sequence';
     const body={origin:coordinate(input.origin),deliveryLocations:input.deliveryLocations};
-    if (nativeStaffEnabled) return request<OptimizeDeliveryRoutesOutput>(path,post(body));
+    if (nativeStaffEnabled) return request<OptimizeDeliveryRoutesOutput>(path,post(editorBody(body)));
     const token=await legacyToken();
     if (!token) throw new Error('Entre novamente para otimizar a sequência.');
     const res=await fetch(path,{...post(body),headers:{'content-type':'application/json',Authorization:'Bearer '+token}});
@@ -333,7 +374,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
     if (!stops.length) return null;
     try {
       const path='/api/compute-optimized-route';
-      const init=post(nativeStaffEnabled ? {origin:coordinate(origin),stops:stops.map(coordinate)} : {origin,stops});
+      const init=post(nativeStaffEnabled ? editorBody({origin:coordinate(origin),stops:stops.map(coordinate)}) : {origin,stops});
       const data=nativeStaffEnabled ? await request<RouteInfo>(path,init) : await fetch(path,init).then(response=>{
         if (!response.ok) throw new Error('Falha ao calcular a rota.');
         return response.json() as Promise<RouteInfo>;
@@ -348,7 +389,7 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
   }
 
   return {
-    readDocument,readList,watch,update,remove,createRoute,createServicePair,requestLocation,batch,call,sequence,computeRoute,defaultOrigin,sendNotice,
+    readDocument,readList,watch,update,remove,createRoute,createServicePair,unlinkStop,requestLocation,batch,call,sequence,computeRoute,defaultOrigin,sendNotice,
     notify:async(data:EditorRow)=>{
       if (!nativeStaffEnabled) return (await loadLegacy()).addNotification(data);
       return {id:noticeIdFrom(notices,data.routeId)};
@@ -361,14 +402,15 @@ function routeEditor(request:Requester,ids:Map<string,string>,notices:Map<string
 
 export function useRouteEditor() {
   const actor=useOptionalStaff();
+  const pathname=usePathname();
   const legacy=useAuth();
   const request=actor?.request ?? unavailable;
   const commandIds=useRef(new Map<string,string>());
   const notices=useRef(new Map<string,string>());
   const dispatches=useRef<PendingDispatch>(new Map());
   const legacyUser=nativeStaffEnabled ? null:legacy.user;
-  const transport=useMemo(()=>routeEditor(request,commandIds.current,notices.current,dispatches.current,
-    async()=>legacyUser?.getIdToken()),[request,legacyUser]);
+  const transport=useMemo(()=>routeEditor(request,staffEditorSurface(pathname),commandIds.current,notices.current,dispatches.current,
+    async()=>legacyUser?.getIdToken()),[request,legacyUser,pathname]);
   const draftKey=actor ? staffWorkspaceKey(actor.userId,actor.scopeId,'newRouteData'):'newRouteData';
   // Activity written by native commands is authoritative, including automated cleanup.
   return {...transport,draftKey,user:legacyUser,native:nativeStaffEnabled};

@@ -40,22 +40,29 @@ async function readCallback(tryFirstAccess:boolean):Promise<EntryState> {
 const recoveryReturn='rotaexata-password-return';
 const firstAccessIntent='rotaexata-first-access';
 
-function RecoveredAccount({firstAccess,onUpdated,staff}:{firstAccess:boolean;onUpdated:()=>void;staff:boolean}) {
+function RecoveredAccount({firstAccess,onUpdated,onKind}:{firstAccess:boolean;onUpdated:()=>void;onKind:(kind:'staff'|'driver')=>void}) {
   const {request,signOut}=useEarnings();
   const [onboarding,setOnboarding]=useState<{state:string;passwordSet:boolean}|null|undefined>(undefined);
+  const [kind,setKind]=useState<'staff'|'driver'>();
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
   const load=useCallback(async (signal?:AbortSignal)=>{
     setError('');
     try {
-      const result=nativeDriverEnabled && !staff
+      const recovered=nativeStaffEnabled ? await request<{kind:'staff'|'driver'}>('/api/account/recovery-kind',{signal})
+        : {kind:'driver' as const};
+      const result=nativeDriverEnabled && recovered.kind==='driver'
         ? await request<{onboarding:{state:string;passwordSet:boolean}|null}>('/api/driver/onboarding',{signal})
         : {onboarding:null};
-      if (!signal?.aborted) setOnboarding(result.onboarding);
+      if (!signal?.aborted) {
+        setKind(recovered.kind);
+        onKind(recovered.kind);
+        setOnboarding(result.onboarding);
+      }
     } catch (error) {
       if (!signal?.aborted) setError(earningsMessage(error));
     }
-  },[request,staff]);
+  },[request,onKind]);
   useEffect(()=>{
     const abort=new AbortController();
     void load(abort.signal);
@@ -77,7 +84,7 @@ function RecoveredAccount({firstAccess,onUpdated,staff}:{firstAccess:boolean;onU
       : <p role="status">Conferindo acesso…</p>}
   </div>;
   if (!onboarding || onboarding.state==='complete') {
-    if (firstAccess) return <div className="mx-auto max-w-sm space-y-3 p-6">
+    if (firstAccess && kind==='driver') return <div className="mx-auto max-w-sm space-y-3 p-6">
       <p role="status">{onboarding ? 'O primeiro acesso já foi concluído.' : 'Esta conta não tem um cadastro de motorista pendente.'}</p>
       <Link className="underline" href="/my-routes">Abrir minhas rotas</Link>
       <Button variant="ghost" onClick={()=>void signOut()}>Sair</Button>
@@ -104,10 +111,7 @@ export function DriverAccountEntry({next,firstAccess=false}:{next:string;firstAc
   const callback=useRef<Promise<EntryState> | null>(null);
   useEffect(()=>{
     let current=true;
-    const recoverCode=new URLSearchParams(window.location.search).has('code');
-    const returnTo=recoverCode ? window.localStorage.getItem(recoveryReturn) ?? next:next;
-    const forStaff=nativeStaffEnabled && !!staffReturnPath(returnTo);
-    const first=!forStaff && (firstAccess || (nativeDriverEnabled && window.localStorage.getItem(firstAccessIntent)==='1'));
+    const first=firstAccess || (nativeDriverEnabled && window.localStorage.getItem(firstAccessIntent)==='1');
     callback.current ??=readCallback(first).catch(()=> 'invalid');
     void callback.current.then(result=>{
       if (!current) return;
@@ -135,7 +139,12 @@ export function DriverAccountEntry({next,firstAccess=false}:{next:string;firstAc
     finally {setBusy(false);}
   }
 
-  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><RecoveredAccount firstAccess={setup} staff={nativeStaffEnabled && !!staffReturnPath(destination)}
+  const onKind=useCallback((kind:'staff'|'driver')=>{
+    setDestination(previous=>kind==='staff' ? staffReturnPath(previous) ?? '/dashboard':
+      staffReturnPath(previous) ? '/my-routes':previous);
+  },[]);
+
+  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><RecoveredAccount firstAccess={setup} onKind={onKind}
     onUpdated={()=>{window.localStorage.removeItem(recoveryReturn);window.localStorage.removeItem(firstAccessIntent);setState('done');}} />
   </main></EarningsShell>;
   return <main className="mx-auto max-w-sm space-y-4 p-6">

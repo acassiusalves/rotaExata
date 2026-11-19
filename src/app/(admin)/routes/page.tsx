@@ -40,6 +40,7 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { collectStaffPages,loadStaffPageList,staffPageUrl } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 import type { StaffRouteCommand } from '@/lib/staff/route-contract';
@@ -119,26 +120,25 @@ export default function RoutesPage() {
   const { request,role:userRole }=useStaff();
   const readBoard=React.useCallback(async (signal:AbortSignal)=>{
     const endpoint='/api/staff/routes';
-    const options=request<{services:ServiceWithRoutes['service'][];drivers:Driver[]}>(endpoint+'?view=options',{signal});
-    const pages=request<{routes:RouteDocument[];pendingNotifications:string[];cursor:string|null}>(endpoint,{signal});
-    const [directory,first]=await Promise.all([options,pages]);
-    const routes=new Map(first.routes.map(route=>[route.id,route]));
-    const pending=new Set(first.pendingNotifications);
-    let cursor=first.cursor;
-    while (cursor) {
-      const page=await request<typeof first>(endpoint+'?cursor='+encodeURIComponent(cursor),{signal});
-      for (const route of page.routes) routes.set(route.id,route);
-      for (const routeId of page.pendingNotifications) pending.add(routeId);
-      cursor=page.cursor;
-    }
-    const current=staffRouteDates<RouteDocument[]>([...routes.values()]).sort((a,b)=>b.plannedDate.valueOf()-a.plannedDate.valueOf());
+    const pending=new Set<string>();
+    const [services,drivers,routes]=await Promise.all([
+      loadStaffPageList<ServiceWithRoutes['service'],'services'>(request,endpoint+'?view=services','services',signal),
+      loadStaffPageList<Driver,'drivers'>(request,endpoint+'?view=drivers','drivers',signal),
+      collectStaffPages<RouteDocument>(async cursor=>{
+        const page=await request<{routes:RouteDocument[];pendingNotifications:string[];cursor:string|null}>(
+          staffPageUrl(endpoint,cursor),{signal});
+        for (const id of page.pendingNotifications) pending.add(id);
+        return {items:page.routes,cursor:page.cursor};
+      }),
+    ]);
+    const current=staffRouteDates<RouteDocument[]>(routes).sort((a,b)=>b.plannedDate.valueOf()-a.plannedDate.valueOf());
     return {
       routes:current,
-      services:staffRouteDates<ServiceWithRoutes['service'][]>(directory.services).flatMap(service=>{
+      services:staffRouteDates<ServiceWithRoutes['service'][]>(services).flatMap(service=>{
         const related=current.filter(route=>route.serviceId===service.id);
         return related.length || service.status==='organizing' ? [{service,routes:related}]:[];
       }),
-      drivers:directory.drivers.map(driver=>({
+      drivers:drivers.map(driver=>({
         ...staffRouteDates<Driver>(driver),status:driver.status ?? 'offline',phone:driver.phone ?? 'N/A',
         totalDeliveries:driver.totalDeliveries ?? 0,rating:driver.rating ?? 0,lastSeenAt:driver.lastSeenAt ?
           new Date(driver.lastSeenAt.valueOf()) : new Date(0),

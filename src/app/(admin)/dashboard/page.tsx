@@ -51,6 +51,7 @@ import {
 } from '@/components/ui/tabs';
 import { useStaff } from '@/components/staff/staff-session';
 import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { Button } from '@/components/ui/button';
 import { RouteInfo, DriverLocationWithInfo, PlaceValue } from '@/lib/types';
@@ -193,7 +194,7 @@ const PaymentMethodIcon: React.FC<{ method: string }> = ({ method }) => {
 
 export default function DashboardPage() {
   const {request}=useStaff();
-  const load=React.useCallback((signal:AbortSignal)=>request<{routes:RouteDocument[]}>('/api/staff/dashboard',{signal}),[request]);
+  const load=React.useCallback((signal:AbortSignal)=>loadStaffPageList<RouteDocument,'routes'>(request,'/api/staff/dashboard','routes',signal).then(routes=>({routes})),[request]);
   const {data,error,loading:isLoading,refresh}=useStaffQuery(load);
   const [selectedStop, setSelectedStop] = React.useState<{ stop: PlaceValue; index: number } | null>(null);
   const [isStopInfoOpen, setIsStopInfoOpen] = React.useState(false);

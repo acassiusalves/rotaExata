@@ -210,7 +210,7 @@ test('history resend and code repair are atomic and replay without duplicate dis
     try {
       const concurrent=await resendStaffHistoryRoute(db,actor,selection,dispatch);
       assert.equal(concurrent.replayed,true);
-      assert.equal(concurrent.push,'failed');
+      assert.equal(concurrent.push,'uncertain');
       assert.equal(sent,1);
     } finally {
       releasePush();

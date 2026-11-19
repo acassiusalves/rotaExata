@@ -16,7 +16,7 @@ export function staffPhotoReference(routeId:string,source:unknown) {
   return staffPhotoReferencePrefix+'legacy.'+Buffer.from(routeId).toString('base64url')+'.'+sha(source);
 }
 
-export async function readStaffLegacyPhoto(db:Firestore,id:string,view:StaffPhotoView) {
+export async function readStaffLegacyPhoto(db:Firestore,id:string,view:StaffPhotoView,canRead?:(routeId:string,data:Record<string,unknown>)=>boolean) {
   const parts=/^legacy\.([A-Za-z0-9_-]{1,800})\.([a-f0-9]{64})$/.exec(id);
   if (!parts) throw new EarningsError(404,'route_not_found');
   const routeId=routeDocumentId.safeParse(Buffer.from(parts[1],'base64url').toString());
@@ -25,7 +25,7 @@ export async function readStaffLegacyPhoto(db:Firestore,id:string,view:StaffPhot
   const stops=Array.isArray(route?.stops) ? route.stops:[];
   const source=stops.flatMap(stop=>proofFields.map(field=>stop?.[field])).find(value=>
     typeof value==='string' && !isProtectedPhoto(value) && sha(value)===parts[2]);
-  if (!source || !staffRouteCanReadPhoto(route,source,view)) throw new EarningsError(404,'route_not_found');
+  if (!source || !route || (canRead && !canRead(routeId.data,route)) || !staffRouteCanReadPhoto(route,source,view)) throw new EarningsError(404,'route_not_found');
   if (source.startsWith('data:image/') && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(source) &&
       source.length<=8*1024*1024*4/3) return source;
   return readLegacyReportReceipt(source,process.env.FIREBASE_STORAGE_BUCKET);
