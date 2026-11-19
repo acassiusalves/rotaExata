@@ -14,6 +14,7 @@ import {randomBytes} from "node:crypto";
 import {driverPushMessage} from "./driver-push";
 import {checkInviteConflict} from "./invite-conflict";
 import {blocksLegacyDriverAccountAction, isNativeDriverUuid, sourceDriverAssignable, type LegacyDriverAccountAction} from "./legacy-driver-accounts";
+import {legacyRotaStaffAllowed} from "./legacy-staff-cutover";
 import {buildSyncPatch} from "./sync-user";
 import {resolveAutoCompletion} from "./auto-completion";
 import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
@@ -58,6 +59,14 @@ async function assertLegacyDriverAccountAllowed(action: LegacyDriverAccountActio
   const profile = "uid" in action && isNativeDriverUuid(action.uid) ? (await db.collection("users").doc(action.uid).get()).data() : undefined;
   if (blocksLegacyDriverAccountAction(phase.data(), action, profile)) {
     throw new HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
+  }
+}
+
+async function assertLegacyRotaStaffEnabled(req:CallableRequest):Promise<void> {
+  if (!req.auth) throw new HttpsError("unauthenticated","Sessão operacional ausente");
+  const phase=(await getFirestore().doc("rotaAuthTransition/staff").get()).data();
+  if (!legacyRotaStaffAllowed(phase)) {
+    throw new HttpsError("failed-precondition","Abra o RotaExata e entre com sua conta Lunna.");
   }
 }
 
@@ -202,6 +211,7 @@ async function generateRouteCode(): Promise<string> {
 export const inviteUser = onCall(
   {region:"southamerica-east1"},
   async (req)=>{
+    await assertLegacyRotaStaffEnabled(req);
     const d=req.data||{};
     const email=String(d.email||"").trim().toLowerCase();
     const role=String(d.role||"").trim();
@@ -299,6 +309,7 @@ export const inviteUser = onCall(
 export const deleteUser = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
@@ -368,6 +379,7 @@ export const deleteUser = onCall(
 export const resetUserPassword = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
@@ -450,6 +462,7 @@ export const resetUserPassword = onCall(
 export const updateDriverProfile = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     const displayName = String(d.displayName || "").trim();
@@ -532,6 +545,7 @@ export const updateDriverProfile = onCall(
 export const deleteRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
@@ -575,6 +589,7 @@ export const deleteRoute = onCall(
 export const updateRouteName = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const name = String(d.name || "").trim();
@@ -604,6 +619,7 @@ export const updateRouteName = onCall(
 export const updateRouteDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const driverId = String(d.driverId || "").trim();
@@ -659,6 +675,7 @@ export const updateRouteDriver = onCall(
 export const duplicateRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
@@ -723,6 +740,7 @@ export const duplicateRoute = onCall(
 export const completeRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
@@ -878,6 +896,7 @@ export const notifyRouteChanges = onCall(
 export const sendCustomNotification = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const title = String(d.title || "").trim();
     const message = String(d.message || "").trim();
@@ -1015,6 +1034,7 @@ export const authUserMirror=functionsV1.region("southamerica-east1")
 export const forceLogoutDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
@@ -1168,6 +1188,7 @@ export const cleanupOfflineDrivers = functionsV1
 export const forceCleanupOfflineDrivers = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     await assertAuthorizedRole(
       req.auth?.uid,
       "Apenas administradores, sócios e gestores podem atualizar o status dos motoristas"
@@ -1219,6 +1240,7 @@ export const forceCleanupOfflineDrivers = onCall(
 export const generateDriverImpersonationToken = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const driverId = String(d.driverId || "").trim();
 
@@ -1482,6 +1504,7 @@ export const autoCompleteRoutes = functionsV1
 export const resendRouteToDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
@@ -1624,6 +1647,7 @@ export const resendRouteToDriver = onCall(
 export const forceCompleteService = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const authContext=await requireOperationalOperator(req,["admin","socio"]);
     const {serviceId}=req.data;
     const db=getFirestore();

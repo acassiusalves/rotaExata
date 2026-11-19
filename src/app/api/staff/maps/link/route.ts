@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import { requireStaffActor } from '@/lib/server/staff/actor';
-import { earningsErrorResponse } from '@/lib/server/earnings/transport';
+import { EarningsError,earningsErrorResponse } from '@/lib/server/earnings/transport';
 import { POST as resolveMapsLink } from '../../../resolve-maps-link/route';
 
 export async function POST(request:NextRequest) {
   try {
-    await requireStaffActor(request,'route:create');
+    const view=new URL(request.url).searchParams.get('view');
+    if (view!==null && view!=='settings') throw new EarningsError(422,'staff_invalid_query');
+    await requireStaffActor(request,view==='settings'?'settings:manage':'route:create');
     return await resolveMapsLink(request);
   } catch(error) {return earningsErrorResponse(error);}
 }

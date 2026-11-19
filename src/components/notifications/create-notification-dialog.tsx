@@ -20,163 +20,122 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { db, functions } from '@/lib/firebase/client';
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import type { DriverRequest } from '@/lib/driver/runtime-client';
+import type { StaffNotificationCreate, StaffNotificationDriver, StaffNotificationDrivers, StaffNotificationReceipt } from '@/lib/staff/notification-contract';
+import { staffNotificationError } from './staff-notification-messages';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send, Users } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 
-interface Driver {
-  id: string;
-  displayName: string;
-  email: string;
-}
-
 interface CreateNotificationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  request?: DriverRequest;
+  onCreated?: () => void;
 }
 
-export function CreateNotificationDialog({
-  open,
-  onOpenChange,
-}: CreateNotificationDialogProps) {
-  const [title, setTitle] = React.useState('');
-  const [message, setMessage] = React.useState('');
-  const [type, setType] = React.useState<string>('system');
-  const [priority, setPriority] = React.useState<string>('medium');
-  const [selectedDrivers, setSelectedDrivers] = React.useState<string[]>([]);
-  const [sendToAll, setSendToAll] = React.useState(false);
-  const [sendPushNotification, setSendPushNotification] = React.useState(true);
-  const [drivers, setDrivers] = React.useState<Driver[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [loadingDrivers, setLoadingDrivers] = React.useState(false);
-  const { toast } = useToast();
+const maxRecipients=200;
 
-  // Carregar lista de motoristas quando o dialog abrir
-  React.useEffect(() => {
-    if (open) {
-      loadDrivers();
-    }
-  }, [open]);
+export function CreateNotificationDialog({open,onOpenChange,request,onCreated}:CreateNotificationDialogProps) {
+  const [title,setTitle]=React.useState('');
+  const [message,setMessage]=React.useState('');
+  const [type,setType]=React.useState<StaffNotificationCreate['type']>('system');
+  const [priority,setPriority]=React.useState<StaffNotificationCreate['priority']>('medium');
+  const [selectedDrivers,setSelectedDrivers]=React.useState<string[]>([]);
+  const [sendToAll,setSendToAll]=React.useState(false);
+  const [sendPushNotification,setSendPushNotification]=React.useState(true);
+  const [drivers,setDrivers]=React.useState<StaffNotificationDriver[]>([]);
+  const [loading,setLoading]=React.useState(false);
+  const [loadingDrivers,setLoadingDrivers]=React.useState(false);
+  const [driversError,setDriversError]=React.useState('');
+  const [retry,setRetry]=React.useState(0);
+  const command=React.useRef<{key:string;id:string}>();
+  const action=React.useRef<AbortController>();
+  const {toast}=useToast();
+  React.useEffect(()=>()=>action.current?.abort(),[]);
 
-  const loadDrivers = async () => {
+  React.useEffect(()=>{
+    if (!open) return;
+    const controller=new AbortController();
     setLoadingDrivers(true);
-    try {
-      const q = query(collection(db, 'users'), where('role', '==', 'driver'));
-      const snapshot = await getDocs(q);
-      const driversList: Driver[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        driversList.push({
-          id: doc.id,
-          displayName: data.displayName || data.email || 'Sem nome',
-          email: data.email || '',
-        });
-      });
-      setDrivers(driversList);
-    } catch (error) {
-      console.error('Erro ao carregar motoristas:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível carregar a lista de motoristas.',
-      });
-    } finally {
-      setLoadingDrivers(false);
-    }
-  };
-
-  const handleToggleDriver = (driverId: string) => {
-    setSelectedDrivers((prev) =>
-      prev.includes(driverId)
-        ? prev.filter((id) => id !== driverId)
-        : [...prev, driverId]
-    );
-  };
-
-  const handleToggleAll = () => {
-    if (selectedDrivers.length === drivers.length) {
-      setSelectedDrivers([]);
-    } else {
-      setSelectedDrivers(drivers.map((d) => d.id));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!title.trim() || !message.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Campos obrigatórios',
-        description: 'Preencha o título e a mensagem da notificação.',
-      });
-      return;
-    }
-
-    if (!sendToAll && selectedDrivers.length === 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Selecione destinatários',
-        description: 'Selecione pelo menos um motorista ou marque "Enviar para todos".',
-      });
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const recipients = sendToAll ? drivers.map((d) => d.id) : selectedDrivers;
-
-      // Criar notificação para cada destinatário
-      for (const driverId of recipients) {
-        const driver = drivers.find((d) => d.id === driverId);
-
-        await addDoc(collection(db, 'notifications'), {
-          type,
-          title: title.trim(),
-          message: message.trim(),
-          priority,
-          driverId,
-          driverName: driver?.displayName || driver?.email || 'Motorista',
-          read: false,
-          opened: false,
-          openedAt: null,
-          timestamp: serverTimestamp(),
-          createdBy: 'admin', // TODO: pegar do contexto de autenticação
-        });
-      }
-
-      // Se a opção de enviar push notification estiver marcada, chamar Cloud Function
-      if (sendPushNotification) {
-        try {
-          const sendNotificationFn = httpsCallable(functions, 'sendCustomNotification');
-          await sendNotificationFn({
-            title: title.trim(),
-            message: message.trim(),
-            driverIds: recipients,
-            priority,
-            type,
-          });
-        } catch (pushError) {
-          console.error('❌ Erro ao enviar push notifications:', pushError);
-          // Não falhar a operação inteira se apenas o push falhar
-          toast({
-            variant: 'default',
-            title: 'Notificação criada',
-            description: 'Notificação criada, mas o push notification falhou.',
-          });
+    setDriversError('');
+    async function load() {
+      try {
+        let rows:StaffNotificationDriver[];
+        if (request) {
+          rows=[];
+          const seen=new Set<string>();
+          let cursor:string|null=null;
+          do {
+            const page:StaffNotificationDrivers=await request('/api/staff/notifications/drivers'+
+              (cursor ? '?'+new URLSearchParams({cursor}):''),{signal:controller.signal});
+            rows.push(...page.drivers);
+            cursor=page.cursor;
+            if (cursor && seen.has(cursor)) throw new Error('Cursor repetido.');
+            if (cursor) seen.add(cursor);
+          } while (cursor && !controller.signal.aborted);
+        } else {
+          rows=await (await import('./legacy-notification-data')).legacyNotificationDrivers();
         }
+        if (!controller.signal.aborted) {
+          setDrivers(rows);
+          setSelectedDrivers(previous=>previous.filter(id=>rows.some(driver=>driver.id===id)));
+          if (request && rows.length>maxRecipients) setSendToAll(false);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setDriversError(staffNotificationError(error,'Não foi possível carregar os motoristas.'));
+      } finally {
+        if (!controller.signal.aborted) setLoadingDrivers(false);
       }
+    }
+    void load();
+    return ()=>controller.abort();
+  },[open,request,retry]);
 
-      toast({
-        title: 'Notificação enviada!',
-        description: `Notificação enviada para ${recipients.length} motorista${recipients.length > 1 ? 's' : ''}.`,
-      });
+  const canSelectAll=!request || drivers.length<=maxRecipients;
+  const handleToggleDriver=(id:string)=>setSelectedDrivers(previous=>previous.includes(id)
+    ? previous.filter(item=>item!==id)
+    : !request || previous.length<maxRecipients ? [...previous,id]:previous);
+  const handleToggleAll=()=>setSelectedDrivers(previous=>previous.length===drivers.length ? []:drivers.map(driver=>driver.id));
+  function close(next:boolean) {
+    if (!action.current) onOpenChange(next);
+  }
 
-      // Resetar formulário
+  async function handleSubmit(event:React.FormEvent) {
+    event.preventDefault();
+    if (action.current || loadingDrivers || driversError) return;
+    const driverIds=sendToAll ? drivers.map(driver=>driver.id):selectedDrivers;
+    if (!title.trim() || !message.trim() || !driverIds.length) {
+      toast({variant:'destructive',title:'Campos obrigatórios',description:'Preencha o título e a mensagem e selecione os destinatários.'});
+      return;
+    }
+    const input={title:title.trim(),message:message.trim(),driverIds:[...driverIds].sort(),priority,type,push:sendPushNotification};
+    const key=JSON.stringify(input);
+    if (command.current?.key!==key) command.current={key,id:crypto.randomUUID()};
+    const current=new AbortController();
+    action.current=current;
+    setLoading(true);
+    try {
+      if (request) {
+        const result=await request<StaffNotificationReceipt>('/api/staff/notifications',{
+          method:'POST',body:JSON.stringify({...input,commandId:command.current.id}),signal:current.signal,
+        });
+        if (current.signal.aborted) return;
+        const count=(status:StaffNotificationReceipt['deliveries'][number]['push'])=>result.deliveries.filter(row=>row.push===status).length;
+        const status=sendPushNotification ? [
+          count('accepted')>0 && `${count('accepted')} push aceito(s)`,
+          count('skipped')>0 && `${count('skipped')} sem vínculo ou permissão de push`,
+          count('failed')>0 && `${count('failed')} falha(s)`,
+          count('uncertain')>0 && `${count('uncertain')} sem confirmação do envio`,
+        ].filter(Boolean).join(' · '):'';
+        toast({title:`Notificação registrada para ${result.deliveries.length} motorista(s)`,description:status || undefined});
+      } else {
+        const failed=await (await import('./legacy-notification-data')).createLegacyNotifications(input,drivers);
+        if (current.signal.aborted) return;
+        toast(failed ? {title:'Notificação registrada',description:'O envio de push falhou.'}
+          : {title:'Notificação enviada',description:`Destinatários selecionados: ${driverIds.length}`});
+      }
+      command.current=undefined;
       setTitle('');
       setMessage('');
       setType('system');
@@ -184,21 +143,21 @@ export function CreateNotificationDialog({
       setSelectedDrivers([]);
       setSendToAll(false);
       setSendPushNotification(true);
+      onCreated?.();
       onOpenChange(false);
-    } catch (error: any) {
-      console.error('Erro ao criar notificação:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: error.message || 'Não foi possível criar a notificação.',
-      });
+    } catch (error) {
+      if (!current.signal.aborted) toast({variant:'destructive',title:'Não foi possível concluir o envio',
+        description:staffNotificationError(error,'Tente novamente com os mesmos dados para conferir o resultado do envio.')});
     } finally {
-      setLoading(false);
+      if (action.current===current) {
+        action.current=undefined;
+        if (!current.signal.aborted) setLoading(false);
+      }
     }
-  };
+  }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Criar Nova Notificação</DialogTitle>
@@ -242,7 +201,7 @@ export function CreateNotificationDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="type">Tipo</Label>
-              <Select value={type} onValueChange={setType}>
+              <Select value={type} onValueChange={value=>setType(value as typeof type)}>
                 <SelectTrigger id="type">
                   <SelectValue />
                 </SelectTrigger>
@@ -258,7 +217,7 @@ export function CreateNotificationDialog({
 
             <div className="space-y-2">
               <Label htmlFor="priority">Prioridade</Label>
-              <Select value={priority} onValueChange={setPriority}>
+              <Select value={priority} onValueChange={value=>setPriority(value as typeof priority)}>
                 <SelectTrigger id="priority">
                   <SelectValue />
                 </SelectTrigger>
@@ -279,8 +238,9 @@ export function CreateNotificationDialog({
               <Checkbox
                 id="sendToAll"
                 checked={sendToAll}
+                disabled={!canSelectAll || loadingDrivers || !!driversError || loading}
                 onCheckedChange={(checked) => {
-                  setSendToAll(checked as boolean);
+                  setSendToAll(checked === true);
                   if (checked) {
                     setSelectedDrivers(drivers.map((d) => d.id));
                   }
@@ -294,7 +254,11 @@ export function CreateNotificationDialog({
               </Label>
             </div>
 
-            {!sendToAll && (
+            {!canSelectAll && <p className="text-xs text-muted-foreground">Selecione até {maxRecipients} motoristas por envio.</p>}
+            {driversError && <div role="alert" className="text-sm text-destructive">
+              {driversError} <Button variant="link" type="button" onClick={()=>setRetry(current=>current+1)}>Tentar novamente</Button>
+            </div>}
+            {!sendToAll && !driversError && (
               <div className="border rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
                 {loadingDrivers ? (
                   <div className="flex items-center justify-center py-4">
@@ -315,6 +279,7 @@ export function CreateNotificationDialog({
                         variant="ghost"
                         size="sm"
                         onClick={handleToggleAll}
+                        disabled={!canSelectAll || loading}
                       >
                         {selectedDrivers.length === drivers.length ? 'Desmarcar todos' : 'Selecionar todos'}
                       </Button>
@@ -324,6 +289,7 @@ export function CreateNotificationDialog({
                         <Checkbox
                           id={`driver-${driver.id}`}
                           checked={selectedDrivers.includes(driver.id)}
+                          disabled={loading || (!!request && selectedDrivers.length>=maxRecipients && !selectedDrivers.includes(driver.id))}
                           onCheckedChange={() => handleToggleDriver(driver.id)}
                         />
                         <Label
@@ -362,12 +328,12 @@ export function CreateNotificationDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => close(false)}
               disabled={loading}
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || loadingDrivers || !!driversError || !drivers.length}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

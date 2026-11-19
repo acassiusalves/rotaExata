@@ -51,15 +51,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { db } from '@/lib/firebase/client';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  Timestamp,
-} from 'firebase/firestore';
+import type { Timestamp } from 'firebase/firestore';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { staffRouteDates } from '@/lib/staff/route-dates';
+import { csvCell, reportDayBounds, reportErrorMessage, useReportPagination, useReportPageReset, useStaffReportData } from '@/components/reports/use-staff-report-data';
+import { Pagination } from '@/components/ui/pagination';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -81,7 +77,7 @@ type RouteDocument = RouteInfo & {
     vehicle: { type: string; plate: string };
   } | null;
   driverId?: string;
-  plannedDate: Timestamp;
+  plannedDate: Date | Timestamp;
 };
 
 type ClientRecord = {
@@ -100,9 +96,21 @@ type ClientRecord = {
   deliveryStatus?: string;
 };
 
+function routeClients(route:RouteDocument):ClientRecord[] {
+  const plannedDate=route.plannedDate instanceof Date ? route.plannedDate : route.plannedDate?.toDate();
+  if (!plannedDate) return [];
+  return (route.stops??[]).flatMap((stop,index)=>stop && (stop.customerName || stop.phone || stop.address) ? [{
+    id:`${route.id}-${index}`,routeId:route.id,routeName:route.name || 'Rota sem nome',routeCode:route.code,
+    driverName:route.driverInfo?.name || 'Não atribuído',plannedDate,
+    customerName:stop.customerName || 'Cliente não informado',phone:stop.phone || '',
+    address:stop.address || stop.addressString || '',complemento:stop.complemento,
+    orderNumber:typeof stop.orderNumber==='string' ? stop.orderNumber:undefined,
+    notes:stop.notes,deliveryStatus:stop.deliveryStatus,
+  }]:[]);
+}
+
 export default function NumbersListPage() {
-  const [clients, setClients] = React.useState<ClientRecord[]>([]);
-  const [filteredClients, setFilteredClients] = React.useState<ClientRecord[]>([]);
+  const [legacyClients,setClients]=React.useState<ClientRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
 
   // Filtros
@@ -126,6 +134,39 @@ export default function NumbersListPage() {
     }
   };
 
+  const handleDateRangeChange = (start: Date, end: Date) => {
+    setStartDate(start);
+    setEndDate(end);
+  };
+
+  const bounds=reportDayBounds(startDate,endDate);
+  const reportPath='/api/staff/reports?'+new URLSearchParams({
+    view:'numbers',clock:'planned',start:bounds.start.toISOString(),end:bounds.end.toISOString(),
+  });
+  const nativeReport=useStaffReportData<RouteDocument,'routes'>(reportPath,'routes');
+
+  React.useEffect(() => {
+    if (nativeStaffEnabled) return;
+    setIsLoading(true);
+    let cancelled=false;
+    let unsubscribe:(()=>void)|undefined;
+    void Promise.all([import('@/lib/firebase/client'),import('firebase/firestore')])
+      .then(([{db},{collection,query,where,orderBy,onSnapshot,Timestamp}])=>{
+        if (cancelled) return;
+        const q=query(collection(db,'routes'),
+          where('plannedDate','>=',Timestamp.fromDate(startDate)),
+          where('plannedDate','<=',Timestamp.fromDate(endDate)),orderBy('plannedDate','desc'));
+        unsubscribe=onSnapshot(q,snapshot=>{
+          setClients(snapshot.docs.flatMap(doc=>routeClients({...doc.data(),id:doc.id} as RouteDocument)));
+          setIsLoading(false);
+        },error=>{console.error('Erro ao buscar rotas:',error);setIsLoading(false);});
+      }).catch(error=>{if (!cancelled) {console.error(error);setIsLoading(false);}});
+    return ()=>{cancelled=true;unsubscribe?.();};
+  },[startDate,endDate]);
+
+  const clients=React.useMemo(()=>nativeStaffEnabled ?
+    staffRouteDates<RouteDocument[]>(nativeReport.data ?? []).flatMap(routeClients):legacyClients,[nativeReport.data,legacyClients]);
+
   // Lista de motoristas e rotas únicas
   const drivers = React.useMemo(() => {
     const uniqueDrivers = new Set(clients.map(c => c.driverName).filter(Boolean));
@@ -142,74 +183,8 @@ export default function NumbersListPage() {
     return Array.from(uniqueRoutes.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [clients]);
 
-  const handleDateRangeChange = (start: Date, end: Date) => {
-    setStartDate(start);
-    setEndDate(end);
-  };
-
-  // Buscar dados das rotas
-  React.useEffect(() => {
-    setIsLoading(true);
-
-    const q = query(
-      collection(db, 'routes'),
-      where('plannedDate', '>=', Timestamp.fromDate(startDate)),
-      where('plannedDate', '<=', Timestamp.fromDate(endDate)),
-      orderBy('plannedDate', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const clientsData: ClientRecord[] = [];
-
-        querySnapshot.forEach((doc) => {
-          const route = doc.data() as RouteDocument;
-          const routeId = doc.id;
-          const routeName = route.name || 'Rota sem nome';
-          const routeCode = route.code;
-          const driverName = route.driverInfo?.name || 'Não atribuído';
-          const plannedDate = route.plannedDate?.toDate() || new Date();
-
-          // Extrair dados de cada parada/cliente
-          if (route.stops && Array.isArray(route.stops)) {
-            route.stops.forEach((stop: PlaceValue, index: number) => {
-              // Só adicionar se tiver informações do cliente
-              if (stop.customerName || stop.phone || stop.address) {
-                clientsData.push({
-                  id: `${routeId}-${index}`,
-                  routeId,
-                  routeName,
-                  routeCode,
-                  customerName: stop.customerName || 'Cliente não informado',
-                  phone: stop.phone || '',
-                  address: stop.address || stop.addressString || '',
-                  complemento: stop.complemento,
-                  orderNumber: stop.orderNumber,
-                  notes: stop.notes,
-                  driverName,
-                  plannedDate,
-                  deliveryStatus: stop.deliveryStatus,
-                });
-              }
-            });
-          }
-        });
-
-        setClients(clientsData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Erro ao buscar rotas:', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [startDate, endDate]);
-
   // Aplicar filtros
-  React.useEffect(() => {
+  const filteredClients=React.useMemo(() => {
     let filtered = [...clients];
 
     // Filtro por termo de busca
@@ -235,8 +210,11 @@ export default function NumbersListPage() {
       filtered = filtered.filter(c => c.routeId === selectedRoute);
     }
 
-    setFilteredClients(filtered);
+    return filtered;
   }, [clients, searchTerm, selectedDriver, selectedRoute]);
+
+  const pagination=useReportPagination(filteredClients);
+  useReportPageReset(pagination.setPage,searchTerm,selectedDriver,selectedRoute,startDate,endDate);
 
   // Exportar para CSV
   const exportToCSV = () => {
@@ -255,7 +233,7 @@ export default function NumbersListPage() {
 
     const csvContent = [
       headers.join(';'),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(';')),
+      ...rows.map(row => row.map(csvCell).join(';')),
     ].join('\n');
 
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -263,6 +241,7 @@ export default function NumbersListPage() {
     link.href = URL.createObjectURL(blob);
     link.download = `lista-clientes-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const getStatusBadge = (status?: string) => {
@@ -278,6 +257,11 @@ export default function NumbersListPage() {
     }
   };
 
+  if (nativeStaffEnabled && nativeReport.error) return <div className="space-y-2 p-6" role="alert">
+    <p>{reportErrorMessage(nativeReport.error)}</p>
+    <Button variant="outline" onClick={nativeReport.refresh}>Tentar novamente</Button>
+  </div>;
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -291,7 +275,7 @@ export default function NumbersListPage() {
             </p>
           </div>
         </div>
-        <Button onClick={exportToCSV} disabled={filteredClients.length === 0}>
+        <Button onClick={exportToCSV} disabled={filteredClients.length === 0 || (nativeStaffEnabled && nativeReport.loading)}>
           <Download className="mr-2 h-4 w-4" />
           Exportar CSV
         </Button>
@@ -430,7 +414,7 @@ export default function NumbersListPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {(nativeStaffEnabled ? nativeReport.loading : isLoading) ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             </div>
@@ -458,7 +442,7 @@ export default function NumbersListPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredClients.map((client) => (
+                  {pagination.pageRows.map((client) => (
                     <TableRow key={client.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -540,6 +524,7 @@ export default function NumbersListPage() {
                   ))}
                 </TableBody>
               </Table>
+              <Pagination currentPage={pagination.page} totalPages={pagination.pageCount} itemsPerPage={50} totalItems={filteredClients.length} onPageChange={pagination.setPage} showItemsPerPage={false} />
             </div>
           )}
         </CardContent>

@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { collection, query, orderBy, limit as firestoreLimit, getDocs, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import { useCallback, useEffect, useState, useMemo } from 'react';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { csvCell, reportErrorMessage, useStaffReportData } from '@/components/reports/use-staff-report-data';
 import { Activity, RefreshCw, FileDown, LayoutGrid, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -25,9 +25,12 @@ import {
 import type { ActivityLogEntry } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/auth-context';
 
 const ITEMS_PER_PAGE = 50;
+
+type ActivityRow=ActivityLogEntry & {id:string};
+type NativeActivityRow=Omit<ActivityRow,'timestamp'> & {timestamp:string|null};
 
 type ViewMode = 'table' | 'cards';
 
@@ -36,8 +39,15 @@ export default function ActivityPage() {
   const { user, loading: authLoading } = useAuth();
 
   // Estados principais
-  const [activities, setActivities] = useState<(ActivityLogEntry & { id: string })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [legacyActivities, setActivities] = useState<ActivityRow[]>([]);
+  const [legacyLoading, setLoading] = useState(true);
+  const nativeActivity=useStaffReportData<NativeActivityRow,'activities'>('/api/staff/history?view=activities','activities');
+  const loading=nativeStaffEnabled ? nativeActivity.loading:legacyLoading;
+  const activities=useMemo(()=>nativeStaffEnabled ? (nativeActivity.data ?? []).flatMap(row=>{
+    if (!row.timestamp) return [];
+    const time=new Date(row.timestamp);
+    return [{...row,timestamp:{toDate:()=>time} as ActivityLogEntry['timestamp']}];
+  }):legacyActivities,[nativeActivity.data,legacyActivities]);
 
   // Filtros
   const [filters, setFilters] = useState<FilterState>({
@@ -56,59 +66,36 @@ export default function ActivityPage() {
   // Modal de detalhes
   const [selectedActivity, setSelectedActivity] = useState<(ActivityLogEntry & { id: string }) | null>(null);
 
-  // Carregar atividades apenas quando autenticado
-  useEffect(() => {
-    if (!authLoading && user) {
-      loadActivities();
-    } else if (!authLoading && !user) {
-      setLoading(false);
+  const loadLegacy=useCallback(async (signal?:AbortSignal) => {
+    if (nativeStaffEnabled || !user) return;
+    setLoading(true);
+    try {
+      const [{db},{collection,query,orderBy,limit,getDocs}]=await Promise.all([
+        import('@/lib/firebase/client'),import('firebase/firestore'),
+      ]);
+      if (signal?.aborted) return;
+      const snapshot=await getDocs(query(collection(db,'activity_log'),orderBy('timestamp','desc'),limit(200)));
+      if (!signal?.aborted) setActivities(snapshot.docs.map(doc=>({...doc.data(),id:doc.id} as ActivityRow)));
+    } catch (error) {
+      if (!signal?.aborted) console.error('Erro ao carregar atividades:',error);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [authLoading, user]);
+  },[user]);
 
-  const loadActivities = async () => {
-    // Verifica se usuário está autenticado antes de fazer query
+  useEffect(()=>{
+    if (nativeStaffEnabled || authLoading) return;
     if (!user) {
-      console.warn('[ActivityPage] Tentativa de carregar atividades sem usuário autenticado');
+      setActivities([]);
       setLoading(false);
       return;
     }
+    const controller=new AbortController();
+    void loadLegacy(controller.signal);
+    return ()=>controller.abort();
+  },[authLoading,loadLegacy,user]);
 
-    setLoading(true);
-    try {
-      console.log('[ActivityPage] Iniciando carregamento de atividades...');
-      console.log('[ActivityPage] Usuário autenticado:', user.email, '| UID:', user.uid);
-
-      const q = query(
-        collection(db, 'activity_log'),
-        orderBy('timestamp', 'desc'),
-        firestoreLimit(200) // Aumentado de 100 para 200
-      );
-
-      console.log('[ActivityPage] Query criada, executando getDocs...');
-      const snapshot = await getDocs(q);
-
-      console.log('[ActivityPage] Snapshot recebido, docs:', snapshot.size);
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as (ActivityLogEntry & { id: string })[];
-
-      setActivities(data);
-      console.log(`[ActivityPage] ✅ ${data.length} atividades carregadas com sucesso`);
-    } catch (error: any) {
-      console.error('[ActivityPage] ❌ Erro ao carregar atividades:', error);
-      console.error('[ActivityPage] Código do erro:', error?.code);
-      console.error('[ActivityPage] Mensagem:', error?.message);
-      console.error('[ActivityPage] Stack:', error?.stack);
-
-      // Mostrar erro amigável para o usuário
-      if (error?.code === 'permission-denied') {
-        alert('Erro de permissão ao carregar atividades. Verifique se você está autenticado e tem permissão para acessar esta página.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadActivities=nativeStaffEnabled ? nativeActivity.refresh : ()=>{void loadLegacy();};
 
   // Estatísticas computadas
   const stats = useMemo(() => calcularEstatisticas(activities), [activities]);
@@ -128,7 +115,7 @@ export default function ActivityPage() {
           activity.pointCode?.toLowerCase().includes(search) ||
           activity.entityCode?.toLowerCase().includes(search) ||
           activity.userName?.toLowerCase().includes(search) ||
-          activity.action.toLowerCase().includes(search);
+          activity.action?.toLowerCase().includes(search);
 
         if (!matches) return false;
       }
@@ -153,17 +140,15 @@ export default function ActivityPage() {
 
       // Filtro de data início
       if (filters.dataInicio) {
-        const dataInicioObj = new Date(filters.dataInicio);
-        const timestamp = activity.timestamp as Timestamp;
-        if (timestamp.toDate() < dataInicioObj) return false;
+        const start=new Date(filters.dataInicio+'T00:00:00');
+        if (activity.timestamp.toDate()<start) return false;
       }
 
       // Filtro de data fim
       if (filters.dataFim) {
-        const dataFimObj = new Date(filters.dataFim);
-        dataFimObj.setHours(23, 59, 59, 999);
-        const timestamp = activity.timestamp as Timestamp;
-        if (timestamp.toDate() > dataFimObj) return false;
+        const end=new Date(filters.dataFim+'T00:00:00');
+        end.setDate(end.getDate()+1);
+        if (activity.timestamp.toDate()>=end) return false;
       }
 
       // Filtro de usuário
@@ -222,7 +207,7 @@ export default function ActivityPage() {
     ]);
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .map(row => row.map(csvCell).join(','))
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -230,7 +215,14 @@ export default function ActivityPage() {
     link.href = URL.createObjectURL(blob);
     link.download = `atividades-${new Date().toISOString()}.csv`;
     link.click();
+    URL.revokeObjectURL(link.href);
   };
+
+  if (nativeStaffEnabled && nativeActivity.error) return <div className="space-y-2" role="alert">
+    <p>{reportErrorMessage(nativeActivity.error)}</p>
+    <Button variant="outline" onClick={nativeActivity.refresh}>Tentar novamente</Button>
+  </div>;
+  const authenticating=!nativeStaffEnabled && authLoading;
 
   return (
     <div className="container mx-auto p-6 max-w-7xl space-y-6">
@@ -291,12 +283,12 @@ export default function ActivityPage() {
       </div>
 
       {/* Conteúdo */}
-      {(authLoading || loading) ? (
+      {(authenticating || loading) ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex flex-col items-center gap-2">
             <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              {authLoading ? 'Autenticando...' : 'Carregando atividades...'}
+              {authenticating ? 'Autenticando...' : 'Carregando atividades...'}
             </p>
           </div>
         </div>
@@ -361,7 +353,7 @@ function ActivityCard({
   activity: ActivityLogEntry & { id: string };
   onViewDetails: () => void;
 }) {
-  const formatTimestamp = (timestamp: Timestamp) => {
+  const formatTimestamp = (timestamp: ActivityLogEntry['timestamp']) => {
     try {
       return format(timestamp.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
     } catch {

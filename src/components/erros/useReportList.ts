@@ -6,7 +6,7 @@ import type { User } from 'firebase/auth';
 import { REPORT_CREATED_EVENT, type ReportSummary } from '@/lib/reporting/report-contract';
 import { initialReportFilters, type ReportCounts, type ReportFilterValues } from './ReportFilters';
 
-export function useReportList(user: User | null | undefined, ownOnly = false,nativeRequest?: DriverRequest) {
+export function useReportList(user: User | null | undefined, ownOnly = false,nativeRequest?: DriverRequest,staff = false) {
   const [filters, setFilters] = useState<ReportFilterValues>(initialReportFilters);
   const [pages, setPages] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export function useReportList(user: User | null | undefined, ownOnly = false,nat
       if (cursor) params.set('cursor', cursor);
       let data;
       if (nativeRequest) data=await nativeRequest<{reports:ReportSummary[];counts:ReportCounts;nextCursor:string|null}>(
-        '/api/driver/feedbacks/admin?'+params,{signal:controller.signal});
+        (staff ? '/api/staff/feedbacks?':'/api/driver/feedbacks/admin?')+params,{signal:controller.signal});
       else {
         const token=await user!.getIdToken();
         const response=await fetch('/api/feedbacks/admin?'+params,{headers:{Authorization:'Bearer '+token},signal:controller.signal});
@@ -48,11 +48,11 @@ export function useReportList(user: User | null | undefined, ownOnly = false,nat
       setCounts(data.counts);
       setNextCursor(data.nextCursor);
     } catch (error) {
-      if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Falha ao carregar os chamados.');
+      if (!controller.signal.aborted) setError(staff ? 'Não foi possível carregar os chamados.' : error instanceof Error ? error.message : 'Falha ao carregar os chamados.');
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [user, cursor, filters, ownOnly,nativeRequest]);
+  }, [user,cursor,filters,ownOnly,nativeRequest,staff]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 200);

@@ -5,12 +5,102 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { db } from '@/lib/firebase/client';
-import { collection, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { generateRouteCode } from '@/lib/firebase/route-code';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { reportErrorMessage, useStaffReportCommandIds } from '@/components/reports/use-staff-report-data';
 import { Progress } from '@/components/ui/progress';
 
 export default function MigrateCodesPage() {
+  return nativeStaffEnabled ? <NativeMigrateCodes />:<LegacyMigrateCodes />;
+}
+
+type Candidate={id:string;name:string;revision:string};
+type Preview={routes:Candidate[];checked:number;cursor:string|null};
+function NativeMigrateCodes() {
+  const staff=useOptionalStaff();
+  const commandId=useStaffReportCommandIds();
+  const [preview,setPreview]=React.useState<Omit<Preview,'cursor'>>();
+  const [applied,setApplied]=React.useState<{id:string;code:string}[]>([]);
+  const [running,setRunning]=React.useState<'preview'|'apply'>();
+  const [error,setError]=React.useState('');
+  async function simulate() {
+    if (!staff || running) return;
+    setRunning('preview');
+    setPreview(undefined);
+    setApplied([]);
+    setError('');
+    try {
+      const routes:Candidate[]=[];
+      let checked=0;
+      let cursor:string|null=null;
+      do {
+        const query=new URLSearchParams({view:'codes'});
+        if (cursor) query.set('cursor',cursor);
+        const page:Preview=await staff.request('/api/staff/history/codes?'+query);
+        if (page.cursor && page.cursor===cursor) throw new Error('Invalid pagination cursor');
+        cursor=page.cursor;
+        routes.push(...page.routes);
+        checked+=page.checked;
+      } while (cursor);
+      setPreview({routes,checked});
+    } catch (error) {
+      setError(reportErrorMessage(error));
+    } finally {
+      setRunning(undefined);
+    }
+  }
+  async function apply() {
+    if (!staff || !preview?.routes.length || running) return;
+    if (!window.confirm(`Preencher o código de ${preview.routes.length} rota(s) da simulação?`)) return;
+    setRunning('apply');
+    setError('');
+    try {
+      const rows=preview.routes.filter(route=>!applied.some(row=>row.id===route.id));
+      for (let start=0;start<rows.length;start+=50) {
+        const routes=rows.slice(start,start+50).map(({id,revision})=>({id,revision}));
+        const result=await staff.request<{routes:typeof applied}>('/api/staff/history/codes',{
+          method:'POST',body:JSON.stringify({routes,commandId:commandId(routes)}),
+        });
+        setApplied(previous=>[...previous,...result.routes]);
+      }
+    } catch (error) {
+      setError(reportErrorMessage(error));
+    } finally {
+      setRunning(undefined);
+    }
+  }
+  return <div className="flex-1 space-y-4">
+    <div>
+      <h2 className="text-3xl font-bold tracking-tight">Migração de Códigos de Rotas</h2>
+      <p className="text-muted-foreground">Preencha códigos sequenciais em rotas que ainda não possuem código.</p>
+    </div>
+    <Card>
+      <CardHeader><CardTitle>Simulação e migração</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={()=>void simulate()} disabled={!staff || !!running}>
+            {running==='preview' ? 'Consultando rotas…':'Simular migração'}
+          </Button>
+          <Button onClick={()=>void apply()} disabled={!staff || !!running || !preview || preview.routes.length<=applied.length}>
+            {running==='apply' ? 'Aplicando códigos…':'Aplicar aos resultados'}
+          </Button>
+        </div>
+        {error && <p role="alert" className="text-destructive">{error}</p>}
+        {preview && <>
+          <p role="status">{preview.checked} rota(s) consultada(s). {preview.routes.length} sem código. {applied.length} atualizada(s).</p>
+          {preview.routes.length>0 && <ul className="max-h-96 space-y-1 overflow-auto rounded-md border p-3 text-sm">
+            {preview.routes.map(route=><li key={route.id}>
+              <span>{route.name}</span>
+              {applied.find(row=>row.id===route.id) && <span className="ml-2 font-medium">{applied.find(row=>row.id===route.id)?.code}</span>}
+            </li>)}
+          </ul>}
+        </>}
+      </CardContent>
+    </Card>
+  </div>;
+}
+
+function LegacyMigrateCodes() {
   const [isRunning, setIsRunning] = React.useState(false);
   const [progress, setProgress] = React.useState(0);
   const [total, setTotal] = React.useState(0);
@@ -34,6 +124,9 @@ export default function MigrateCodesPage() {
     try {
       addLog('🚀 Iniciando migração de códigos de rotas...');
 
+      const [{db},{collection,getDocs,doc,updateDoc,query,orderBy},{generateRouteCode}]=await Promise.all([
+        import('@/lib/firebase/client'),import('firebase/firestore'),import('@/lib/firebase/route-code'),
+      ]);
       // Buscar todas as rotas
       const routesRef = collection(db, 'routes');
       const q = query(routesRef, orderBy('createdAt', 'asc'));

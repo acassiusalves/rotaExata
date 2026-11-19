@@ -1,3 +1,4 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import {authorizeOperationalWriter} from '@/lib/firebase/operational-writer-auth';
 import {EarningsError,earningsErrorResponse} from '@/lib/server/earnings/transport';
 import {isProtectedPhoto,protectedPhotoPrefix} from '@/lib/driver/photo-policy';
@@ -231,6 +232,7 @@ function parseFirestoreDocument(doc: any): any {
 }
 
 export async function POST(req: Request) {
+  if (nativeStaffEnabled) return NextResponse.json({error:'rota_staff_native_required'},{status:410});
   try {
     await authorizeOperationalWriter(req);
     // Rate limiting (mais restritivo para AI - consome mais recursos)

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useOptionalStaff } from '@/components/staff/staff-session';
 import { useAuth } from '@/hooks/auth-context';
 import { useOptionalDriverRuntime } from '@/components/driver/driver-runtime';
 import { Button } from '@/components/ui/button';
@@ -21,13 +22,16 @@ import { useToast } from '@/hooks/use-toast';
 export function FloatingFeedbackButton() {
   const { user } = useAuth();
   const driver=useOptionalDriverRuntime();
-  return <FeedbackButton key={driver?.userId ?? user?.uid ?? 'anonymous'} />;
+  const staff=useOptionalStaff();
+  return <FeedbackButton key={staff?.userId ?? driver?.userId ?? user?.uid ?? 'anonymous'} />;
 }
 
 function FeedbackButton() {
   const { user, loading } = useAuth();
   const driver=useOptionalDriverRuntime();
-  const nativeRequest=driver?.native ? driver.request:undefined;
+  const staff=useOptionalStaff();
+  const nativeRequest=staff?.request ?? (driver?.native ? driver.request:undefined);
+  const endpoint=staff ? '/api/staff/feedbacks':'/api/driver/feedbacks';
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(emptyReportDraft);
   const requestId = useRef<string | undefined>(undefined);
@@ -81,7 +85,7 @@ function FeedbackButton() {
         ...submission,submissionId:requestId.current,url:window.location.href,userAgent:navigator.userAgent,
         resolution:`${window.innerWidth}x${window.innerHeight}`,logs:capturedLogs,
       });
-      if (nativeRequest) await nativeRequest('/api/driver/feedbacks',{method:'POST',signal:controller.signal,body});
+      if (nativeRequest) await nativeRequest(endpoint,{method:'POST',signal:controller.signal,body});
       else {
         const token=await user!.getIdToken();
         const response=await fetch('/api/feedbacks',{method:'POST',signal:controller.signal,

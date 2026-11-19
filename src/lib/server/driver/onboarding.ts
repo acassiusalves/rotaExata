@@ -1,3 +1,5 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { resolveStaffActor } from '@/lib/server/staff/actor';
 import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
@@ -61,7 +63,8 @@ async function writeProjection(row:DriverProvision,stage:'pending'|'ready'|'assi
 
 export async function serveDriverProvision(request:Request) {
   try {
-    const {rpcArgs}=await requestEnv(request);
+    const {actor,rpcArgs}=await requestEnv(request);
+    if (nativeStaffEnabled) await resolveStaffActor(actor,'drivers:accounts');
     const run=(p_action:string,fields?:{commandId?:string;name?:string;email?:string;phone?:string;revision?:number})=>
       earningsRpc('rota_driver_provision',{...rpcArgs,p_action,p_command_id:fields?.commandId ?? null,
         p_name:fields?.name ?? null,p_email:fields?.email ?? null,p_phone:fields?.phone ?? null,

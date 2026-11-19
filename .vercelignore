@@ -9,6 +9,9 @@ functions/*
 !functions/src
 functions/src/*
 !functions/src/earnings-source-adapter.ts
+!functions/src/driver-push.ts
+!functions/src/legacy-driver-accounts.ts
+!functions/src/push-outcome.ts
 docs/investigations
 docs/superpowers
 firebase-debug.log

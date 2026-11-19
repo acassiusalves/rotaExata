@@ -1,4 +1,4 @@
-'use server';
+import 'server-only';
 
 /**
  * @fileOverview This file defines a Genkit flow for optimizing delivery routes.

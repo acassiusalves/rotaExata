@@ -4,6 +4,8 @@ import { useCallback,useEffect,useRef,useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { EarningsRequestError,EarningsShell,earningsMessage,useEarnings } from '@/components/earnings/earnings-shell';
+import { StaffGate } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { DriverProvisioning } from './driver-provisioning';
 import { useConfirm } from '@/hooks/use-confirm';
 import type { DriverAccount,DriverAccountCommand } from '@/lib/driver/account-contract';
@@ -101,5 +103,5 @@ function DriverAccountControls() {
 }
 
 export function DriverAccountAdmin() {
-  return <EarningsShell portal><DriverAccountControls /></EarningsShell>;
+  return <EarningsShell portal staffLogin>{nativeStaffEnabled ? <StaffGate><DriverAccountControls /></StaffGate> : <DriverAccountControls />}</EarningsShell>;
 }

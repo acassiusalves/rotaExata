@@ -61,6 +61,7 @@ const operations = {
   'driver:edit':['/drivers'],
   'driver:preview':['/drivers',administrators],
   'drivers:cleanup':['/drivers'],
+  'drivers:accounts':['/driver/admin/accounts'],
   'history:activity':['/history/atividades'],
   'history:driver':['/history/motorista'],
   'history:routes':['/history/rotas'],
@@ -78,6 +79,8 @@ const operations = {
   'integration:manage':['/api'],
   'permissions:manage':['/permissions'],
   'directory:read':['/permissions'],
+  'finance:rules':['/financeiro/regras'],
+  'finance:payments':['/financeiro/pagamentos'],
 } as const satisfies Record<string, readonly [StaffPage, (readonly StaffRole[])?]>;
 export type StaffOperation = 'session' | keyof typeof operations;
 

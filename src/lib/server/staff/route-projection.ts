@@ -1,4 +1,5 @@
 import { driverTimestamp } from '../../driver/runtime-contract.ts';
+import { staffPhotoReference,proofFields } from './legacy-photo.ts';
 import { isSourceDriverAssignable } from '../../dispatch-driver.ts';
 import type { PlaceValue,LunnaService,RouteInfo } from '../../types';
 
@@ -17,7 +18,7 @@ const items=(value:unknown,mapper:(item:unknown)=>object)=>Array.isArray(value) 
 
 const placeFields=['id','pointCode','placeId','address','addressString','addressSeverity','lat','lng','city','cidade','uf','state',
   'neighborhood','bairro','street','rua','number','numero','zipCode','cep','complemento','geocodedAddress','customerName','phone',
-  'deliveryStatus','wentToLocation','photoUrl','signatureUrl','attemptPhotoUrl','failureReason','notes','orderNumber','lunnaClientCode',
+  'deliveryStatus','wentToLocation','failureReason','notes','orderNumber','lunnaClientCode',
   'hasExchangeItems','operationType','expectedValue','wasModified','modificationType','editedByDriver','timeWindowStart','timeWindowEnd',
   'hasTimePreference','previousRouteId','previousRouteCode','movedFromPointCode','fromRouteId','originalSequence','pending',
   'moveReason','movedBy','movedByName','reconciled','reconciledBy','reconciledMethod','aiExtractedValue','hasValidationIssues'] as const;
@@ -36,12 +37,19 @@ export function projectStaffPlace(value:unknown) {
     ...(Array.isArray(data.items) ? {items:items(data.items,item=>project(item,['id','code','description','quantity','subtotal','tipo']))}:{}),
   } as StaffPlace;
 }
+export function projectStaffEvidencePlace(routeId:string,value:unknown) {
+  const data=row(value);
+  return {...projectStaffPlace(value),...Object.fromEntries(proofFields.flatMap(field=>{
+    const reference=staffPhotoReference(routeId,data[field]);
+    return reference ? [[field,reference]]:[];
+  }))};
+}
 const vehicleFields=['type','plate','model','color'];
 function vehicle(value:unknown) {
   return {type:'',plate:'',...project(value,vehicleFields)};
 }
 const routeFields=['code','name','status','distanceMeters','duration','encodedPolyline','pendingChanges','currentStopIndex','source',
-  'serviceId','serviceCode','driverId','lastModifiedBy','visible','color','createdBy','resentBy'];
+  'serviceId','serviceCode','routeDate','routeTime','period','driverId','lastModifiedBy','visible','color','createdBy','resentBy'];
 const routeDates=['plannedDate','createdAt','updatedAt','dispatchedAt','completedAt','autoCompletedAt','startedAt','lastModifiedAt','resentAt'] as const;
 function location(value:unknown) {
   return {
@@ -54,6 +62,9 @@ export type StaffRoute = Omit<RouteInfo,'stops'|'startedAt'|'completedAt'|'actua
     id:string;revision?:string;name:string;origin:StaffPlace;stops:StaffPlace[];driverId?:string;
     driverInfo?:{name:string;vehicle:ReturnType<typeof vehicle>};currentLocation?:ReturnType<typeof location>;
     actualPath?:ReturnType<typeof location>[];
+    unassignedStops?:StaffPlace[];
+    organizedRoutes?:{key?:string;name?:string;dispatched?:boolean;stops:StaffPlace[];info:Record<string,unknown>}[];
+    routeNames?:Record<string,string>;
   };
 
 export function projectStaffRoute(id:string,data:Fields,revision?:string):StaffRoute {
@@ -63,8 +74,16 @@ export function projectStaffRoute(id:string,data:Fields,revision?:string):StaffR
     ...project(data,routeFields),
     ...dates(data,routeDates),
     id,revision,
-    stops:Array.isArray(data.stops) ? data.stops.map(projectStaffPlace):[],
+    stops:Array.isArray(data.stops) ? data.stops.map(value=>projectStaffEvidencePlace(id,value)):[],
     origin:projectStaffPlace(data.origin),
+    ...(Array.isArray(data.unassignedStops) ? {unassignedStops:data.unassignedStops.map(projectStaffPlace)}:{}),
+    ...(Array.isArray(data.organizedRoutes) ? {organizedRoutes:data.organizedRoutes.map(value=>{
+      const planned=row(value);
+      return {...project(planned,['key','name','dispatched']),stops:items(planned.stops,projectStaffPlace) as StaffPlace[],
+        info:project(planned.info,['distanceMeters','duration','encodedPolyline','color'])};
+    })}:{}),
+    ...(data.routeNames ? {routeNames:Object.fromEntries(Object.entries(row(data.routeNames)).filter(([key,name])=>
+      /^[A-Z]{1,3}$/.test(key) && typeof name==='string')) as Record<string,string>} : {}),
     lunnaOrderIds:strings(data.lunnaOrderIds),
     ...(data.driverInfo ? {driverInfo:{name:typeof driver.name==='string'?driver.name:'Motorista',vehicle:vehicle(driver.vehicle)}}:{}),
     ...(data.currentLocation ? {currentLocation:location(data.currentLocation)}:{}),

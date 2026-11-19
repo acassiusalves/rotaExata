@@ -21,8 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { functions } from '@/lib/firebase/client';
-import { httpsCallable } from 'firebase/functions';
 import { useToast } from '@/hooks/use-toast';
 import {
   Table,
@@ -44,10 +42,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { db } from '@/lib/firebase/client';
-import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
+import type { Timestamp } from 'firebase/firestore';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { staffRouteDates } from '@/lib/staff/route-dates';
+import { reportDayBounds, reportErrorMessage, useReportPagination, useReportPageReset, useStaffReportCommandIds, useStaffReportData } from '@/components/reports/use-staff-report-data';
+import { Pagination } from '@/components/ui/pagination';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
-import { format, startOfDay, endOfDay, subDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { RouteDetailsDialog } from '@/components/routes/route-details-dialog';
 import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
@@ -55,9 +57,10 @@ import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets'
 type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  plannedDate: Timestamp;
-  completedAt?: Timestamp;
-  autoCompletedAt?: Timestamp;
+  plannedDate: Date | Timestamp;
+  completedAt?: Date | Timestamp;
+  autoCompletedAt?: Date | Timestamp;
+  revision?: string;
   origin: PlaceValue;
   driverInfo: {
     name: string;
@@ -104,7 +107,7 @@ const getPeriodInfo = (date: Date | Timestamp) => {
 };
 
 // Componente de Badge de Status
-const StatusBadge: React.FC<{ status?: 'dispatched' | 'in_progress' | 'completed' | 'completed_auto' }> = ({ status }) => {
+const StatusBadge: React.FC<{ status?: RouteInfo['status'] }> = ({ status }) => {
   if (status === 'completed_auto') {
     return (
       <Badge variant="secondary" className="flex items-center gap-1.5">
@@ -131,11 +134,15 @@ const getInitials = (name: string) => {
   return name.substring(0, 2);
 };
 
+const routeDate=(value:Date|Timestamp|undefined|null)=>value instanceof Date ? value:value?.toDate();
+const byCompletion=(a:RouteDocument,b:RouteDocument)=>
+  (routeDate(b.completedAt ?? b.autoCompletedAt)?.getTime() ?? 0) -
+  (routeDate(a.completedAt ?? a.autoCompletedAt)?.getTime() ?? 0) || a.id.localeCompare(b.id);
+
 export default function HistoryRoutesPage() {
   const { toast } = useToast();
-  const [completedRoutes, setCompletedRoutes] = React.useState<RouteDocument[]>([]);
-  const [filteredRoutes, setFilteredRoutes] = React.useState<RouteDocument[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [legacyRoutes,setCompletedRoutes]=React.useState<RouteDocument[]>([]);
+  const [isLegacyLoading, setIsLoading] = React.useState(true);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
@@ -154,40 +161,29 @@ export default function HistoryRoutesPage() {
   const [dateFilterType, setDateFilterType] = React.useState<'completed' | 'planned'>('completed');
   const [selectedCompletionType, setSelectedCompletionType] = React.useState<'all' | 'completed' | 'completed_auto'>('all');
 
-  // Buscar todas as rotas concluídas
-  React.useEffect(() => {
-    const q = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['completed', 'completed_auto'])
-    );
+  const staff=useOptionalStaff();
+  const commandId=useStaffReportCommandIds();
+  const canResend=!nativeStaffEnabled || staff?.role==='admin' || staff?.role==='socio';
+  const nativeHistory=useStaffReportData<RouteDocument,'routes'>('/api/staff/history?view=routes','routes');
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const routesData: RouteDocument[] = [];
-        snapshot.forEach((doc) => {
-          routesData.push({ id: doc.id, ...doc.data() } as RouteDocument);
-        });
+  const completedRoutes=React.useMemo(()=>nativeStaffEnabled ?
+    staffRouteDates<RouteDocument[]>(nativeHistory.data ?? []).sort(byCompletion):legacyRoutes,[nativeHistory.data,legacyRoutes]);
 
-        // Ordenar por data de conclusão (mais recente primeiro) no cliente
-        // Usa autoCompletedAt como fallback para rotas completed_auto
-        routesData.sort((a, b) => {
-          const dateA = (a.completedAt ?? a.autoCompletedAt)?.toMillis() || 0;
-          const dateB = (b.completedAt ?? b.autoCompletedAt)?.toMillis() || 0;
-          return dateB - dateA;
-        });
-
-        setCompletedRoutes(routesData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching routes: ', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
+  React.useEffect(()=>{
+    if (nativeStaffEnabled) return;
+    let cancelled=false;
+    let unsubscribe:(()=>void)|undefined;
+    void Promise.all([import('@/lib/firebase/client'),import('firebase/firestore')])
+      .then(([{db},{collection,query,where,onSnapshot}])=>{
+        if (cancelled) return;
+        unsubscribe=onSnapshot(query(collection(db,'routes'),where('status','in',['completed','completed_auto'])),
+          snapshot=>{
+            setCompletedRoutes(snapshot.docs.map(doc=>({...doc.data(),id:doc.id} as RouteDocument)).sort(byCompletion));
+            setIsLoading(false);
+          },error=>{console.error('Error fetching routes:',error);setIsLoading(false);});
+      }).catch(error=>{if (!cancelled) {console.error(error);setIsLoading(false);}});
+    return ()=>{cancelled=true;unsubscribe?.();};
+  },[]);
 
   // Extrair lista única de motoristas
   const drivers = React.useMemo(() => {
@@ -201,7 +197,7 @@ export default function HistoryRoutesPage() {
   }, [completedRoutes]);
 
   // Aplicar filtros
-  React.useEffect(() => {
+  const filteredRoutes=React.useMemo(() => {
     let filtered = [...completedRoutes];
 
     // Filtro por busca de texto
@@ -236,23 +232,22 @@ export default function HistoryRoutesPage() {
     }
 
     // Filtro por intervalo de datas
-    const start = startOfDay(startDate);
-    const end = endOfDay(endDate);
+    const {start,end}=reportDayBounds(startDate,endDate);
     filtered = filtered.filter(route => {
       if (dateFilterType === 'completed') {
         // Rotas completed_auto usam autoCompletedAt; rotas completed usam completedAt
         const dateField = route.completedAt ?? route.autoCompletedAt;
         if (!dateField) return false;
-        const completedDate = dateField.toDate();
-        return completedDate >= start && completedDate <= end;
+        const completedDate = routeDate(dateField)!;
+        return completedDate >= start && completedDate < end;
       } else {
         if (!route.plannedDate) return false;
-        const plannedDateObj = route.plannedDate.toDate();
-        return plannedDateObj >= start && plannedDateObj <= end;
+        const plannedDateObj = routeDate(route.plannedDate)!;
+        return plannedDateObj >= start && plannedDateObj < end;
       }
     });
 
-    setFilteredRoutes(filtered);
+    return filtered;
   }, [completedRoutes, searchTerm, selectedDriver, selectedPeriod, startDate, endDate, dateFilterType, selectedCompletionType]);
 
   const handleOpenDetails = (route: RouteDocument) => {
@@ -269,18 +264,40 @@ export default function HistoryRoutesPage() {
     if (!routeToResend) return;
     setIsResending(true);
     try {
-      const resendRouteToDriver = httpsCallable(functions, 'resendRouteToDriver');
-      await resendRouteToDriver({ routeId: routeToResend.id });
-      toast({ title: 'Rota reenviada!', description: 'O motorista foi notificado e a rota voltará ao app dele.' });
+      if (nativeStaffEnabled) {
+        if (!staff || !canResend || !routeToResend.revision) throw new Error('Reenvio indisponível.');
+        const command={routeId:routeToResend.id,revision:routeToResend.revision};
+        const result=await staff.request<{push:'accepted'|'skipped_no_token'|'failed'}>('/api/staff/history/resend',{
+          method:'POST',body:JSON.stringify({...command,commandId:commandId(command)}),
+        });
+        toast({title:'Rota reenviada',description:result.push==='accepted' ?
+          'A rota voltou ao app e o envio da notificação foi aceito.' :
+          'A rota voltou ao app. O envio da notificação não foi confirmado.'});
+      } else {
+        const [{functions},{httpsCallable}]=await Promise.all([import('@/lib/firebase/client'),import('firebase/functions')]);
+        await httpsCallable(functions,'resendRouteToDriver')({routeId:routeToResend.id});
+        toast({title:'Rota reenviada!',description:'O motorista foi notificado e a rota voltará ao app dele.'});
+      }
       setIsResendDialogOpen(false);
       setRouteToResend(null);
     } catch (error) {
       console.error('Erro ao reenviar rota:', error);
-      toast({ variant: 'destructive', title: 'Erro ao reenviar rota', description: 'Tente novamente.' });
+      toast({ variant: 'destructive', title: 'Erro ao reenviar rota', description: nativeStaffEnabled ? reportErrorMessage(error):'Tente novamente.' });
     } finally {
+      if (nativeStaffEnabled) nativeHistory.refresh();
       setIsResending(false);
     }
   };
+
+  const pagination=useReportPagination(filteredRoutes,24);
+  useReportPageReset(pagination.setPage,searchTerm,selectedDriver,selectedPeriod,startDate,endDate,dateFilterType,selectedCompletionType);
+
+  const isLoading=nativeStaffEnabled ? nativeHistory.loading:isLegacyLoading;
+
+  if (nativeStaffEnabled && nativeHistory.error) return <div className="space-y-2" role="alert">
+    <p>{reportErrorMessage(nativeHistory.error)}</p>
+    <Button variant="outline" onClick={nativeHistory.refresh}>Tentar novamente</Button>
+  </div>;
 
   return (
     <>
@@ -428,7 +445,7 @@ export default function HistoryRoutesPage() {
 
         {!isLoading && filteredRoutes.length > 0 && viewMode === 'grid' && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredRoutes.map((route) => (
+            {pagination.pageRows.map((route) => (
               <Card key={route.id} className="flex flex-col">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
@@ -444,7 +461,7 @@ export default function HistoryRoutesPage() {
                   </div>
                   <CardDescription>
                     {route.completedAt
-                      ? `Concluída em ${format(route.completedAt.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`
+                      ? `Concluída em ${format(routeDate(route.completedAt)!, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`
                       : 'Data de conclusão não registrada'}
                   </CardDescription>
                 </CardHeader>
@@ -478,7 +495,7 @@ export default function HistoryRoutesPage() {
                       <Calendar className="h-4 w-4 text-muted-foreground" />
                       <span>
                         {route.plannedDate
-                          ? format(route.plannedDate.toDate(), "dd/MM/yyyy", { locale: ptBR })
+                          ? format(routeDate(route.plannedDate)!, "dd/MM/yyyy", { locale: ptBR })
                           : 'Data não informada'}
                       </span>
                     </div>
@@ -489,7 +506,7 @@ export default function HistoryRoutesPage() {
                     <FileText className="mr-2 h-4 w-4" />
                     Ver Detalhes
                   </Button>
-                  {route.status === 'completed_auto' && (
+                  {canResend && route.status === 'completed_auto' && (
                     <Button className="w-full" variant="outline" onClick={() => handleOpenResendDialog(route)}>
                       <RefreshCw className="mr-2 h-4 w-4" />
                       Reenviar ao Motorista
@@ -518,7 +535,7 @@ export default function HistoryRoutesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRoutes.map((route) => (
+                {pagination.pageRows.map((route) => (
                   <TableRow key={route.id}>
                     <TableCell>
                       <Badge variant="outline" className="font-mono">
@@ -550,19 +567,19 @@ export default function HistoryRoutesPage() {
                     </TableCell>
                     <TableCell>
                       {route.plannedDate
-                        ? format(route.plannedDate.toDate(), "dd/MM/yyyy", { locale: ptBR })
+                        ? format(routeDate(route.plannedDate)!, "dd/MM/yyyy", { locale: ptBR })
                         : '-'}
                     </TableCell>
                     <TableCell>
                       {route.completedAt
-                        ? format(route.completedAt.toDate(), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                        ? format(routeDate(route.completedAt)!, "dd/MM/yyyy HH:mm", { locale: ptBR })
                         : '-'}
                     </TableCell>
                     <TableCell className="text-center">{route.stops.length}</TableCell>
                     <TableCell className="text-center">{formatDistance(route.distanceMeters)} km</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {route.status === 'completed_auto' && (
+                        {canResend && route.status === 'completed_auto' && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -589,6 +606,9 @@ export default function HistoryRoutesPage() {
           </div>
         )}
       </div>
+
+      <Pagination currentPage={pagination.page} totalPages={pagination.pageCount} itemsPerPage={24}
+        totalItems={filteredRoutes.length} onPageChange={pagination.setPage} showItemsPerPage={false} />
 
       {selectedRoute && (
         <RouteDetailsDialog

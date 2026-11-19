@@ -426,17 +426,9 @@ export default function RoutesPage() {
   }
 
   const handleEditDraft = (route: RouteDocument) => {
-    // Simplificado: apenas salvar o ID do rascunho
-    // Os dados completos serão carregados do Firestore na página de organização
-    // Isso garante consistência entre diferentes computadores
-    const routeData = {
-      isDraft: true,
-      draftRouteId: route.id,
-    };
-    sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
-    router.push('/routes/organize');
+    router.push('/routes/organize?draft='+encodeURIComponent(route.id));
   };
-  
+
   // Filter routes based on search query
   // Rotas que pertencem a serviços (serão exibidas dentro do ServiceCard)
   const serviceRouteIds = React.useMemo(() => {

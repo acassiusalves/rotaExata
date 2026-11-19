@@ -27,7 +27,10 @@ test('os quatro callables compilados recusam a ação após autenticação e ant
   const rawRequest={get:()=> 'Bearer synthetic'};
   class HttpsError extends Error { constructor(code,message) {super(message);this.code=code;} }
   const db={
-    doc(path) {assert.equal(path,'rotaAuthTransition/driver');return {get:async()=>({data:()=>phase})};},
+    doc(path) {
+      assert.match(path,/^rotaAuthTransition\/(driver|staff)$/);
+      return {get:async()=>({data:()=>path.endsWith('/driver') ? phase:undefined})};
+    },
     collection(name) {
       assert.equal(name,'users');
       return {doc:()=>({get:async()=>({data:()=>({role:authorizedRole})}),delete:effect,set:effect,update:effect})};
@@ -51,7 +54,7 @@ test('os quatro callables compilados recusam a ação após autenticação e ant
   };
   runInNewContext(readFileSync(new URL('../lib/index.js',import.meta.url),'utf8'),{
     exports,
-    require: name=>builtins[name] ?? (name==='./legacy-driver-accounts' || name.startsWith('node:') ? requireCompiled(name):{}),
+    require: name=>builtins[name] ?? (name==='./legacy-driver-accounts' || name==='./legacy-staff-cutover' || name.startsWith('node:') ? requireCompiled(name):{}),
   });
 
   for (const name of ['inviteUser','deleteUser','resetUserPassword','forceLogoutDriver']) {
@@ -84,13 +87,13 @@ test('escritores operacionais passam pela verificação de credencial e perfil a
     'firebase-functions/v1':{region:()=>chain},'firebase-admin/app':{initializeApp() {}},
     'firebase-admin/auth':{getAuth:()=>({verifyIdToken:async(_t,revoked)=>{assert.equal(revoked,true);return {uid,firebase:{sign_in_provider:'password'}};}})},
     'firebase-admin/firestore':{getFirestore:()=>({
-      doc:()=>({get:async()=>({data:()=>({mode:'supabase',driverUids:['synthetic-cohort']})})}),
+      doc:path=>({get:async()=>({data:()=>path.endsWith('/driver') ? {mode:'supabase',driverUids:['synthetic-cohort']}:undefined})}),
       collection:name=>{if(name!=='users'){door++;throw new Error('arrival at operational store');}
         return {doc:()=>({get:async()=>({data:()=>profile})})};},
     })},
   };
   runInNewContext(readFileSync(new URL('../lib/index.js',import.meta.url),'utf8'),{exports,
-    require:name=>modules[name] ?? (name==='./legacy-driver-accounts' || name.startsWith('node:')?requireCompiled(name):{})});
+    require:name=>modules[name] ?? (name==='./legacy-driver-accounts' || name==='./legacy-staff-cutover' || name.startsWith('node:')?requireCompiled(name):{})});
   const data={routeId:'r',name:'R',driverId:'d',changes:[{changeType:'sequence'}]};
   const request=(actor=uid)=>({auth:{uid:actor},data,rawRequest:{get:()=> 'Bearer synthetic'}});
   for(const name of ['deleteRoute','updateRouteName','updateRouteDriver','duplicateRoute','notifyRouteChanges','completeRoute','resendRouteToDriver','sendCustomNotification','forceCompleteService']){

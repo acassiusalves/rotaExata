@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { clearLegacyRotaIndexedDb,clearLegacyRotaWebStorage } from '@/lib/staff/legacy-browser-session';
 import { clearStaffWorkspace } from '@/lib/staff/workspace';
 import { clearDevicePushGrant } from '@/lib/driver/push-device';
 import { earningsBrowserClient,signOutNativeLocally } from '@/lib/earnings/client';
@@ -76,6 +77,11 @@ export function NativeSessionProvider({children,enabled=true}:{children:ReactNod
   },[]);
 
   useEffect(()=>{
+    const priorApiKey=process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+    if (nativeStaffEnabled && priorApiKey) {
+      for (const storage of [window.localStorage,window.sessionStorage]) clearLegacyRotaWebStorage(storage,priorApiKey);
+      if (window.indexedDB) void clearLegacyRotaIndexedDb(window.indexedDB,priorApiKey).catch(()=>{});
+    }
     const browser=enabled ? earningsBrowserClient() : undefined;
     if (!browser) {setLoading(false);return;}
     setClient(browser);

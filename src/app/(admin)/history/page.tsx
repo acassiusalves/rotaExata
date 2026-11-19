@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useLayoutIdentity } from '@/components/staff/staff-session';
 import { History, User, Route as RouteIcon, ArrowRight, Activity } from 'lucide-react';
 import {
   Card,
@@ -13,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 
 export default function HistoryPage() {
+  const {canNavigate}=useLayoutIdentity();
   return (
     <div className="flex-1 space-y-4">
       <div>
@@ -23,7 +25,7 @@ export default function HistoryPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Link href="/history/motorista">
+        {canNavigate('/history/motorista') && <Link href="/history/motorista">
           <Card className="cursor-pointer transition-all hover:shadow-lg hover:border-primary">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -45,9 +47,9 @@ export default function HistoryPage() {
               </p>
             </CardContent>
           </Card>
-        </Link>
+        </Link>}
 
-        <Link href="/history/rotas">
+        {canNavigate('/history/rotas') && <Link href="/history/rotas">
           <Card className="cursor-pointer transition-all hover:shadow-lg hover:border-primary">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -69,9 +71,9 @@ export default function HistoryPage() {
               </p>
             </CardContent>
           </Card>
-        </Link>
+        </Link>}
 
-        <Link href="/history/atividades">
+        {canNavigate('/history/atividades') && <Link href="/history/atividades">
           <Card className="cursor-pointer transition-all hover:shadow-lg hover:border-primary">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -93,7 +95,7 @@ export default function HistoryPage() {
               </p>
             </CardContent>
           </Card>
-        </Link>
+        </Link>}
       </div>
     </div>
   );

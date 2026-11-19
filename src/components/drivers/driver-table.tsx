@@ -1,6 +1,5 @@
 'use client';
 
-import { nativeDriverEnabled } from '@/lib/driver/mode';
 
 import * as React from 'react';
 import { ChevronsUpDown } from 'lucide-react';
@@ -164,10 +163,6 @@ function formatPendingHeadline(driver: Driver): string {
 const getDriverColumns = (
   onViewDetailsClick: (driver: Driver) => void,
   onEditClick: (driver: Driver) => void,
-  onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void,
-  onResetPasswordClick: (driver: Driver) => void,
-  onImpersonateClick: (driver: Driver) => void
 ): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
@@ -429,26 +424,6 @@ const getDriverColumns = (
                     <DropdownMenuItem onClick={() => onEditClick(driver)}>
                        Editar
                     </DropdownMenuItem>
-                    {!nativeDriverEnabled && <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => onImpersonateClick(driver)}>
-                       <Smartphone className="mr-2 h-4 w-4" />
-                       Testar como Motorista
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onForceLogoutClick(driver)}>
-                       <LogOut className="mr-2 h-4 w-4" />
-                       Deslogar Motorista
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onResetPasswordClick(driver)}>
-                       <KeyRound className="mr-2 h-4 w-4" />
-                       Resetar Senha
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
-                       <Trash2 className="mr-2 h-4 w-4" />
-                       Remover
-                    </DropdownMenuItem>
-                    </>}
                 </DropdownMenuContent>
             </DropdownMenu>
         </div>
@@ -457,39 +432,17 @@ const getDriverColumns = (
   },
 ];
 
-export function DriverTable({
-  drivers,
-  onViewDetailsClick,
-  onEditClick,
-  onDeleteClick,
-  onForceLogoutClick,
-  onResetPasswordClick,
-  onImpersonateClick
-}: {
-  drivers: Driver[],
-  onViewDetailsClick: (driver: Driver) => void,
-  onEditClick: (driver: Driver) => void,
-  onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void,
-  onResetPasswordClick: (driver: Driver) => void,
-  onImpersonateClick: (driver: Driver) => void
+export function DriverTable({drivers,onViewDetailsClick,onEditClick}:{
+  drivers:Driver[];
+  onViewDetailsClick:(driver:Driver)=>void;
+  onEditClick:(driver:Driver)=>void;
 }) {
   // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns = React.useMemo(
-    () => getDriverColumns(
-      onViewDetailsClick,
-      onEditClick,
-      onDeleteClick,
-      onForceLogoutClick,
-      onResetPasswordClick,
-      onImpersonateClick
-    ),
-    [onViewDetailsClick, onEditClick, onDeleteClick, onForceLogoutClick, onResetPasswordClick, onImpersonateClick]
-  );
+  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick),[onViewDetailsClick,onEditClick]);
 
   const table = useReactTable({
     data: drivers,

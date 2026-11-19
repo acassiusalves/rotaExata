@@ -1,0 +1,96 @@
+import { FieldValue,type Firestore } from 'firebase-admin/firestore';
+import { factsHash } from '../../../../functions/src/earnings-source-adapter.ts';
+import { staffEditorCommandSchema,type StaffEditorCommand } from '../../staff/editor-contract.ts';
+import { routeDocumentId } from '../../staff/route-contract.ts';
+import { EarningsError } from '../earnings/transport.ts';
+import { staffRouteRevision } from './route-commands.ts';
+
+type EditorActor={userId:string;sourceUid?:string;name:string};
+const activeStatuses=['draft','pending','dispatched','in_progress'];
+
+export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,value:unknown) {
+  const command:StaffEditorCommand=staffEditorCommandSchema.parse(value);
+  const collection='routeId' in command ? 'routes' : 'serviceId' in command ? 'services' : 'orders';
+  const entityId='routeId' in command ? command.routeId : 'serviceId' in command ? command.serviceId : command.orderId;
+  const target=db.collection(collection).doc(entityId);
+  const receipt=db.collection('rotaStaffCommands').doc(command.commandId);
+  const fingerprint=factsHash({actor:actor.userId,command});
+  const stamp=FieldValue.serverTimestamp;
+  return db.runTransaction(async tx=>{
+    const [previous,snapshot]=await tx.getAll(receipt,target);
+    if (previous.exists) {
+      if (previous.get('fingerprint')!==fingerprint) throw new EarningsError(409,'staff_command_conflict');
+      return {ok:true,replayed:true};
+    }
+    if (!snapshot.exists) throw new EarningsError(404,'staff_resource_not_found');
+    if (staffRouteRevision(snapshot.updateTime)!==command.revision) throw new EarningsError(409,'staff_route_conflict');
+    const data=snapshot.data()!;
+    if (collection==='routes' && !activeStatuses.includes(data.status)) throw new EarningsError(409,'staff_route_closed');
+
+    switch (command.kind) {
+      case 'arrange': {
+        if (data.status!=='draft') throw new EarningsError(409,'staff_route_conflict');
+        const saved=(Array.isArray(data.organizedRoutes) ? data.organizedRoutes:[]).filter(route=>route?.dispatched===true);
+        const alreadyDispatched=new Set(saved.map(route=>route.key));
+        const keys=new Set(command.routes.map(route=>route.key));
+        if (keys.size!==command.routes.length || command.routes.some(route=>alreadyDispatched.has(route.key))) {
+          throw new EarningsError(409,'staff_route_conflict');
+        }
+        const pending=command.routes.map(route=>({...route,dispatched:false}));
+        tx.update(target,{organizedRoutes:[...saved,...pending],
+          routeNames:Object.fromEntries([...saved,...pending].map(route=>[route.key,route.name])),updatedAt:stamp()});
+        break;
+      }
+      case 'route-pool': {
+        const assigned=new Set((Array.isArray(data.stops) ? data.stops:[]).map(stop=>String(stop?.id ?? stop?.placeId)));
+        if (command.stops.some(stop=>assigned.has(stop.id))) throw new EarningsError(409,'staff_route_conflict');
+        tx.update(target,{unassignedStops:command.stops,updatedAt:stamp()});
+        break;
+      }
+      case 'prune-service-pool': {
+        if (data.status==='completed') throw new EarningsError(409,'staff_service_closed');
+        const removed=new Set(command.removed);
+        const allStops=(Array.isArray(data.allStops) ? data.allStops:[]).filter(stop=>!removed.has(String(stop?.id ?? stop?.placeId)));
+        tx.update(target,{allStops,'stats.totalDeliveries':allStops.length,updatedAt:stamp()});
+        break;
+      }
+      case 'delete-draft': {
+        if (data.status!=='draft') throw new EarningsError(409,'staff_route_conflict');
+        const serviceId=routeDocumentId.safeParse(data.serviceId);
+        if (serviceId.success) {
+          const service=await tx.get(db.collection('services').doc(serviceId.data));
+          const link=service.get('routeIds');
+          if (service.exists && Array.isArray(link)) {
+            const routeIds=link.filter(id=>id!==entityId);
+            tx.update(service.ref,{routeIds,'stats.totalRoutes':routeIds.length,updatedAt:stamp()});
+          }
+        }
+        tx.delete(target);
+        break;
+      }
+      case 'detach-order': {
+        const serviceId=routeDocumentId.safeParse(data.rotaExataServiceId);
+        const routeId=routeDocumentId.safeParse(data.rotaExataRouteId);
+        const route=routeId.success ? await tx.get(db.collection('routes').doc(routeId.data)):null;
+        const service=serviceId.success ? await tx.get(db.collection('services').doc(serviceId.data)):null;
+        const siblings=serviceId.success ? await tx.get(db.collection('routes').where('serviceId','==',serviceId.data)):null;
+        const linked=[
+          ...[route?.get('stops'),service?.get('allStops')],
+          ...(siblings?.docs.map(doc=>doc.get('stops')) ?? []),
+        ].some(stops=>Array.isArray(stops) && stops.some(stop=>stop?.orderNumber===data.number && !stop?.unlinkedAt));
+        if (linked) throw new EarningsError(409,'staff_order_still_on_route');
+        tx.update(target,{logisticsStatus:null,rotaExataServiceId:null,rotaExataServiceCode:null,
+          rotaExataRouteId:null,rotaExataRouteCode:null,updatedAt:stamp()});
+        break;
+      }
+    }
+    tx.create(receipt,{fingerprint,actorId:actor.userId,entityId,kind:command.kind,createdAt:stamp()});
+    tx.create(db.collection('activity_log').doc('staff-'+command.commandId),{
+      timestamp:stamp(),userId:actor.sourceUid ?? actor.userId,canonicalUserId:actor.userId,userName:actor.name,
+      eventType:command.kind==='delete-draft' ? 'route_deleted':'route_updated',
+      entityType:collection==='routes' ? 'route':collection==='services' ? 'service':'order',entityId,
+      action:command.kind,
+    });
+    return {ok:true,replayed:false};
+  });
+}

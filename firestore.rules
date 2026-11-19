@@ -13,6 +13,11 @@ service cloud.firestore {
             || get(actor).data.get('nativeDriverProvisioningId', '') != '')));
     }
 
+    function rotaStaffUsesNativeAuth() {
+      let transition = /databases/$(database)/documents/rotaAuthTransition/staff;
+      return exists(transition) && get(transition).data.get('mode', 'firebase') != 'firebase';
+    }
+
     function isAuthed() {
       return request.auth != null && !isRetiredFirebaseDriver();
     }
@@ -68,14 +73,18 @@ service cloud.firestore {
     // ===== USERS COLLECTION =====
     match /users/{userId} {
       function nativeProjectionFields() {
-        return ['nativeDriverProvisioningId','nativeDriverReady','nativeDriverDispatchEnabled','nativeDriverDispatchFence'];
+        return ['nativeDriverProvisioningId','nativeDriverReady','nativeDriverDispatchEnabled','nativeDriverDispatchFence','nativeStaffProvisioningId'];
+      }
+      function protectedNativeProfile() {
+        return resource.data.get('nativeDriverProvisioningId', '') != '' ||
+          resource.data.get('nativeStaffProvisioningId', '') != '';
       }
       function nativeProjectionUpdateAllowed() {
         let fields = request.resource.data.diff(resource.data).affectedKeys();
         return !fields.hasAny(nativeProjectionFields())
           && (!isNativeDriverUuid(userId) || request.resource.data.get('role', '') != 'driver'
             || resource.data.get('role', '') == 'driver')
-          && (resource.data.get('nativeDriverProvisioningId', '') == ''
+          && (!protectedNativeProfile()
             || !fields.hasAny(['role','active','disabled','permissions','forceLogoutAt','fcmSessionBindingId']));
       }
       allow read: if isOwner(userId) || isAppAdmin();
@@ -83,7 +92,7 @@ service cloud.firestore {
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','active','disabled','permissions','forceLogoutAt','fcmSessionBindingId'])));
       allow create: if isAppAdmin() && !request.resource.data.keys().hasAny(nativeProjectionFields())
         && (!isNativeDriverUuid(userId) || request.resource.data.get('role', '') != 'driver');
-      allow delete: if isAppAdmin() && resource.data.get('nativeDriverProvisioningId', '') == '';
+      allow delete: if isAppAdmin() && !protectedNativeProfile();
       // Permitir list para usuários autenticados (vendedores precisam ver lista de vendedores para criar pedidos)
       allow list: if isAuthed();
     }
@@ -128,9 +137,11 @@ service cloud.firestore {
 
     // ===== SETTINGS COLLECTION =====
     match /settings/{settingId} {
-      allow read, write: if isAppAdmin();
-      // Permitir leitura pública para catálogos públicos
-      allow read: if true;
+      allow read: if settingId != 'googleMaps' && isAppAdmin();
+      allow write: if settingId != 'googleMaps' && isAppAdmin()
+        && (settingId != 'permissions' || !rotaStaffUsesNativeAuth());
+      // Catálogos ainda leem as configurações públicas. A chave server é via Admin SDK.
+      allow read: if settingId != 'googleMaps';
     }
 
     // ===== CONFIGURAÇÕES COLLECTION =====
@@ -143,7 +154,7 @@ service cloud.firestore {
 
     // ===== LOCATION UPDATE REQUESTS =====
     match /locationUpdateRequests/{driverId} {
-      allow create, update: if isAppAdmin();
+      allow create, update: if isAppAdmin() && !rotaStaffUsesNativeAuth();
       allow read, delete: if isAuthed() && driverId == request.auth.uid;
     }
 
@@ -782,11 +793,16 @@ service cloud.firestore {
       function ownsNotification() {
         return isAuthed() && resource.data.driverId == request.auth.uid;
       }
+      function reservesStaffAuthors(keys) {
+        return !keys.hasAny(['staffScopeId', 'staffAuthorId', 'staffAuthorName', 'staffNotificationCommandId', 'staffPushStatus']);
+      }
       allow read: if isAppAdmin() || ownsNotification();
-      allow create: if isAppAdmin() || (isAuthed() && request.resource.data.driverId == request.auth.uid);
-      allow update: if isAppAdmin() || (ownsNotification()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt', 'read']));
-      allow delete: if isAppAdmin();
+      allow create: if reservesStaffAuthors(request.resource.data.keys())
+        && ((isAppAdmin() && !rotaStaffUsesNativeAuth()) || (isAuthed() && request.resource.data.driverId == request.auth.uid));
+      allow update: if reservesStaffAuthors(request.resource.data.diff(resource.data).affectedKeys())
+        && ((isAppAdmin() && !rotaStaffUsesNativeAuth()) || (ownsNotification()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt', 'read'])));
+      allow delete: if isAppAdmin() && !rotaStaffUsesNativeAuth();
     }
 
     match /routeChangeNotifications/{routeId} {

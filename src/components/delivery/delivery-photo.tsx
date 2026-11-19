@@ -6,6 +6,8 @@ import {useAuth} from '@/hooks/auth-context';
 import {usePathname} from 'next/navigation';
 import {useOptionalStaff} from '@/components/staff/staff-session';
 import {staffPhotoViewForPath} from '@/lib/staff/media-policy';
+import {isStaffPhotoReference} from '@/lib/staff/photo-reference';
+import {nativeStaffEnabled} from '@/lib/staff/mode';
 import {protectedPhotoPrefix,isProtectedPhoto} from '@/lib/driver/photo-policy';
 
 export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<HTMLImageElement>,'src'> & {src:string;expand?:boolean}) {
@@ -16,9 +18,11 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
   const {user}=useAuth();
   const request=staff?.request ?? runtime?.request;
   const actor=staff?.userId ?? runtime?.userId ?? user?.uid;
-  const staffSource=staff && staffView ? '/api/staff/media/'+src.slice(protectedPhotoPrefix.length)+'?view='+staffView:null;
+  const bridged=isStaffPhotoReference(src);
+  const protectedSource=isProtectedPhoto(src) || bridged;
+  const staffSource=staff && staffView && protectedSource ?
+    (bridged ? src : '/api/staff/media/'+src.slice(protectedPhotoPrefix.length))+'?view='+staffView:null;
   const native=runtime?.native;
-  const protectedSource=isProtectedPhoto(src);
   const [loaded,setLoaded]=useState<{src:string;actor?:string;url?:string}>();
   useEffect(()=>{
     if (!protectedSource || !actor) return;
@@ -49,7 +53,7 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
   },[actor,native,protectedSource,request,src,staffSource,inStaff,user]);
 
   const current=loaded?.src===src && loaded.actor===actor ? loaded:undefined;
-  const url=protectedSource ? current?.url:src;
+  const url=protectedSource ? current?.url:nativeStaffEnabled && staffView ? undefined:src;
   if (!url) return <p role="status" className="text-sm text-muted-foreground">{current?'Comprovante indisponível.':'Carregando comprovante…'}</p>;
   const image=<img {...props} src={url} alt={alt} />;
   return expand ? <a href={url} target="_blank" rel="noopener noreferrer">{image}</a>:image;

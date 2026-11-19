@@ -1,3 +1,4 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { NextRequest, NextResponse } from 'next/server';
 import { extractCoordsFromMapsUrl, isShortMapsLink } from '@/lib/maps-link';
 
@@ -5,6 +6,7 @@ import { extractCoordsFromMapsUrl, isShortMapsLink } from '@/lib/maps-link';
 const DOMINIOS_PERMITIDOS = /^https?:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl)\//i;
 
 export async function POST(req: NextRequest) {
+  if (nativeStaffEnabled) return NextResponse.json({error:'rota_staff_native_required'},{status:410});
   let url: string;
   try {
     ({ url } = await req.json());

@@ -1,7 +1,8 @@
+import {nativeStaffEnabled} from '@/lib/staff/mode';
 import {driverAuthority} from '@/lib/server/driver/authority';
 import {authorizeOperationalWriter} from '@/lib/firebase/operational-writer-auth';
 import {readDeliveryPhoto} from '@/lib/server/driver/media';
-import {earningsErrorResponse} from '@/lib/server/earnings/transport';
+import {EarningsError,earningsErrorResponse} from '@/lib/server/earnings/transport';
 import {privateJson} from '@/lib/server/earnings/store';
 
 export const runtime='nodejs';
@@ -10,7 +11,10 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
   try {
     const mode=request.headers.get('x-rota-media-mode');
     let sourceUid:string|undefined;
-    if (mode==='operator') await authorizeOperationalWriter(request);
+    if (mode==='operator') {
+      if (nativeStaffEnabled) throw new EarningsError(410,'rota_staff_native_required');
+      await authorizeOperationalWriter(request);
+    }
     else {
       const actor=await driverAuthority(request,mode==='legacy-driver'?'legacy':'native');
       sourceUid=actor.sourceUid;

@@ -5,6 +5,8 @@ import * as React from 'react';
 import { X, Navigation, Share2, Copy, Check, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RouteMap } from '@/components/maps/RouteMap';
+import dynamic from 'next/dynamic';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { usePathname } from 'next/navigation';
 import type { Timestamp } from 'firebase/firestore';
 import { useStaff } from '@/components/staff/staff-session';
@@ -43,13 +45,21 @@ interface RouteMapDialogProps {
     route: RouteDocument;
 }
 
-export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
+const LegacyRouteMapDialog=dynamic(()=>import('./legacy-route-map-dialog').then(module=>module.RouteMapDialog),{ssr:false});
+
+export function RouteMapDialog(props:RouteMapDialogProps) {
+  if (!nativeStaffEnabled) return <LegacyRouteMapDialog {...props} />;
+  return <StaffRouteMapDialog {...props} />;
+}
+
+function StaffRouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
   const [copied, setCopied] = React.useState(false);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   const {request}=useStaff();
-  const view=usePathname()==='/routes/monitoring' ? 'monitor':'history';
+  const path=usePathname();
+  const view=path==='/routes/monitoring' ? 'monitor':path==='/history/motorista' ? 'driver-history':'history';
   const routeId=route.id;
   const load=React.useCallback(async(signal:AbortSignal)=>{
     if (!isOpen) return null;
@@ -253,7 +263,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                     routes={mapRoutes}
                     driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading ?? undefined } : undefined}
                     driverLocations={driverLocations}
-                    onRefreshDriverLocation={handleRefreshDriverLocation}
+                    onRefreshDriverLocation={view==='monitor' ? handleRefreshDriverLocation:undefined}
                 />
             </div>
         </DialogContent>

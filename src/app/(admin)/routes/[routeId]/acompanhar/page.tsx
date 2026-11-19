@@ -2,7 +2,9 @@
 'use client';
 
 import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
+import type { Timestamp } from 'firebase/firestore';
 import * as React from 'react';
+import { useRouteEditor, activeRoutes as selectActiveRoutes, eligibleDrivers as selectEligibleDrivers, routeRef as editorRoute, serviceRef as editorService, editorTime as serverTimestamp, editorUnion as arrayUnion, editorIncrement as increment, routesOnDay, serviceRoutes, ordersByNumber, editorDate } from '@/components/staff/use-route-editor';
 import {
   Card,
   CardContent,
@@ -98,25 +100,18 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { RouteTimeline } from '@/components/routes/route-timeline';
-import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { db, functions } from '@/lib/firebase/client';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, writeBatch, deleteDoc, arrayUnion, increment } from "firebase/firestore";
-import { httpsCallable } from 'firebase/functions';
-import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   resolveRoutePlanMetrics,
-  saveExistingRoutePlansAtomically,
-  saveRoutePlanBatchAtomically,
   type RouteMetrics,
   type SavedRoutePlan,
-} from '@/lib/firebase/route-stop-mutations';
+} from '@/lib/route-stop-mutations';
 import {
   findSingleStopByIdentity,
   RouteStructureConflictError,
@@ -134,7 +129,6 @@ import {
   upsertStopInCollection,
 } from '@/lib/route-stop-utils';
 import { isValidOrigin } from '@/lib/default-origin';
-import { carregarOrigemPadrao } from '@/lib/default-origin-client';
 
 
 interface RouteData {
@@ -184,11 +178,7 @@ const getRoutePeriodFromHour = (hour: number): 'Matutino' | 'Vespertino' | 'Notu
 const getRouteScheduleFromDate = (
   dateLike?: Timestamp | Date | null
 ): Pick<RouteData, 'routeDate' | 'routeTime' | 'period'> => {
-  const baseDate = dateLike instanceof Timestamp
-    ? dateLike.toDate()
-    : dateLike instanceof Date
-      ? dateLike
-      : new Date();
+  const baseDate=editorDate(dateLike) ?? new Date();
 
   return {
     routeDate: baseDate.toISOString(),
@@ -225,29 +215,6 @@ const createEmptyServiceForm = () => ({
   lng: null as number | null,
 });
 
-const computeRoute = async (
-  origin: PlaceValue,
-  stops: PlaceValue[]
-): Promise<RouteInfo | null> => {
-  if (stops.length === 0) return null;
-  try {
-    const res = await fetch('/api/compute-optimized-route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ origin, stops }),
-    });
-    if (!res.ok) {
-       const errorText = await res.text();
-       console.error('API Error:', errorText);
-       throw new Error(errorText);
-    }
-    const data = await res.json();
-    return { ...data, stops, visible: true }; // Ensure original stops are returned
-  } catch (error) {
-    console.error('Failed to compute route:', error);
-    return null;
-  }
-};
 
 const formatDistance = (meters: number) => {
   if (meters === 0) return '0.00';
@@ -575,6 +542,7 @@ const EditableRouteName: React.FC<{
 };
 
 export default function RouteAcompanharPage() {
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, plan:saveRoutePlanBatchAtomically, saveExisting:saveExistingRoutePlansAtomically, draftKey, sendNotice, native } = useRouteEditor();
   const router = useRouter();
   const params = useParams();
   const routeId = params.routeId as string;
@@ -905,7 +873,7 @@ export default function RouteAcompanharPage() {
 
   React.useEffect(() => {
     // Fetch available drivers from Firestore
-    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
+    const q = selectEligibleDrivers;
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const driversData: Driver[] = [];
       snapshot.forEach(doc => {
@@ -918,7 +886,7 @@ export default function RouteAcompanharPage() {
           phone: data.phone || 'N/A',
           status: data.status || 'offline',
           vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
-          lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
+          lastSeenAt: editorDate(data.lastSeenAt) || new Date(0),
           totalDeliveries: data.totalDeliveries || 0,
           rating: data.rating || 0,
           avatarUrl: data.photoURL,
@@ -943,10 +911,7 @@ export default function RouteAcompanharPage() {
     console.log('🚗 [useEffect:driverLocations] Motoristas disponíveis:', availableDrivers.map(d => ({ id: d.id, name: d.name })));
 
     // Buscar rotas que estão em progresso ou despachadas
-    const routesQuery = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['in_progress', 'dispatched'])
-    );
+    const routesQuery = selectActiveRoutes;
 
     console.log('🚗 [useEffect:driverLocations] Configurando listener para rotas in_progress/dispatched');
 
@@ -1061,10 +1026,7 @@ export default function RouteAcompanharPage() {
         if (routeData.serviceId) {
           console.log('🔍 [loadAdditionalRoutes] Rota pertence a serviço, filtrando por serviceId:', routeData.serviceId);
 
-          const q = query(
-            collection(db, 'routes'),
-            where('serviceId', '==', routeData.serviceId)
-          );
+          const q = serviceRoutes(routeData.serviceId);
 
           const querySnapshot = await getDocs(q);
           const routes: AdditionalRouteEntry[] = [];
@@ -1129,7 +1091,7 @@ export default function RouteAcompanharPage() {
               data: routeInfo,
               driverId: routeDoc.driverId,
               driverInfo: routeDoc.driverInfo,
-              plannedDate: routeDoc.plannedDate?.toDate(),
+              plannedDate: editorDate(routeDoc.plannedDate),
             });
             visibility[doc.id] = false; // Hidden by default
           });
@@ -1142,17 +1104,11 @@ export default function RouteAcompanharPage() {
 
         // Comportamento original para rotas que não pertencem a serviços
         const routeDate = new Date(routeData.routeDate);
-        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
-        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
 
         // Período selecionado para filtrar (passado da página de rotas)
         const selectedPeriod = routeData.period;
 
-        const q = query(
-          collection(db, 'routes'),
-          where('plannedDate', '>=', dayStart),
-          where('plannedDate', '<=', dayEnd)
-        );
+        const q = routesOnDay(routeDate);
 
         const querySnapshot = await getDocs(q);
         const routes: AdditionalRouteEntry[] = [];
@@ -1189,7 +1145,7 @@ export default function RouteAcompanharPage() {
 
           // Filter by period if specified
           if (selectedPeriod && routeDoc.plannedDate) {
-            const routePlannedDate = routeDoc.plannedDate.toDate();
+            const routePlannedDate = editorDate(routeDoc.plannedDate)!;
             const routePeriod = getRoutePeriodFromDate(routePlannedDate);
             if (routePeriod !== selectedPeriod) {
               return;
@@ -1226,7 +1182,7 @@ export default function RouteAcompanharPage() {
             data: routeInfo,
             driverId: routeDoc.driverId,
             driverInfo: routeDoc.driverInfo,
-            plannedDate: routeDoc.plannedDate?.toDate(),
+            plannedDate: editorDate(routeDoc.plannedDate),
           });
           visibility[doc.id] = false; // Hidden by default
         });
@@ -1250,7 +1206,7 @@ export default function RouteAcompanharPage() {
       return;
     }
 
-    const routeRef = doc(db, 'routes', routeData.currentRouteId);
+    const routeRef = editorRoute(routeData.currentRouteId);
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -1305,7 +1261,7 @@ export default function RouteAcompanharPage() {
       setIsLoading(true);
       try {
         // Buscar dados da rota
-        const routeDoc = await getDoc(doc(db, 'routes', routeId));
+        const routeDoc = await getDoc(editorRoute(routeId));
 
         if (!routeDoc.exists()) {
           console.error('❌ [useEffect:loadRouteData] Rota não encontrada:', routeId);
@@ -1377,7 +1333,7 @@ export default function RouteAcompanharPage() {
         const loadRouteFromFirestore = async () => {
           setIsLoading(true);
           try {
-            const routeRef = doc(db, 'routes', parsedData.currentRouteId!);
+            const routeRef = editorRoute(parsedData.currentRouteId!);
             console.log('🔄 [useEffect:loadRouteData] Buscando rota:', parsedData.currentRouteId);
             const routeSnap = await getDoc(routeRef);
 
@@ -1416,7 +1372,7 @@ export default function RouteAcompanharPage() {
                   for (let i = 0; i < allRouteOrderNumbers.length; i += 30) {
                     const batch = allRouteOrderNumbers.slice(i, i + 30);
                     const ordersSnap = await getDocs(
-                      query(collection(db, 'orders'), where('number', 'in', batch))
+                      ordersByNumber(batch)
                     );
                     for (const orderDoc of ordersSnap.docs) {
                       const orderData = orderDoc.data();
@@ -1447,7 +1403,7 @@ export default function RouteAcompanharPage() {
                       } catch (notifyError) {
                         console.error('⚠️ [loadRouteData] Erro ao notificar motorista após limpeza:', notifyError);
                       }
-                      await updateDoc(doc(db, 'routes', parsedData.currentRouteId!), {
+                      await updateDoc(editorRoute(parsedData.currentRouteId!), {
                         unassignedStops: cleanedUnassigned,
                         updatedAt: serverTimestamp(),
                       });
@@ -1620,7 +1576,7 @@ export default function RouteAcompanharPage() {
         if (parsedData.isService && parsedData.serviceId) {
           try {
             const snap = await getDocs(
-              query(collection(db, 'routes'), where('serviceId', '==', parsedData.serviceId))
+              serviceRoutes(parsedData.serviceId)
             );
             if (snap.size > 0) {
               console.log('🔍 [useEffect:loadRouteData] Encontradas rotas no Firestore:', snap.size);
@@ -1659,7 +1615,7 @@ export default function RouteAcompanharPage() {
                   for (let i = 0; i < orderNums.length; i += 30) {
                     const batchNums = orderNums.slice(i, i + 30);
                     const ordersSnap = await getDocs(
-                      query(collection(db, 'orders'), where('number', 'in', batchNums))
+                      ordersByNumber(batchNums)
                     );
                     for (const oDoc of ordersSnap.docs) {
                       const oData = oDoc.data();
@@ -1716,7 +1672,7 @@ export default function RouteAcompanharPage() {
                 }
               }
 
-              const serviceDoc = await getDoc(doc(db, 'services', parsedData.serviceId!));
+              const serviceDoc = await getDoc(editorService(parsedData.serviceId!));
               if (serviceDoc.exists()) {
                 const svcData = serviceDoc.data();
                 let allStops = (svcData.allStops || []) as PlaceValue[];
@@ -1729,7 +1685,7 @@ export default function RouteAcompanharPage() {
                     for (let i = 0; i < orderNums.length; i += 30) {
                       const batchNums = orderNums.slice(i, i + 30);
                       const ordersSnap = await getDocs(
-                        query(collection(db, 'orders'), where('number', 'in', batchNums))
+                        ordersByNumber(batchNums)
                       );
                       for (const oDoc of ordersSnap.docs) {
                         const oData = oDoc.data();
@@ -1742,7 +1698,7 @@ export default function RouteAcompanharPage() {
                       const origLen = allStops.length;
                       allStops = allStops.filter(s => !s.orderNumber || !unlinkedSvc.has(s.orderNumber));
                       if (allStops.length < origLen) {
-                        await updateDoc(doc(db, 'services', parsedData.serviceId!), {
+                        await updateDoc(editorService(parsedData.serviceId!), {
                           allStops,
                           'stats.totalDeliveries': allStops.length,
                           updatedAt: serverTimestamp(),
@@ -2040,7 +1996,7 @@ export default function RouteAcompanharPage() {
             try {
               // Checar se já existem rotas para este serviço
               const existingCheck = await getDocs(
-                query(collection(db, 'routes'), where('serviceId', '==', parsedData.serviceId))
+                serviceRoutes(parsedData.serviceId)
               );
 
               if (existingCheck.size > 0) {
@@ -2061,8 +2017,26 @@ export default function RouteAcompanharPage() {
                 const routeDate = new Date(parsedData.routeDate);
                 const savedIds: { A: string | null; B: string | null } = { A: null, B: null };
 
+                if (native) {
+                  const pending = [
+                    {key:'A' as const,computed:computedRouteA,stops:stopsA,color:'#e60000',name:'Rota 1'},
+                    {key:'B' as const,computed:computedRouteB,stops:stopsB,color:'#1fd634',name:'Rota 2'},
+                  ].filter(route=>route.computed && route.stops.length>0);
+                  const created=await createServicePair(parsedData.serviceId!,pending.map(route=>({
+                    name:route.name,routeKey:route.key,origin:parsedData.origin,stops:route.stops,color:route.color,
+                    encodedPolyline:route.computed!.encodedPolyline || '',
+                    distanceMeters:route.computed!.distanceMeters || 0,
+                    duration:route.computed!.duration || '0s',
+                    status:'draft',plannedDate:routeDate,
+                  })));
+                  created.forEach((result,index)=>{
+                    const route=pending[index];
+                    savedIds[route.key]=result.id;
+                    rememberPersistedStops(result.id,route.stops);
+                  });
+                } else {
                 if (computedRouteA && stopsA.length > 0) {
-                  const routeADoc = await addDoc(collection(db, 'routes'), {
+                  const routeADoc = await createEditorRoute({
                     name: 'Rota 1',
                     origin: parsedData.origin,
                     stops: stopsA,
@@ -2074,7 +2048,7 @@ export default function RouteAcompanharPage() {
                     serviceId: parsedData.serviceId,
                     serviceCode: parsedData.serviceCode,
                     source: 'lunna',
-                    plannedDate: Timestamp.fromDate(routeDate),
+                    plannedDate: routeDate,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                   });
@@ -2084,7 +2058,7 @@ export default function RouteAcompanharPage() {
                 }
 
                 if (computedRouteB && stopsB.length > 0) {
-                  const routeBDoc = await addDoc(collection(db, 'routes'), {
+                  const routeBDoc = await createEditorRoute({
                     name: 'Rota 2',
                     origin: parsedData.origin,
                     stops: stopsB,
@@ -2096,7 +2070,7 @@ export default function RouteAcompanharPage() {
                     serviceId: parsedData.serviceId,
                     serviceCode: parsedData.serviceCode,
                     source: 'lunna',
-                    plannedDate: Timestamp.fromDate(routeDate),
+                    plannedDate: routeDate,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                   });
@@ -2105,12 +2079,14 @@ export default function RouteAcompanharPage() {
                   console.log('💾 [calculateRoutes] Rota B salva no Firestore:', routeBDoc.id);
                 }
 
+                }
+
                 setServiceRouteIds(savedIds);
 
                 // Atualizar o serviço com os IDs das rotas
                 const routeIdsToAdd = [savedIds.A, savedIds.B].filter(Boolean) as string[];
-                if (routeIdsToAdd.length > 0) {
-                  const serviceRef = doc(db, 'services', parsedData.serviceId);
+                if (!native && routeIdsToAdd.length > 0) {
+                  const serviceRef = editorService(parsedData.serviceId);
                   await updateDoc(serviceRef, {
                     routeIds: arrayUnion(...routeIdsToAdd),
                     'stats.totalRoutes': routeIdsToAdd.length,
@@ -2152,7 +2128,7 @@ export default function RouteAcompanharPage() {
 
     console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da rota:', routeId);
 
-    const unsubscribe = onSnapshot(doc(db, 'routes', routeId), (docSnap) => {
+    const unsubscribe = onSnapshot(editorRoute(routeId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const newName = data.name || data.code || 'Rota 1';
@@ -2181,10 +2157,7 @@ export default function RouteAcompanharPage() {
     const serviceId = routeData.serviceId;
     console.log('👂 [useEffect:serviceListener] Iniciando listener para serviço:', serviceId);
 
-    const routesQuery = query(
-      collection(db, 'routes'),
-      where('serviceId', '==', serviceId)
-    );
+    const routesQuery = serviceRoutes(serviceId);
 
     // Guardar referência para saber os IDs que já conhecemos
     let isFirstSnapshot = true;
@@ -2300,7 +2273,7 @@ export default function RouteAcompanharPage() {
     if (!routeData?.isService || !routeData?.serviceId) return;
 
     const serviceId = routeData.serviceId;
-    const serviceRef = doc(db, 'services', serviceId);
+    const serviceRef = editorService(serviceId);
 
     let previousAllStopsCount: number | null = null;
 
@@ -2325,7 +2298,7 @@ export default function RouteAcompanharPage() {
         const routeStopIds = new Set<string>();
         const routeStopOrders = new Set<string>();
         try {
-          const routesSnap = await getDocs(query(collection(db, 'routes'), where('serviceId', '==', serviceId)));
+          const routesSnap = await getDocs(serviceRoutes(serviceId));
           routesSnap.forEach(rd => {
             const stops = (rd.data().stops || []) as PlaceValue[];
             stops.forEach(s => {
@@ -2725,7 +2698,7 @@ export default function RouteAcompanharPage() {
         // Persistir no sessionStorage para que sobreviva a recarregamentos
         if (routeData?.isService) {
           try {
-            const storedData = sessionStorage.getItem('newRouteData');
+            const storedData = sessionStorage.getItem(draftKey);
             if (storedData) {
               const parsed = JSON.parse(storedData);
               // Atualizar o stop nos dados do sessionStorage
@@ -2734,7 +2707,7 @@ export default function RouteAcompanharPage() {
               );
               if (stopIndex !== -1) {
                 parsed.stops[stopIndex] = updatedStop;
-                sessionStorage.setItem('newRouteData', JSON.stringify(parsed));
+                sessionStorage.setItem(draftKey, JSON.stringify(parsed));
                 console.log('💾 [handleSaveEditedService] sessionStorage atualizado com stop geocodificado');
               }
             }
@@ -3495,12 +3468,13 @@ export default function RouteAcompanharPage() {
   };
 
   const notifySavedRouteChanges = async (result: SavedRoutePlan) => {
+    if (native) return sendNotice(result.noticeId);
     if (
       result.changes.length === 0 ||
       !result.driverId ||
       !['dispatched', 'in_progress'].includes(result.status)
     ) return;
-    const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+    const notifyFn = callEditor.bind(null, 'notifyRouteChanges');
     const response = await notifyFn({
       routeId: result.routeId,
       driverId: result.driverId,
@@ -3615,7 +3589,7 @@ export default function RouteAcompanharPage() {
     // If route was saved to Firestore, delete it there too
     if (dynamicRoute.firestoreId) {
       try {
-        await deleteDoc(doc(db, 'routes', dynamicRoute.firestoreId));
+        await deleteDoc(editorRoute(dynamicRoute.firestoreId));
         addDebugLog('DELETE_ROUTE', `Deleted route ${routeKey} from Firestore`, {
           firestoreId: dynamicRoute.firestoreId
         });
@@ -3745,6 +3719,7 @@ export default function RouteAcompanharPage() {
 
         const routeDocData: Record<string, any> = {
             name: routeName,
+            ...(native ? {routeKey}:{}),
             status: 'dispatched',
             plannedDate: new Date(`${routeData.routeDate.split('T')[0]}T${routeData.routeTime}`),
             origin: routeData.origin,
@@ -3798,14 +3773,14 @@ export default function RouteAcompanharPage() {
         } else {
             // Criar novo documento (fluxo não-serviço ou sem draft existente)
             routeDocData.createdAt = serverTimestamp();
-            const routeRef = await addDoc(collection(db, "routes"), routeDocData);
+            const routeRef = await createEditorRoute(routeDocData);
             routeRefId = routeRef.id;
             rememberPersistedStops(routeRefId, routeToSave.stops);
         }
 
         // Se é um serviço, atualizar o serviço com o ID da rota
-        if (routeData.isService && routeData.serviceId) {
-            const serviceRef = doc(db, 'services', routeData.serviceId);
+        if (!native && routeData.isService && routeData.serviceId) {
+            const serviceRef = editorService(routeData.serviceId);
             await updateDoc(serviceRef, {
                 routeIds: arrayUnion(routeRefId),
                 'stats.totalRoutes': increment(existingDraftId ? 0 : 1),
@@ -3815,10 +3790,7 @@ export default function RouteAcompanharPage() {
 
             // Atualizar pedidos Luna com referência à rota
             for (const orderNumber of lunnaOrderIds) {
-                const ordersQuery = query(
-                    collection(db, 'orders'),
-                    where('number', '==', orderNumber)
-                );
+                const ordersQuery = ordersByNumber(orderNumber);
                 const ordersSnap = await getDocs(ordersQuery);
                 if (!ordersSnap.empty) {
                     await updateDoc(ordersSnap.docs[0].ref, {
@@ -3880,7 +3852,7 @@ export default function RouteAcompanharPage() {
     }
 
     try {
-      const updateRouteNameFn = httpsCallable(functions, 'updateRouteName');
+      const updateRouteNameFn = callEditor.bind(null, 'updateRouteName');
       await updateRouteNameFn({ routeId, name: newName });
 
       toast({
@@ -4257,9 +4229,9 @@ export default function RouteAcompanharPage() {
       return false;
     }
 
-    const batch = writeBatch(db);
+    const batch = createEditorBatch();
     routeIds.forEach(routeId => {
-      batch.update(doc(db, 'routes', routeId), {
+      batch.update(editorRoute(routeId), {
         unassignedStops: dedupeStops(nextUnassignedStops),
         updatedAt: serverTimestamp(),
       });
@@ -4417,7 +4389,7 @@ export default function RouteAcompanharPage() {
     // Também remover do allStops do serviço (exclusão permanente)
     if (routeData.isService && routeData.serviceId && stop.orderNumber) {
       try {
-        const serviceRef = doc(db, 'services', routeData.serviceId);
+        const serviceRef = editorService(routeData.serviceId);
         const serviceSnap = await getDoc(serviceRef);
         if (serviceSnap.exists()) {
           const svcData = serviceSnap.data();
@@ -4441,10 +4413,10 @@ export default function RouteAcompanharPage() {
     if (stop.orderNumber) {
       try {
         const ordersSnap = await getDocs(
-          query(collection(db, 'orders'), where('number', '==', stop.orderNumber))
+          ordersByNumber(stop.orderNumber)
         );
         for (const orderDoc of ordersSnap.docs) {
-          await updateDoc(doc(db, 'orders', orderDoc.id), {
+          await updateDoc(orderDoc.ref, {
             logisticsStatus: null,
             rotaExataServiceId: null,
             rotaExataServiceCode: null,
@@ -4792,7 +4764,7 @@ export default function RouteAcompanharPage() {
       };
     });
     const preparedNewRoutes = newRoutesToCreate.map((newRoute) => {
-      const routeId = doc(collection(db, 'routes')).id;
+      const routeId = editorRoute(crypto.randomUUID()).id;
       const routeDate = new Date(routeData.routeDate);
       const data: Record<string, any> = {
         name: newRoute.dynamicRoute.name,
@@ -4802,7 +4774,7 @@ export default function RouteAcompanharPage() {
         duration: newRoute.routeInfo?.duration || '0s',
         color: newRoute.dynamicRoute.color,
         status: 'draft',
-        plannedDate: Timestamp.fromDate(routeDate),
+        plannedDate: routeDate,
         period: routeData.period || 'Matutino',
         createdAt: serverTimestamp(),
       };
@@ -4968,7 +4940,7 @@ export default function RouteAcompanharPage() {
             title: 'Todas as rotas foram despachadas!',
             description: 'Redirecionando para a página de rotas.',
         });
-        sessionStorage.removeItem('newRouteData');
+        sessionStorage.removeItem(draftKey);
         setTimeout(() => router.push('/routes'), 1500);
     }
   }, [isLoading, routeA, routeB, router, toast, routeData]);
@@ -5058,12 +5030,7 @@ export default function RouteAcompanharPage() {
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
       // Criar documento de solicitação de atualização
-      const requestRef = doc(db, 'locationUpdateRequests', driverId);
-      await setDoc(requestRef, {
-        driverId,
-        requestedAt: serverTimestamp(),
-        status: 'pending',
-      });
+      await requestDriverLocation(driverId);
 
       toast({
         title: 'Atualização solicitada',

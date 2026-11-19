@@ -9,7 +9,7 @@ function boundPushMessage(token, bindingId, deliveryId) {
     return { token, data: { boundPush: "1", bindingId, deliveryId },
         android: { priority: "high", ttl: FIVE_MINUTES }, webpush: { headers: { TTL: "300" } } };
 }
-async function driverPushMessage(db, sourceUid, profile, legacy) {
+async function driverPushMessage(db, sourceUid, profile, legacy, validate) {
     const transition = (await db.doc("rotaAuthTransition/driver").get()).data();
     const bindingId = profile?.fcmSessionBindingId;
     const protectedDriver = typeof bindingId === "string" || (transition?.mode === "supabase" &&
@@ -24,16 +24,22 @@ async function driverPushMessage(db, sourceUid, profile, legacy) {
     if (!grant || grant.sourceUid !== sourceUid || grant.token !== legacy.token || !grant.proof)
         return null;
     try {
-        const configured = new URL(process.env.ROTA_EARNINGS_EVENTS_URL ?? "");
-        if (configured.protocol !== "https:" || configured.username || configured.password ||
-            configured.pathname !== "/api/internal/earnings/events" || configured.search || configured.hash)
-            return null;
-        const response = await fetch(new URL("/api/driver/push-delivery", configured.origin), {
-            method: "POST", headers: { "Content-Type": "application/json" }, redirect: "error", cache: "no-store",
-            signal: AbortSignal.timeout(5000), body: JSON.stringify({ bindingId, proof: grant.proof }),
-        });
-        if (!response.ok)
-            return null;
+        if (validate) {
+            if (!await validate(bindingId, grant.proof))
+                return null;
+        }
+        else {
+            const configured = new URL(process.env.ROTA_EARNINGS_EVENTS_URL ?? "");
+            if (configured.protocol !== "https:" || configured.username || configured.password ||
+                configured.pathname !== "/api/internal/earnings/events" || configured.search || configured.hash)
+                return null;
+            const response = await fetch(new URL("/api/driver/push-delivery", configured.origin), {
+                method: "POST", headers: { "Content-Type": "application/json" }, redirect: "error", cache: "no-store",
+                signal: AbortSignal.timeout(5000), body: JSON.stringify({ bindingId, proof: grant.proof }),
+            });
+            if (!response.ok)
+                return null;
+        }
     }
     catch {
         return null;

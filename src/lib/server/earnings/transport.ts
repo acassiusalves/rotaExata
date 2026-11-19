@@ -135,3 +135,16 @@ export async function readJsonBody(request: Request, limit: number): Promise<unk
     reader.releaseLock();
   }
 }
+
+export async function createSupabaseStaffAuth(id:string,email:string,commandId:string) {
+  const response=await request('/auth/v1/admin/users',earningsServiceHeaders(),{
+    id,email,email_confirm:false,app_metadata:{rota_staff_provisioning:commandId},
+  });
+  if (!response.ok) {
+    const payload=await response.json().catch(()=>null);
+    const code=payload?.error_code ?? payload?.code;
+    if (code==='email_exists' || code==='user_already_exists') throw new EarningsError(409,'staff_email_exists');
+    throw new EarningsError(503,'staff_unavailable');
+  }
+  return response.json();
+}

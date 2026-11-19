@@ -1,3 +1,4 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthToken, hasAllowedRole } from '@/lib/firebase/admin';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
@@ -123,6 +124,7 @@ async function saveApiKeyToFirestore(key: string): Promise<void> {
 
 
 export async function POST(req: NextRequest) {
+  if (nativeStaffEnabled) return NextResponse.json({error:'staff_legacy_endpoint_retired'},{status:410});
   try {
     // Rate limiting (mais restritivo para escrita)
     const clientIP = getClientIP(req);

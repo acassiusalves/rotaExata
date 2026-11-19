@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { earningsScopeId, verifyNativeSession, type ActorAuthority } from '../earnings/actor.ts';
 import { EarningsError, earningsRpc, earningsSupabaseUrl, verifySupabaseUser } from '../earnings/transport.ts';
+import { refreshStaffSource,staffDirectoryError } from './source-auth.ts';
 import { defaultStaffPolicy, staffOperationAllowed, staffPolicySchema, staffRoles, type StaffOperation, type StaffPolicy } from '../../staff/access.ts';
 
 const uuid=z.string().uuid();
@@ -23,6 +24,7 @@ export type StaffAuthority = Pick<ActorAuthority,'issuer'|'scopeId'|'now'|'verif
   sourceProject:string;
   resolve:(identity:{ userId:string; sessionId:string; scopeId:string })=>Promise<unknown>;
   readPolicy:()=>Promise<unknown>;
+  refreshSource?:(input:{userId:string;sessionId:string;scopeId:string})=>Promise<void>;
 };
 
 function defaultAuthority():StaffAuthority {
@@ -33,6 +35,7 @@ function defaultAuthority():StaffAuthority {
     scopeId:earningsScopeId(),
     sourceProject,
     verify:verifySupabaseUser,
+    refreshSource:refreshStaffSource,
     resolve:({userId,sessionId,scopeId})=>earningsRpc('rota_staff_resolve_actor',{
       p_user_id:userId,p_session_id:sessionId,p_scope_id:scopeId,
     }),
@@ -49,12 +52,17 @@ function defaultAuthority():StaffAuthority {
 export async function requireStaffActor(request:Request,operation:StaffOperation,authority?:StaffAuthority):Promise<StaffActor> {
   const auth=authority ?? defaultAuthority();
   const identity=await verifyNativeSession(request,auth);
-  const result=await auth.resolve({userId:identity.userId,sessionId:identity.sessionId,scopeId:auth.scopeId});
+  return resolveStaffActor(identity,operation,auth);
+}
+
+export async function resolveStaffActor(
+  identity:Awaited<ReturnType<typeof verifyNativeSession>>,operation:StaffOperation,auth:StaffAuthority=defaultAuthority(),
+):Promise<StaffActor> {
+  const scope={userId:identity.userId,sessionId:identity.sessionId,scopeId:auth.scopeId};
+  await auth.refreshSource?.(scope);
+  const result=await auth.resolve(scope);
   const code=(result as {errorCode?:unknown}|null)?.errorCode;
-  if (code==='platform_session_revoked') throw new EarningsError(401,'staff_unauthorized');
-  if (code==='platform_directory_unavailable') throw new EarningsError(503,'staff_unavailable');
-  if (code==='platform_password_change_required') throw new EarningsError(403,code);
-  if (code) throw new EarningsError(403,'staff_access_denied');
+  if (code) throw staffDirectoryError(code);
 
   const parsed=identitySchema.safeParse(result);
   if (!parsed.success) {

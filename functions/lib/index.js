@@ -49,6 +49,7 @@ const node_crypto_1 = require("node:crypto");
 const driver_push_1 = require("./driver-push");
 const invite_conflict_1 = require("./invite-conflict");
 const legacy_driver_accounts_1 = require("./legacy-driver-accounts");
+const legacy_staff_cutover_1 = require("./legacy-staff-cutover");
 const sync_user_1 = require("./sync-user");
 const auto_completion_1 = require("./auto-completion");
 const push_outcome_1 = require("./push-outcome");
@@ -84,6 +85,14 @@ async function assertLegacyDriverAccountAllowed(action) {
     const profile = "uid" in action && (0, legacy_driver_accounts_1.isNativeDriverUuid)(action.uid) ? (await db.collection("users").doc(action.uid).get()).data() : undefined;
     if ((0, legacy_driver_accounts_1.blocksLegacyDriverAccountAction)(phase.data(), action, profile)) {
         throw new https_1.HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
+    }
+}
+async function assertLegacyRotaStaffEnabled(req) {
+    if (!req.auth)
+        throw new https_1.HttpsError("unauthenticated", "Sessão operacional ausente");
+    const phase = (await (0, firestore_2.getFirestore)().doc("rotaAuthTransition/staff").get()).data();
+    if (!(0, legacy_staff_cutover_1.legacyRotaStaffAllowed)(phase)) {
+        throw new https_1.HttpsError("failed-precondition", "Abra o RotaExata e entre com sua conta Lunna.");
     }
 }
 async function requireOperationalOperator(req, roles = ADMIN_ROLES) {
@@ -202,6 +211,7 @@ async function generateRouteCode() {
 //   });
 /* ========== inviteUser (callable) ========== */
 exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const email = String(d.email || "").trim().toLowerCase();
     const role = String(d.role || "").trim();
@@ -280,6 +290,7 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
 });
 /* ========== deleteUser (callable) ========== */
 exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     await requireOperationalOperator(req);
@@ -332,6 +343,7 @@ exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
 });
 /* ========== resetUserPassword (callable) ========== */
 exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     if (!uid) {
@@ -388,6 +400,7 @@ exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }
 });
 /* ========== updateDriverProfile (callable) ========== */
 exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     const displayName = String(d.displayName || "").trim();
@@ -449,6 +462,7 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
 });
 /* ========== deleteRoute (callable) ========== */
 exports.deleteRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     if (!routeId) {
@@ -478,6 +492,7 @@ exports.deleteRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, asyn
 });
 /* ========== updateRouteName (callable) ========== */
 exports.updateRouteName = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const name = String(d.name || "").trim();
@@ -500,6 +515,7 @@ exports.updateRouteName = (0, https_1.onCall)({ region: "southamerica-east1" }, 
 });
 /* ========== updateRouteDriver (callable) ========== */
 exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const driverId = String(d.driverId || "").trim();
@@ -546,6 +562,7 @@ exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
 });
 /* ========== duplicateRoute (callable) ========== */
 exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     if (!routeId) {
@@ -599,6 +616,7 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
 });
 /* ========== completeRoute (callable) ========== */
 exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const auth = await requireOperationalOperator(req, ["admin", "socio"]);
@@ -735,6 +753,7 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
 });
 /* ========== sendCustomNotification (callable) ========== */
 exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const title = String(d.title || "").trim();
     const message = String(d.message || "").trim();
@@ -862,6 +881,7 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
 });
 /* ========== forceLogoutDriver (callable) ========== */
 exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     await requireOperationalOperator(req);
@@ -985,6 +1005,7 @@ exports.cleanupOfflineDrivers = functionsV1
 /* ========== forceCleanupOfflineDrivers (callable) ========== */
 // Função callable para limpeza manual de motoristas offline
 exports.forceCleanupOfflineDrivers = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem atualizar o status dos motoristas");
     const db = (0, firestore_2.getFirestore)();
     const now = new Date();
@@ -1020,6 +1041,7 @@ exports.forceCleanupOfflineDrivers = (0, https_1.onCall)({ region: "southamerica
 /* ========== generateDriverImpersonationToken (callable) ========== */
 // Gera um custom token do Firebase para permitir que admins testem a interface do motorista
 exports.generateDriverImpersonationToken = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const driverId = String(d.driverId || "").trim();
     // Verificar autenticação
@@ -1248,6 +1270,7 @@ exports.autoCompleteRoutes = functionsV1
 /* ========== resendRouteToDriver (callable) ========== */
 // Reenvia uma rota auto-finalizada ao motorista original, voltando o status para 'dispatched'
 exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const auth = await requireOperationalOperator(req, ["admin", "socio"]);
@@ -1372,6 +1395,7 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
 // Função para forçar conclusão de um serviço completo (serviço + todas as rotas)
 // Disponível apenas para admins
 exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const authContext = await requireOperationalOperator(req, ["admin", "socio"]);
     const { serviceId } = req.data;
     const db = (0, firestore_2.getFirestore)();

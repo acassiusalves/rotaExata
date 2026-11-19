@@ -58,26 +58,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { db } from '@/lib/firebase/client';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  Timestamp,
-  getDoc,
-  getDocs,
-  doc,
-  updateDoc,
-  arrayUnion,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { auth } from '@/lib/firebase/client';
+import type { Timestamp } from 'firebase/firestore';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { aiPaymentMethods } from '@/lib/staff/reports-contract';
+import { staffRouteDates } from '@/lib/staff/route-dates';
+import { csvCell, reportDayBounds, reportErrorMessage, useReportPagination, useReportPageReset, useStaffReportCommandIds, useStaffReportData } from '@/components/reports/use-staff-report-data';
+import { Pagination } from '@/components/ui/pagination';
 import { useToast } from '@/hooks/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
-import { format, startOfDay, endOfDay, subDays, startOfMonth, endOfMonth } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Dialog,
@@ -93,8 +84,6 @@ import {
   DeliveryReportEditDialog,
   type DeliveryReportEditValues,
 } from '@/components/reports/delivery-report-edit-dialog';
-import { logPointDataUpdated } from '@/lib/firebase/activity-log';
-import { syncLunnaOrderStatus } from '@/lib/lunna-sync';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -135,7 +124,9 @@ type RouteDocument = RouteInfo & {
     vehicle: { type: string; plate: string };
   } | null;
   driverId?: string;
-  plannedDate: Timestamp;
+  plannedDate: Date | Timestamp;
+  revision?: string;
+  sortDate?: string;
 };
 
 type DeliveryReport = {
@@ -145,6 +136,7 @@ type DeliveryReport = {
   driverName: string;
   stopIndex: number;
   stopId: string; // ID único da parada para identificação
+  revision?: string;
   customerName: string;
   address: string;
   street?: string;
@@ -266,10 +258,31 @@ const extractCityFromAddress = (address?: string): string => {
   return '';
 };
 
+function reportDate(value:Date|Timestamp|string|undefined|null) {
+  const date=value instanceof Date ? value : typeof value==='string' ? new Date(value) : value?.toDate?.();
+  return date && Number.isFinite(date.getTime()) ? date:undefined;
+}
+
+function sortReportRoutes(rows:RouteDocument[]) {
+  return [...rows].sort((a,b)=>(b.sortDate ?? '').localeCompare(a.sortDate ?? '') || a.id.localeCompare(b.id));
+}
+
+const deliveryKey=(delivery:DeliveryReport)=>JSON.stringify([delivery.routeId,delivery.stopIndex,delivery.stopId]);
+const stopReference=(delivery:DeliveryReport)=>({index:delivery.stopIndex,id:delivery.stopId || undefined});
+
+function groupSelectedDeliveries(deliveries:DeliveryReport[]) {
+  const groups=new Map<string,{routeId:string;revision:string;stops:ReturnType<typeof stopReference>[]}>();
+  for (const delivery of deliveries) {
+    if (!delivery.revision) throw new Error('Revisão da rota indisponível.');
+    const group=groups.get(delivery.routeId) ?? {routeId:delivery.routeId,revision:delivery.revision,stops:[]};
+    group.stops.push(stopReference(delivery));
+    groups.set(delivery.routeId,group);
+  }
+  return [...groups.values()];
+}
+
 export default function ReportsPage() {
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
-  const [deliveries, setDeliveries] = React.useState<DeliveryReport[]>([]);
-  const [filteredDeliveries, setFilteredDeliveries] = React.useState<DeliveryReport[]>([]);
+  const [legacyRoutes,setRoutes]=React.useState<RouteDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
 
   // Filtros
@@ -344,40 +357,79 @@ export default function ReportsPage() {
 
   const visibleColumnCount = Object.values(columnVisibility).filter(Boolean).length;
 
-  // Estatísticas
-  const stats = React.useMemo(() => {
-    const total = filteredDeliveries.length;
-    const completed = filteredDeliveries.filter(d => d.deliveryStatus === 'completed').length;
-    const failed = filteredDeliveries.filter(d => d.deliveryStatus === 'failed').length;
-    const pending = total - completed - failed;
+  const handleDateRangeChange = (start: Date, end: Date) => {
+    setStartDate(start);
+    setEndDate(end);
+  };
 
-    const completionRate = total > 0 ? (completed / total) * 100 : 0;
+  const staff=useOptionalStaff();
+  const commandId=useStaffReportCommandIds();
+  const bounds=reportDayBounds(startDate,endDate);
+  const reportPath='/api/staff/reports?'+new URLSearchParams({
+    view:'general',clock:dateFilterType,start:bounds.start.toISOString(),end:bounds.end.toISOString(),
+  });
+  const nativeReport=useStaffReportData<RouteDocument,'routes'>(reportPath,'routes');
 
-    const totalRevenue = filteredDeliveries
-      .filter(d => d.deliveryStatus === 'completed' && d.payments)
-      .reduce((sum, d) => {
-        const deliveryTotal = selectedPaymentMethod !== 'all'
-          ? d.payments?.filter(p => p.method === selectedPaymentMethod).reduce((s, p) => s + (p.value || 0), 0) || 0
-          : d.payments?.reduce((s, p) => s + (p.value || 0), 0) || 0;
-        return sum + deliveryTotal;
-      }, 0);
+  React.useEffect(() => {
+    if (nativeStaffEnabled) return;
+    let cancelled=false;
+    let unsubscribe:(()=>void)|undefined;
+    const bounds=reportDayBounds(startDate,endDate);
+    const start=bounds.start.getTime();
+    const end=bounds.end.getTime();
+    setIsLoading(true);
+    void Promise.all([import('@/lib/firebase/client'),import('firebase/firestore')])
+      .then(([{db},{collection,query,where,onSnapshot}])=>{
+        if (cancelled) return;
+        unsubscribe=onSnapshot(query(collection(db,'routes'),where('status','in',['dispatched','in_progress','completed','completed_auto'])),
+          snapshot=>{
+            const rows=snapshot.docs.flatMap(doc=>{
+              const route={...doc.data(),id:doc.id} as RouteDocument;
+              const latest=Math.max(...(route.stops??[]).map(stop=>reportDate(stop.completedAt)?.getTime() ?? 0));
+              const instant=dateFilterType==='planned' ? reportDate(route.plannedDate)?.getTime() : latest;
+              return instant!==undefined && instant>=start && instant<end ? [{...route,sortDate:new Date(instant).toISOString()}]:[];
+            });
+            setRoutes(sortReportRoutes(rows));
+            setIsLoading(false);
+          },error=>{console.error('Error fetching routes:',error);setIsLoading(false);});
+      }).catch(error=>{if (!cancelled) {console.error(error);setIsLoading(false);}});
+    return ()=>{cancelled=true;unsubscribe?.();};
+  }, [startDate,endDate,dateFilterType]);
 
-    return {
-      total,
-      completed,
-      failed,
-      pending,
-      completionRate: completionRate.toFixed(1),
-      totalRevenue,
-    };
-  }, [filteredDeliveries, selectedPaymentMethod]);
+  const routes=React.useMemo(()=>nativeStaffEnabled ?
+    sortReportRoutes(staffRouteDates<RouteDocument[]>(nativeReport.data ?? [])):legacyRoutes,[nativeReport.data,legacyRoutes]);
 
-  // Contador de paradas conciliáveis
-  const reconcilableStops = React.useMemo(() => {
-    return filteredDeliveries.filter(d =>
-      d.deliveryStatus === 'completed' && !d.reconciled
-    ).length;
-  }, [filteredDeliveries]);
+  const derivedDeliveries=React.useMemo(()=>routes.flatMap(route=>{
+      const plannedDate=reportDate(route.plannedDate);
+      if (!plannedDate) return [];
+      return (route.stops??[]).flatMap((stop,index)=>!stop ? [] : [{
+        routeId:route.id,routeCode:route.code,routeName:route.name,
+        driverName:route.driverInfo?.name || 'Sem motorista',
+        stopIndex:index,stopId:stop.id,revision:route.revision,
+        customerName:stop.customerName || 'Cliente não informado',
+        address:stop.address || stop.addressString || '',
+        street:stop.rua || stop.street || extractStreetFromAddress(stop.address),
+        city:stop.cidade || stop.city || extractCityFromAddress(stop.address),
+        orderNumber:typeof stop.orderNumber==='string' ? stop.orderNumber:undefined,
+        deliveryStatus:stop.deliveryStatus==='completed' || stop.deliveryStatus==='failed' ? stop.deliveryStatus:undefined,
+        completedAt:reportDate(stop.completedAt),arrivedAt:reportDate(stop.arrivedAt),
+        failureReason:stop.failureReason,wentToLocation:stop.wentToLocation,attemptPhotoUrl:stop.attemptPhotoUrl,
+        phone:stop.phone,notes:stop.notes,plannedDate,payments:stop.payments,
+        photoUrl:stop.photoUrl,signatureUrl:stop.signatureUrl,
+        reconciled:stop.reconciled || false,reconciledAt:reportDate(stop.reconciledAt),
+        reconciledBy:stop.reconciledBy,reconciledMethod:stop.reconciledMethod,aiExtractedValue:stop.aiExtractedValue,
+        expectedValue:stop.expectedValue,
+      } satisfies DeliveryReport]);
+    }),[routes]);
+  const [localDeliveries,setLocalDeliveries]=React.useState<DeliveryReport[]>([]);
+  const deliveries=nativeStaffEnabled ? derivedDeliveries:localDeliveries;
+  React.useEffect(()=>{
+    if (!nativeStaffEnabled) {
+      setLocalDeliveries(derivedDeliveries);
+      return;
+    }
+    setSelectedDelivery(previous=>previous ? derivedDeliveries.find(row=>deliveryKey(row)===deliveryKey(previous)) ?? null:null);
+  },[derivedDeliveries]);
 
   // Lista de motoristas únicos
   const drivers = React.useMemo(() => {
@@ -385,125 +437,7 @@ export default function ReportsPage() {
     return Array.from(uniqueDrivers).sort();
   }, [deliveries]);
 
-  const handleDateRangeChange = (start: Date, end: Date) => {
-    setStartDate(start);
-    setEndDate(end);
-  };
-
-  React.useEffect(() => {
-    // Buscar todas as rotas (incluindo ativas e concluídas)
-    // O filtro de data será aplicado no lado do cliente
-    const q = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['dispatched', 'in_progress', 'completed', 'completed_auto'])
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const routesData: RouteDocument[] = [];
-        const start = startOfDay(startDate);
-        const end = endOfDay(endDate);
-
-        querySnapshot.forEach((doc) => {
-          const routeData = { id: doc.id, ...doc.data() } as RouteDocument;
-
-          // Filtrar por data baseado no tipo selecionado
-          let dateToCheck: Date | null = null;
-
-          if (dateFilterType === 'planned') {
-            dateToCheck = routeData.plannedDate?.toDate();
-          } else {
-            // Para completedAt, precisamos verificar se pelo menos uma parada foi concluída
-            const completedStops = routeData.stops.filter(s => s.completedAt);
-            if (completedStops.length > 0) {
-              // Usar a última data de conclusão
-              const dates = completedStops.map(s =>
-                s.completedAt instanceof Timestamp ? s.completedAt.toDate() : s.completedAt
-              ).filter(Boolean) as Date[];
-              if (dates.length > 0) {
-                dateToCheck = new Date(Math.max(...dates.map(d => d.getTime())));
-              }
-            }
-          }
-
-          // Incluir apenas se a data estiver dentro do intervalo
-          if (dateToCheck && dateToCheck >= start && dateToCheck <= end) {
-            routesData.push(routeData);
-          }
-        });
-
-        // Ordenar por data (mais recente primeiro)
-        routesData.sort((a, b) => {
-          const dateA = dateFilterType === 'planned'
-            ? a.plannedDate?.toMillis() || 0
-            : Math.max(...(a.stops.filter(s => s.completedAt).map(s =>
-                (s.completedAt instanceof Timestamp ? s.completedAt.toMillis() : new Date(s.completedAt!).getTime())
-              ) || [0]));
-          const dateB = dateFilterType === 'planned'
-            ? b.plannedDate?.toMillis() || 0
-            : Math.max(...(b.stops.filter(s => s.completedAt).map(s =>
-                (s.completedAt instanceof Timestamp ? s.completedAt.toMillis() : new Date(s.completedAt!).getTime())
-              ) || [0]));
-          return dateB - dateA;
-        });
-
-        setRoutes(routesData);
-
-        // Processar entregas
-        const deliveriesData: DeliveryReport[] = [];
-        routesData.forEach((route) => {
-          route.stops.forEach((stop, index) => {
-            deliveriesData.push({
-              routeId: route.id,
-              routeCode: route.code, // Código da rota (ex: LNS-0038-6)
-              routeName: route.name,
-              driverName: route.driverInfo?.name || 'Sem motorista',
-              stopIndex: index,
-              stopId: stop.id, // ID único da parada
-              customerName: stop.customerName || 'Cliente não informado',
-              address: stop.address,
-              street: stop.rua || stop.street || extractStreetFromAddress(stop.address),
-              city: stop.cidade || stop.city || extractCityFromAddress(stop.address),
-              orderNumber: stop.orderNumber,
-              deliveryStatus:
-                stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed'
-                  ? stop.deliveryStatus
-                  : undefined,
-              completedAt: stop.completedAt ? (stop.completedAt instanceof Timestamp ? stop.completedAt.toDate() : stop.completedAt) : undefined,
-              arrivedAt: stop.arrivedAt ? (stop.arrivedAt instanceof Timestamp ? stop.arrivedAt.toDate() : stop.arrivedAt) : undefined,
-              failureReason: stop.failureReason,
-              wentToLocation: stop.wentToLocation,
-              attemptPhotoUrl: stop.attemptPhotoUrl,
-              phone: stop.phone,
-              notes: stop.notes,
-              plannedDate: route.plannedDate.toDate(),
-              payments: stop.payments,
-              photoUrl: stop.photoUrl,
-              signatureUrl: stop.signatureUrl,
-              reconciled: stop.reconciled || false,
-              reconciledAt: stop.reconciledAt ? (stop.reconciledAt instanceof Timestamp ? stop.reconciledAt.toDate() : stop.reconciledAt) : undefined,
-              reconciledBy: stop.reconciledBy,
-              reconciledMethod: stop.reconciledMethod,
-              aiExtractedValue: stop.aiExtractedValue,
-              expectedValue: stop.expectedValue, // Valor esperado do pedido Lunna
-            });
-          });
-        });
-
-        setDeliveries(deliveriesData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching routes:', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [startDate, endDate, dateFilterType]);
-
-  React.useEffect(() => {
+  const filteredDeliveries=React.useMemo(() => {
     let filtered = [...deliveries];
 
     // Filtro por busca
@@ -574,12 +508,54 @@ export default function ReportsPage() {
       });
     }
 
-    setFilteredDeliveries(filtered);
+    return filtered;
   }, [deliveries, searchTerm, selectedDriver, selectedStatus, selectedReconciliation, selectedPaymentMethod, selectedPeriod, selectedRouteStatus, routes]);
 
+  // Estatísticas
+  const stats = React.useMemo(() => {
+    const total = filteredDeliveries.length;
+    const completed = filteredDeliveries.filter(d => d.deliveryStatus === 'completed').length;
+    const failed = filteredDeliveries.filter(d => d.deliveryStatus === 'failed').length;
+    const pending = total - completed - failed;
+
+    const completionRate = total > 0 ? (completed / total) * 100 : 0;
+
+    const totalRevenue = filteredDeliveries
+      .filter(d => d.deliveryStatus === 'completed' && d.payments)
+      .reduce((sum, d) => {
+        const deliveryTotal = selectedPaymentMethod !== 'all'
+          ? d.payments?.filter(p => p.method === selectedPaymentMethod).reduce((s, p) => s + (p.value || 0), 0) || 0
+          : d.payments?.reduce((s, p) => s + (p.value || 0), 0) || 0;
+        return sum + deliveryTotal;
+      }, 0);
+
+    return {
+      total,
+      completed,
+      failed,
+      pending,
+      completionRate: completionRate.toFixed(1),
+      totalRevenue,
+    };
+  }, [filteredDeliveries, selectedPaymentMethod]);
+
+  // Contador de paradas conciliáveis
+  const reconcilableStops = React.useMemo(() => {
+    return filteredDeliveries.filter(d =>
+      d.deliveryStatus === 'completed' && !d.reconciled
+    ).length;
+  }, [filteredDeliveries]);
+
+  const pagination=useReportPagination(filteredDeliveries);
+  const resetFilters=[searchTerm,selectedDriver,selectedStatus,selectedReconciliation,selectedPaymentMethod,
+    selectedPeriod,selectedRouteStatus,startDate,endDate,dateFilterType];
+  useReportPageReset(pagination.setPage,...resetFilters);
+  const filterKey=JSON.stringify(resetFilters);
+  React.useEffect(()=>setSelectedDeliveryIds(new Set()),[filterKey]);
+
   // Funções de seleção para conciliação
-  const handleToggleSelection = (stopId: string) => {
-    const delivery = deliveries.find(d => d.stopId === stopId);
+  const handleToggleSelection = (delivery: DeliveryReport) => {
+    const stopId=deliveryKey(delivery);
 
     // Validar se a parada pode ser conciliada
     if (delivery && delivery.deliveryStatus !== 'completed') {
@@ -603,11 +579,8 @@ export default function ReportsPage() {
   };
 
   const handleToggleSelectAll = () => {
-    if (selectedDeliveryIds.size === filteredDeliveries.length) {
-      setSelectedDeliveryIds(new Set());
-    } else {
-      setSelectedDeliveryIds(new Set(filteredDeliveries.map(d => d.stopId)));
-    }
+    const keys=filteredDeliveries.filter(delivery=>delivery.deliveryStatus==='completed').map(deliveryKey);
+    setSelectedDeliveryIds(keys.every(key=>selectedDeliveryIds.has(key)) ? new Set() : new Set(keys));
   };
 
   const handleReconcileSelected = async () => {
@@ -621,7 +594,7 @@ export default function ReportsPage() {
     }
 
     // Verificar se todas as entregas selecionadas foram concluídas
-    const selectedDeliveries = deliveries.filter(d => selectedDeliveryIds.has(d.stopId));
+    const selectedDeliveries = deliveries.filter(d => selectedDeliveryIds.has(deliveryKey(d)));
     const pendingDeliveries = selectedDeliveries.filter(d => d.deliveryStatus !== 'completed');
 
     if (pendingDeliveries.length > 0) {
@@ -634,8 +607,25 @@ export default function ReportsPage() {
     }
 
     setIsReconciling(true);
+    let confirmed=0;
 
     try {
+      if (nativeStaffEnabled) {
+        if (!staff) throw new Error('Sessão indisponível.');
+        for (const group of groupSelectedDeliveries(selectedDeliveries)) {
+          const command={...group,kind:'reconcile',reconciled:true};
+          const result=await staff.request<{updated:number}>('/api/staff/reports',{
+            method:'PATCH',body:JSON.stringify({...command,commandId:commandId(command)}),
+          });
+          confirmed+=result.updated;
+        }
+        setSelectedDeliveryIds(new Set());
+        toast({title:'Entregas conciliadas',description:`${confirmed} entrega(s) atualizada(s).`});
+        return;
+      }
+      const [{auth,db},{doc,getDocs,query,collection,where,updateDoc,Timestamp}]=await Promise.all([
+        import('@/lib/firebase/client'),import('firebase/firestore'),
+      ]);
       const currentUser = auth.currentUser;
       if (!currentUser) {
         throw new Error('Usuário não autenticado');
@@ -643,8 +633,7 @@ export default function ReportsPage() {
 
       // Agrupar por routeId para otimizar as atualizações
       const deliveriesByRoute = new Map<string, DeliveryReport[]>();
-      selectedDeliveryIds.forEach(stopId => {
-        const delivery = deliveries.find(d => d.stopId === stopId);
+      selectedDeliveries.forEach(delivery => {
         if (delivery) {
           if (!deliveriesByRoute.has(delivery.routeId)) {
             deliveriesByRoute.set(delivery.routeId, []);
@@ -699,22 +688,21 @@ export default function ReportsPage() {
       toast({
         variant: 'destructive',
         title: 'Erro ao conciliar',
-        description: 'Não foi possível conciliar as entregas. Tente novamente.',
+        description: nativeStaffEnabled ? `${confirmed ? `${confirmed} entrega(s) já atualizada(s). `:''}${reportErrorMessage(error)}`:
+          'Não foi possível conciliar as entregas. Tente novamente.',
       });
     } finally {
+      if (nativeStaffEnabled) nativeReport.refresh();
       setIsReconciling(false);
     }
   };
-
-  // Métodos de pagamento elegíveis para conciliação com IA
-  const aiEligiblePaymentMethods = ['cartao_credito', 'cartao_debito', 'pix'];
 
   // Função para conciliação com IA
   const handleAIReconciliation = async () => {
     // Filtrar entregas com pagamentos elegíveis (cartão de crédito, débito ou PIX)
     const eligibleDeliveries = filteredDeliveries.filter(d => {
-      const isSelected = selectedDeliveryIds.has(d.stopId);
-      const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
+      const isSelected = selectedDeliveryIds.has(deliveryKey(d));
+      const hasEligiblePayment = d.payments?.some(p => aiPaymentMethods.includes(p.method));
       const hasPhoto = !!d.photoUrl;
       const notReconciled = !d.reconciled;
       const isCompleted = d.deliveryStatus === 'completed';
@@ -747,7 +735,7 @@ export default function ReportsPage() {
       const items = eligibleDeliveries.map(d => {
         // Para pedidos Lunna, usar expectedValue se disponível
         // Caso contrário, usar o valor do pagamento informado pelo motorista
-        const eligiblePayment = d.payments?.find(p => aiEligiblePaymentMethods.includes(p.method));
+        const eligiblePayment = d.payments?.find(p => aiPaymentMethods.includes(p.method));
         const expectedValue = d.expectedValue !== undefined
           ? d.expectedValue
           : (eligiblePayment?.value || 0);
@@ -762,24 +750,21 @@ export default function ReportsPage() {
 
       setAiProgress(30);
 
-      // Chamar API de conciliação
-      const response = await fetch('/api/reconcile-with-ai', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization:'Bearer '+await auth.currentUser?.getIdToken(),
-        },
-        body: JSON.stringify({ items }),
-      });
-
-      setAiProgress(80);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Erro ao processar conciliação');
+      let data:{results:AIReconciliationResult[];summary:AIReconciliationSummary};
+      if (nativeStaffEnabled) {
+        if (!staff) throw new Error('Sessão indisponível.');
+        const routes=groupSelectedDeliveries(eligibleDeliveries).map(route=>({...route,commandId:commandId(['ai',route])}));
+        data=await staff.request('/api/staff/reports/ai',{method:'POST',body:JSON.stringify({routes})});
+      } else {
+        const {auth}=await import('@/lib/firebase/client');
+        const response=await fetch('/api/reconcile-with-ai',{
+          method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser?.getIdToken()},
+          body:JSON.stringify({items}),
+        });
+        const result=await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Erro ao processar conciliação');
+        data=result;
       }
-
-      const data = await response.json();
 
       setAiProgress(100);
 
@@ -806,9 +791,10 @@ export default function ReportsPage() {
       toast({
         variant: 'destructive',
         title: 'Erro na conciliação',
-        description: error.message || 'Não foi possível processar a conciliação com IA.',
+        description: nativeStaffEnabled ? reportErrorMessage(error):(error.message || 'Não foi possível processar a conciliação com IA.'),
       });
     } finally {
+      if (nativeStaffEnabled) nativeReport.refresh();
       setIsAIReconciling(false);
       setAiProgress(0);
     }
@@ -817,8 +803,8 @@ export default function ReportsPage() {
   // Verificar se há entregas elegíveis para IA selecionadas
   const eligibleForAI = React.useMemo(() => {
     return filteredDeliveries.filter(d => {
-      const isSelected = selectedDeliveryIds.has(d.stopId);
-      const hasEligiblePayment = d.payments?.some(p => aiEligiblePaymentMethods.includes(p.method));
+      const isSelected = selectedDeliveryIds.has(deliveryKey(d));
+      const hasEligiblePayment = d.payments?.some(p => aiPaymentMethods.includes(p.method));
       const hasPhoto = !!d.photoUrl;
       const notReconciled = !d.reconciled;
       const isCompleted = d.deliveryStatus === 'completed';
@@ -830,6 +816,16 @@ export default function ReportsPage() {
     setIsReconciling(true);
 
     try {
+      if (nativeStaffEnabled) {
+        if (!staff) throw new Error('Sessão indisponível.');
+        const command={...groupSelectedDeliveries([delivery])[0],kind:'reconcile',reconciled:!delivery.reconciled};
+        await staff.request('/api/staff/reports',{method:'PATCH',body:JSON.stringify({...command,commandId:commandId(command)})});
+        toast({title:delivery.reconciled ? 'Conciliação removida':'Entrega conciliada'});
+        return;
+      }
+      const [{auth,db},{doc,getDocs,query,collection,where,updateDoc,Timestamp}]=await Promise.all([
+        import('@/lib/firebase/client'),import('firebase/firestore'),
+      ]);
       const currentUser = auth.currentUser;
       if (!currentUser) {
         throw new Error('Usuário não autenticado');
@@ -867,7 +863,7 @@ export default function ReportsPage() {
         });
 
         // Atualizar o estado local
-        setDeliveries(prev => prev.map(d => {
+        setLocalDeliveries(prev => prev.map(d => {
           if (d.stopId === delivery.stopId) {
             if (delivery.reconciled) {
               // Remover conciliação
@@ -916,6 +912,7 @@ export default function ReportsPage() {
         description: 'Não foi possível alterar o status de conciliação. Tente novamente.',
       });
     } finally {
+      if (nativeStaffEnabled) nativeReport.refresh();
       setIsReconciling(false);
     }
   };
@@ -988,12 +985,13 @@ export default function ReportsPage() {
       ];
     });
 
-    const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `relatorio-entregas-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const getStatusBadge = (delivery: DeliveryReport) => {
@@ -1067,6 +1065,25 @@ export default function ReportsPage() {
     setIsSavingDeliveryEdit(true);
 
     try {
+      if (nativeStaffEnabled) {
+        if (!staff) throw new Error('Sessão indisponível.');
+        const {routeId,revision}=groupSelectedDeliveries([editingDelivery])[0];
+        const clean=values.status==='completed' ?
+          {status:values.status,payments:values.payments,adminEditReason:values.adminEditReason} :
+          {status:values.status,failureReason:values.failureReason,adminEditReason:values.adminEditReason};
+        const command={kind:'edit',routeId,revision,stop:stopReference(editingDelivery),values:clean};
+        const result=await staff.request<{orderSyncWarning:boolean}>('/api/staff/reports',{
+          method:'PATCH',body:JSON.stringify({...command,commandId:commandId(command)}),
+        });
+        toast(result.orderSyncWarning ? {variant:'destructive',title:'Entrega salva com aviso',
+          description:'Não foi possível localizar um pedido Lunna com vínculo único à rota.'}:{title:'Entrega atualizada'});
+        setIsEditOpen(false);
+        setEditingDelivery(null);
+        return;
+      }
+      const [{auth,db},{doc,getDoc,updateDoc,Timestamp},{logPointDataUpdated},{syncLunnaOrderStatus}]=await Promise.all([
+        import('@/lib/firebase/client'),import('firebase/firestore'),import('@/lib/firebase/activity-log'),import('@/lib/lunna-sync'),
+      ]);
       const currentUser = auth.currentUser;
       if (!currentUser) {
         throw new Error('Usuário não autenticado');
@@ -1223,14 +1240,21 @@ export default function ReportsPage() {
       toast({
         variant: 'destructive',
         title: 'Erro ao salvar correção',
-        description: error instanceof Error ? error.message : 'Não foi possível atualizar a entrega.',
+        description: nativeStaffEnabled ? reportErrorMessage(error):(error instanceof Error ? error.message : 'Não foi possível atualizar a entrega.'),
       });
     } finally {
+      if (nativeStaffEnabled) nativeReport.refresh();
       setIsSavingDeliveryEdit(false);
     }
   };
 
-  if (isLoading) {
+  if (nativeStaffEnabled && nativeReport.error) {
+    return <div className="space-y-2" role="alert">
+      <p>{reportErrorMessage(nativeReport.error)}</p>
+      <Button variant="outline" onClick={nativeReport.refresh}>Tentar novamente</Button>
+    </div>;
+  }
+  if (nativeStaffEnabled ? nativeReport.loading : isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -1566,7 +1590,7 @@ export default function ReportsPage() {
                   {columnVisibility.select && (
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={filteredDeliveries.length > 0 && selectedDeliveryIds.size === filteredDeliveries.length}
+                        checked={filteredDeliveries.length > 0 && filteredDeliveries.filter(row=>row.deliveryStatus==='completed').every(row=>selectedDeliveryIds.has(deliveryKey(row))) && selectedDeliveryIds.size>0}
                         onCheckedChange={handleToggleSelectAll}
                         aria-label="Selecionar todos"
                       />
@@ -1596,8 +1620,8 @@ export default function ReportsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredDeliveries.map((delivery, index) => (
-                    <TableRow key={index}>
+                  pagination.pageRows.map((delivery) => (
+                    <TableRow key={deliveryKey(delivery)}>
                       {columnVisibility.select && (
                         <TableCell>
                           {delivery.deliveryStatus !== 'completed' ? (
@@ -1618,8 +1642,8 @@ export default function ReportsPage() {
                             </TooltipProvider>
                           ) : (
                             <Checkbox
-                              checked={selectedDeliveryIds.has(delivery.stopId)}
-                              onCheckedChange={() => handleToggleSelection(delivery.stopId)}
+                              checked={selectedDeliveryIds.has(deliveryKey(delivery))}
+                              onCheckedChange={() => handleToggleSelection(delivery)}
                               aria-label={`Selecionar entrega ${delivery.stopIndex + 1}`}
                               disabled={delivery.reconciled}
                             />
@@ -1805,6 +1829,7 @@ export default function ReportsPage() {
               </TableBody>
             </Table>
           </div>
+          <Pagination currentPage={pagination.page} totalPages={pagination.pageCount} itemsPerPage={50} totalItems={filteredDeliveries.length} onPageChange={pagination.setPage} showItemsPerPage={false} />
         </CardContent>
       </Card>
 
@@ -2046,19 +2071,25 @@ export default function ReportsPage() {
                       />
                     </div>
                   )}
+                  {selectedDelivery.attemptPhotoUrl && (
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground mb-2 block">Comprovante de tentativa</label>
+                      <DeliveryPhoto src={selectedDelivery.attemptPhotoUrl} alt="Foto do local da tentativa" className="w-full rounded-lg border" expand />
+                    </div>
+                  )}
                   {selectedDelivery.signatureUrl && (
                     <div>
                       <label className="text-sm font-medium text-muted-foreground mb-2 block">
                         Assinatura
                       </label>
-                      <img
+                      <DeliveryPhoto
                         src={selectedDelivery.signatureUrl}
                         alt="Assinatura"
                         className="w-full rounded-lg border bg-white"
                       />
                     </div>
                   )}
-                  {!selectedDelivery.photoUrl && !selectedDelivery.signatureUrl && (
+                  {!selectedDelivery.photoUrl && !selectedDelivery.signatureUrl && !selectedDelivery.attemptPhotoUrl && (
                     <p className="text-center text-muted-foreground py-8">
                       Nenhum comprovante registrado
                     </p>

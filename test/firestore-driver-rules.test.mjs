@@ -13,7 +13,7 @@ runInThisContext(`(function(require, module, exports) { ${preferencesCode}\n})`)
 const { persistDriverPushToken, disableDriverPushToken } = preferencesModule.exports;
 const emulator = process.env.FIRESTORE_EMULATOR_HOST;
 assert.equal(emulator, '127.0.0.1:8181', 'Regras só podem ser testadas no emulador local dedicado');
-const projectId = 'demo-rotaexata-driver';
+const projectId = 'demo-rotaexata-rules';
 let env;
 before(async () => {
   env = await initializeTestEnvironment({ projectId, firestore: { host: '127.0.0.1', port: 8181, rules: readFileSync('firestore.rules', 'utf8') } });
@@ -161,4 +161,54 @@ test('staff only dispatches a new native UUID after its server-owned projection 
   await assertFails(db('admin').doc('users/'+id).update({nativeDriverDispatchEnabled:true}));
   await assertSucceeds(target.update({driverInfo:{name:'Atualização existente'}}));
   await assertSucceeds(target.update({driverId:'a'})); // UID legado preservado
+});
+
+test('Google Maps server credential is server-only while other settings keep their contract',async()=>{
+  await env.withSecurityRulesDisabled(async context=>{
+    const source=context.firestore();
+    await source.doc('settings/googleMaps').set({apiKey:'synthetic-never-a-real-key'});
+    await source.doc('settings/defaultOrigin').set({active:true});
+  });
+  const publicDb=env.unauthenticatedContext().firestore();
+  await assertSucceeds(publicDb.doc('settings/defaultOrigin').get());
+  await assertSucceeds(db('admin').doc('settings/defaultOrigin').set({active:false}));
+  await assertFails(publicDb.doc('settings/googleMaps').get());
+  await assertFails(db('admin').doc('settings/googleMaps').get());
+  await assertFails(db('admin').doc('settings/googleMaps').update({apiKey:'synthetic-replacement'}));
+});
+
+test('staff provisioning marker and projected role cannot be altered by Firebase clients',async()=>{
+  const admin=db('admin');
+  await assertFails(admin.doc('users/forged-native-staff').set({role:'admin',nativeStaffProvisioningId:'forged'}));
+  await env.withSecurityRulesDisabled(async context=>{
+    await context.firestore().doc('users/native-staff').set({role:'gestor',active:true,nativeStaffProvisioningId:'synthetic'});
+  });
+  await assertSucceeds(admin.doc('users/native-staff').get());
+  await assertFails(admin.doc('users/native-staff').update({role:'admin'}));
+  await assertFails(admin.doc('users/native-staff').delete());
+});
+
+test('autoria nativa do aviso só pode ser atribuída pelo servidor',async()=>{
+  const legacy={driverId:'a',title:'Aviso'};
+  await assertSucceeds(db('a').doc('notifications/legacy').set(legacy));
+  await assertFails(db('a').doc('notifications/spoofed').set({...legacy,staffAuthorId:'operator'}));
+  for (const key of ['staffScopeId','staffAuthorId','staffAuthorName','staffNotificationCommandId','staffPushStatus']) {
+    await assertFails(db('admin').doc('notifications/notice-a').update({[key]:'forged'}));
+  }
+});
+
+test('corte de staff impede escritas Rota exclusivas e preserva a integração Lunna',async()=>{
+  const admin=db('admin');
+  await assertSucceeds(admin.doc('settings/permissions').set({pagePermissions:{}}));
+  await env.withSecurityRulesDisabled(context=>context.firestore().doc('rotaAuthTransition/staff').set({mode:'supabase'}));
+  await assertFails(admin.doc('rotaAuthTransition/staff').update({mode:'firebase'}));
+  await assertFails(admin.doc('settings/permissions').update({pagePermissions:{}}));
+  await assertFails(admin.doc('notifications/notice-a').update({title:'Novo'}));
+  await assertFails(admin.doc('locationUpdateRequests/driver-a').set({driverId:'driver-a'}));
+  await assertSucceeds(admin.doc('settings/defaultOrigin').set({origin:{lat:1,lng:2}}));
+  await assertSucceeds(admin.doc('settings/app').set({pagePermissions:{}}));
+  await assertSucceeds(admin.doc('routes/route-a').update({name:'Lunna'}));
+  await assertSucceeds(admin.doc('services/lunna-direct').set({status:'organizing'}));
+  await assertSucceeds(admin.doc('counters/serviceCode').set({count:1}));
+  await assertSucceeds(admin.doc('orders/lunna-direct').set({number:'SYNTHETIC'}));
 });

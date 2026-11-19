@@ -3,6 +3,7 @@
 
 import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import * as React from 'react';
+import { useRouteEditor, activeRoutes as selectActiveRoutes, eligibleDrivers as selectEligibleDrivers, routeRef as editorRoute, editorTime as serverTimestamp, routesOnDay, editorDate, logLegacyEditorActivity } from '@/components/staff/use-route-editor';
 import {
   Card,
   CardContent,
@@ -98,22 +99,14 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { RouteTimeline } from '@/components/routes/route-timeline';
-import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { db, functions } from '@/lib/firebase/client';
-import { generateRouteCode } from '@/lib/firebase/route-code';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
-import { httpsCallable } from 'firebase/functions';
-import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
-import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered, logPointMovedToRoute, logPointRemovedFromRoute, logPointAddedToRoute, logRouteUpdated, logDriverChanged } from '@/lib/firebase/activity-log';
-import { useAuth } from '@/hooks/use-auth';
 
 
 interface RouteData {
@@ -134,29 +127,6 @@ interface RouteData {
   draftRouteId?: string;
 }
 
-const computeRoute = async (
-  origin: PlaceValue,
-  stops: PlaceValue[]
-): Promise<RouteInfo | null> => {
-  if (stops.length === 0) return null;
-  try {
-    const res = await fetch('/api/compute-optimized-route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ origin, stops }),
-    });
-    if (!res.ok) {
-       const errorText = await res.text();
-       console.error('API Error:', errorText);
-       throw new Error(errorText);
-    }
-    const data = await res.json();
-    return { ...data, stops, visible: true }; // Ensure original stops are returned
-  } catch (error) {
-    console.error('Failed to compute route:', error);
-    return null;
-  }
-};
 
 const formatDistance = (meters: number) => {
   if (meters === 0) return '0.00';
@@ -435,9 +405,9 @@ const EditableRouteName: React.FC<{
 };
 
 export default function OrganizeRoutePage() {
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, requestLocation:requestDriverLocation, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, code:generateRouteCode, user, draftKey, native } = useRouteEditor();
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
 
   // Check if Google Maps is loaded (RouteMap component loads it)
@@ -611,7 +581,7 @@ export default function OrganizeRoutePage() {
 
   React.useEffect(() => {
     // Fetch available drivers from Firestore
-    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
+    const q = selectEligibleDrivers;
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const driversData: Driver[] = [];
       snapshot.forEach(doc => {
@@ -624,7 +594,7 @@ export default function OrganizeRoutePage() {
           phone: data.phone || 'N/A',
           status: data.status || 'offline',
           vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
-          lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
+          lastSeenAt: editorDate(data.lastSeenAt) || new Date(0),
           totalDeliveries: data.totalDeliveries || 0,
           rating: data.rating || 0,
           avatarUrl: data.photoURL,
@@ -644,10 +614,7 @@ export default function OrganizeRoutePage() {
     }
 
     // Buscar rotas que estão em progresso ou despachadas
-    const routesQuery = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['in_progress', 'dispatched'])
-    );
+    const routesQuery = selectActiveRoutes;
 
     const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
       const locationsMap = new Map<string, DriverLocationWithInfo>();
@@ -717,14 +684,8 @@ export default function OrganizeRoutePage() {
     const loadAdditionalRoutes = async () => {
       try {
         const routeDate = new Date(routeData.routeDate);
-        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
-        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
 
-        const q = query(
-          collection(db, 'routes'),
-          where('plannedDate', '>=', dayStart),
-          where('plannedDate', '<=', dayEnd)
-        );
+        const q = routesOnDay(routeDate);
 
         const querySnapshot = await getDocs(q);
         const routes: RouteInfo[] = [];
@@ -802,7 +763,7 @@ export default function OrganizeRoutePage() {
       return;
     }
 
-    const routeRef = doc(db, 'routes', routeData.currentRouteId);
+    const routeRef = editorRoute(routeData.currentRouteId);
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -844,7 +805,8 @@ export default function OrganizeRoutePage() {
   }, [routeData?.isExistingRoute, routeData?.currentRouteId]);
 
   React.useEffect(() => {
-    const storedData = sessionStorage.getItem('newRouteData');
+    const draftId=native ? new URLSearchParams(window.location.search).get('draft'):null;
+    const storedData = draftId ? JSON.stringify({isDraft:true,draftRouteId:draftId}):sessionStorage.getItem(draftKey);
 
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
@@ -855,7 +817,7 @@ export default function OrganizeRoutePage() {
         const loadRouteFromFirestore = async () => {
           setIsLoading(true);
           try {
-            const routeRef = doc(db, 'routes', parsedData.currentRouteId!);
+            const routeRef = editorRoute(parsedData.currentRouteId!);
             const routeSnap = await getDoc(routeRef);
 
             if (routeSnap.exists()) {
@@ -918,7 +880,7 @@ export default function OrganizeRoutePage() {
         const loadDraftFromFirestore = async () => {
           setIsLoading(true);
           try {
-            const draftRef = doc(db, 'routes', parsedData.draftRouteId!);
+            const draftRef = editorRoute(parsedData.draftRouteId!);
             const draftSnap = await getDoc(draftRef);
 
             if (!draftSnap.exists()) {
@@ -1168,7 +1130,7 @@ export default function OrganizeRoutePage() {
     const routeId = routeData?.draftRouteId || routeData?.currentRouteId;
     if (!routeId) return;
 
-    const routeRef = doc(db, 'routes', routeId);
+    const routeRef = editorRoute(routeId);
 
     const unsubscribe = onSnapshot(routeRef, (snapshot) => {
       if (!snapshot.exists()) return;
@@ -1675,7 +1637,7 @@ export default function OrganizeRoutePage() {
           // If this is an existing route, update Firestore so driver app receives the update
           if (routeData.isExistingRoute && routeData.currentRouteId) {
             try {
-              const routeRef = doc(db, 'routes', routeData.currentRouteId);
+              const routeRef = editorRoute(routeData.currentRouteId);
               await updateDoc(routeRef, {
                 stops: newStops,
                 encodedPolyline: newRouteInfo.encodedPolyline,
@@ -1811,7 +1773,7 @@ export default function OrganizeRoutePage() {
         // Se for uma rota existente, persistir no Firestore
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newTargetStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -1822,7 +1784,7 @@ export default function OrganizeRoutePage() {
 
             // Registrar no activity log
             if (user && targetRoute) {
-              logPointAddedToRoute({
+              logLegacyEditorActivity("logPointAddedToRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: stopToMove.id || stopToMove.placeId,
@@ -1953,7 +1915,7 @@ export default function OrganizeRoutePage() {
           previousRouteId: sourceRoute.currentRouteId,
           previousRouteCode: sourceRoute.code,
           movedFromPointCode: stopToMove.pointCode,
-          movedAt: Timestamp.now(),
+          movedAt: new Date(),
           movedBy: user?.uid,
           movedByName: user?.email || 'Usuário',
         };
@@ -2102,7 +2064,7 @@ export default function OrganizeRoutePage() {
       }
 
       // Atualizar documento do rascunho no Firestore
-      const draftRef = doc(db, 'routes', routeData.draftRouteId);
+      const draftRef = editorRoute(routeData.draftRouteId);
       await updateDoc(draftRef, {
         organizedRoutes,
         routeNames,
@@ -2117,7 +2079,7 @@ export default function OrganizeRoutePage() {
 
   // useEffect para persistir automaticamente quando as rotas mudam (com debounce)
   React.useEffect(() => {
-    if (!routeData?.isDraft || !routeData?.draftRouteId || isLoading) {
+    if (!routeData?.isDraft || !routeData?.draftRouteId || isLoading || Object.values(isSaving).some(Boolean)) {
       return;
     }
 
@@ -2127,7 +2089,7 @@ export default function OrganizeRoutePage() {
     }, 2000);
 
     return () => clearTimeout(timeoutId);
-  }, [routeA, routeB, dynamicRoutes, routeNames, persistOrganizedRoutes, routeData, isLoading]);
+  }, [routeA, routeB, dynamicRoutes, routeNames, persistOrganizedRoutes, routeData, isLoading, isSaving]);
 
   const handleOptimizeSingleRoute = async (routeKey: 'A' | 'B') => {
     const routeToOptimize = routeKey === 'A' ? routeA : routeB;
@@ -2234,11 +2196,12 @@ export default function OrganizeRoutePage() {
 
     try {
         const driver = availableDrivers.find(d => d.id === driverId);
+        if (native && routeData.draftRouteId) await persistOrganizedRoutes();
         const routeCode = await generateRouteCode();
         const isDraft = routeData.isDraft && routeData.draftRouteId;
 
         // Gerar códigos sequenciais para os pontos
-        const stopsWithCodes = routeToSave.stops.map((stop, index) => ({
+        const stopsWithCodes = native ? routeToSave.stops : routeToSave.stops.map((stop, index) => ({
             ...stop,
             pointCode: `${routeCode}-${String(index + 1).padStart(3, '0')}`
         }));
@@ -2260,11 +2223,11 @@ export default function OrganizeRoutePage() {
             driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
         };
 
-        const docRef = await addDoc(collection(db, "routes"), routeDoc);
+        const docRef = await createEditorRoute(routeDoc, isDraft && native ? {draftId:routeData.draftRouteId!,key:routeKey}:undefined);
 
         // Registrar no activity log
         if (user) {
-            await logRouteDispatched({
+            await logLegacyEditorActivity("logRouteDispatched", {
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 routeId: docRef.id,
@@ -2279,7 +2242,7 @@ export default function OrganizeRoutePage() {
             // Registrar criação dos pontos
             const pointCodes = stopsWithCodes.map(s => s.pointCode).filter((c): c is string => !!c);
             if (pointCodes.length > 0) {
-                await logPointsCreated({
+                await logLegacyEditorActivity("logPointsCreated", {
                     userId: user.uid,
                     userName: user.email || 'Usuário',
                     routeId: docRef.id,
@@ -2299,9 +2262,9 @@ export default function OrganizeRoutePage() {
 
         // Se era um draft, marcar a rota como despachada no array
         // Só deletar o draft quando TODAS as rotas forem despachadas
-        if (isDraft) {
+        if (isDraft && !native) {
             try {
-                const draftRef = doc(db, 'routes', routeData.draftRouteId!);
+                const draftRef = editorRoute(routeData.draftRouteId!);
                 const draftSnap = await getDoc(draftRef);
 
                 if (draftSnap.exists()) {
@@ -2320,7 +2283,7 @@ export default function OrganizeRoutePage() {
                         // Todas as rotas despachadas - deletar o rascunho
                         await deleteDoc(draftRef);
                         console.log('✅ [handleDispatchRoute] Todas rotas despachadas - Draft deletado:', routeData.draftRouteId);
-                        sessionStorage.removeItem('newRouteData');
+                        sessionStorage.removeItem(draftKey);
                     } else {
                         // Ainda tem rotas pendentes - apenas atualizar o array
                         await updateDoc(draftRef, {
@@ -2382,7 +2345,7 @@ export default function OrganizeRoutePage() {
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
-        const routeRef = doc(db, 'routes', currentRouteId);
+        const routeRef = editorRoute(currentRouteId);
 
         // Buscar a rota atual do Firestore para comparar
         const currentRouteDoc = await getDoc(routeRef);
@@ -2435,7 +2398,7 @@ export default function OrganizeRoutePage() {
                     const oldStop = oldStops.find((s: PlaceValue) => String(s.id ?? s.placeId) === change.stopId);
 
                     if (stop && oldStop) {
-                        await logPointReordered({
+                        await logLegacyEditorActivity("logPointReordered", {
                             userId: user.uid,
                             userName: user.email || 'Usuário',
                             pointId: stop.id || stop.placeId,
@@ -2459,7 +2422,7 @@ export default function OrganizeRoutePage() {
             const oldDriverId = currentRouteData.driverId;
             const oldDriverName = currentRouteData.driverInfo?.name;
             if (oldDriverId !== driverId) {
-                logDriverChanged({
+                logLegacyEditorActivity("logDriverChanged",{
                     userId: user.uid,
                     userName: user.email || 'Usuário',
                     routeId: currentRouteId,
@@ -2477,7 +2440,7 @@ export default function OrganizeRoutePage() {
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
           try {
-            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+            const notifyFn = callEditor.bind(null, 'notifyRouteChanges');
             await notifyFn({
               routeId: currentRouteId,
               driverId: currentRouteData.driverId,
@@ -2552,7 +2515,7 @@ export default function OrganizeRoutePage() {
     // Helper para registrar remoção no activity log
     const logRemoval = () => {
       if (user && removedStop && routeData.isExistingRoute && routeData.currentRouteId) {
-        logPointRemovedFromRoute({
+        logLegacyEditorActivity("logPointRemovedFromRoute",{
           userId: user.uid,
           userName: user.email || 'Usuário',
           pointId: removedStop.id || removedStop.placeId,
@@ -2580,7 +2543,7 @@ export default function OrganizeRoutePage() {
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
-          const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          const routeRef = editorRoute(routeData.currentRouteId);
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -2609,7 +2572,7 @@ export default function OrganizeRoutePage() {
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2773,7 +2736,7 @@ export default function OrganizeRoutePage() {
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
-          const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          const routeRef = editorRoute(routeData.currentRouteId);
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -2783,7 +2746,7 @@ export default function OrganizeRoutePage() {
 
           // Registrar no activity log
           if (user) {
-            logPointRemovedFromRoute({
+            logLegacyEditorActivity("logPointRemovedFromRoute",{
               userId: user.uid,
               userName: user.email || 'Usuário',
               pointId: stop.id || stop.placeId,
@@ -2812,7 +2775,7 @@ export default function OrganizeRoutePage() {
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2822,7 +2785,7 @@ export default function OrganizeRoutePage() {
 
             // Registrar no activity log
             if (user) {
-              logPointRemovedFromRoute({
+              logLegacyEditorActivity("logPointRemovedFromRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: stop.id || stop.placeId,
@@ -2920,7 +2883,7 @@ export default function OrganizeRoutePage() {
     // If this is an existing route, save changes to Firestore
     if (routeData.isExistingRoute && routeData.currentRouteId && newRouteInfo) {
       try {
-        const routeRef = doc(db, 'routes', routeData.currentRouteId);
+        const routeRef = editorRoute(routeData.currentRouteId);
         await updateDoc(routeRef, {
           stops: cleanedStops,
           encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2935,7 +2898,7 @@ export default function OrganizeRoutePage() {
             const fromRoute = fromRouteKey === 'A' ? routeA : routeB;
 
             if (fromRoute && movedStop.previousRouteCode) {
-              await logPointMovedToRoute({
+              await logLegacyEditorActivity("logPointMovedToRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: movedStop.id || movedStop.placeId,
@@ -2987,7 +2950,7 @@ export default function OrganizeRoutePage() {
             title: 'Todas as rotas foram despachadas!',
             description: 'Redirecionando para a página de rotas.',
         });
-        sessionStorage.removeItem('newRouteData');
+        sessionStorage.removeItem(draftKey);
         setTimeout(() => router.push('/routes'), 1500);
     }
   }, [isLoading, routeA, routeB, router, toast]);
@@ -3051,12 +3014,7 @@ export default function OrganizeRoutePage() {
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
       // Criar documento de solicitação de atualização
-      const requestRef = doc(db, 'locationUpdateRequests', driverId);
-      await setDoc(requestRef, {
-        driverId,
-        requestedAt: serverTimestamp(),
-        status: 'pending',
-      });
+      await requestDriverLocation(driverId);
 
       toast({
         title: 'Atualização solicitada',

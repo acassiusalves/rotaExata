@@ -1,3 +1,5 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { resolveStaffActor } from '@/lib/server/staff/actor';
 import { z } from 'zod';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { earningsScopeId,verifyNativeSession } from '@/lib/server/earnings/actor';
@@ -33,6 +35,7 @@ export async function serveDriverAccounts(request:Request) {
   try {
     assertDriverPhase();
     const actor=await verifyNativeSession(request);
+    if (nativeStaffEnabled) await resolveStaffActor(actor,'drivers:accounts');
     const command=request.method==='POST' ? driverAccountCommand.safeParse(await readJsonBody(request,4096)) : null;
     if (command && !command.success) throw new EarningsError(422,'driver_account_invalid_command');
     const body=command?.data;

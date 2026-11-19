@@ -437,7 +437,7 @@ export default function MonitoringPage() {
                       Assinatura
                     </h3>
                     <div className="rounded-lg overflow-hidden border bg-white">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.signatureUrl}
                         alt="Assinatura"
                         className="w-full h-auto"

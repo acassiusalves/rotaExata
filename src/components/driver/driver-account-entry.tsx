@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { earningsBrowserClient } from '@/lib/earnings/client';
 import { EarningsShell,earningsMessage,useEarnings } from '@/components/earnings/earnings-shell';
 import { nativeDriverEnabled,accountReturnPath } from '@/lib/driver/mode';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { staffReturnPath } from '@/lib/staff/access';
 import { DriverPasswordForm } from './driver-password-form';
 
 type EntryState='loading'|'request'|'invalid'|'verified'|'recovery'|'done';
@@ -38,7 +40,7 @@ async function readCallback(tryFirstAccess:boolean):Promise<EntryState> {
 const recoveryReturn='rotaexata-password-return';
 const firstAccessIntent='rotaexata-first-access';
 
-function RecoveredAccount({firstAccess,onUpdated}:{firstAccess:boolean;onUpdated:()=>void}) {
+function RecoveredAccount({firstAccess,onUpdated,staff}:{firstAccess:boolean;onUpdated:()=>void;staff:boolean}) {
   const {request,signOut}=useEarnings();
   const [onboarding,setOnboarding]=useState<{state:string;passwordSet:boolean}|null|undefined>(undefined);
   const [error,setError]=useState('');
@@ -46,14 +48,14 @@ function RecoveredAccount({firstAccess,onUpdated}:{firstAccess:boolean;onUpdated
   const load=useCallback(async (signal?:AbortSignal)=>{
     setError('');
     try {
-      const result=nativeDriverEnabled
+      const result=nativeDriverEnabled && !staff
         ? await request<{onboarding:{state:string;passwordSet:boolean}|null}>('/api/driver/onboarding',{signal})
         : {onboarding:null};
       if (!signal?.aborted) setOnboarding(result.onboarding);
     } catch (error) {
       if (!signal?.aborted) setError(earningsMessage(error));
     }
-  },[request]);
+  },[request,staff]);
   useEffect(()=>{
     const abort=new AbortController();
     void load(abort.signal);
@@ -102,7 +104,10 @@ export function DriverAccountEntry({next,firstAccess=false}:{next:string;firstAc
   const callback=useRef<Promise<EntryState> | null>(null);
   useEffect(()=>{
     let current=true;
-    const first=firstAccess || (nativeDriverEnabled && window.localStorage.getItem(firstAccessIntent)==='1');
+    const recoverCode=new URLSearchParams(window.location.search).has('code');
+    const returnTo=recoverCode ? window.localStorage.getItem(recoveryReturn) ?? next:next;
+    const forStaff=nativeStaffEnabled && !!staffReturnPath(returnTo);
+    const first=!forStaff && (firstAccess || (nativeDriverEnabled && window.localStorage.getItem(firstAccessIntent)==='1'));
     callback.current ??=readCallback(first).catch(()=> 'invalid');
     void callback.current.then(result=>{
       if (!current) return;
@@ -130,7 +135,7 @@ export function DriverAccountEntry({next,firstAccess=false}:{next:string;firstAc
     finally {setBusy(false);}
   }
 
-  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><RecoveredAccount firstAccess={setup}
+  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><RecoveredAccount firstAccess={setup} staff={nativeStaffEnabled && !!staffReturnPath(destination)}
     onUpdated={()=>{window.localStorage.removeItem(recoveryReturn);window.localStorage.removeItem(firstAccessIntent);setState('done');}} />
   </main></EarningsShell>;
   return <main className="mx-auto max-w-sm space-y-4 p-6">

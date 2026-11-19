@@ -88,7 +88,12 @@ export function earningsScopeId() {
 
 export async function requireEarningsActor(request: Request, action: EarningsAction, authority?: ActorAuthority): Promise<EarningsActor> {
   const identity=await verifyNativeSession(request,authority);
-  const auth=authority ?? defaultAuthority();
+  return resolveEarningsActor(identity,action,authority);
+}
+
+export async function resolveEarningsActor(
+  identity:Awaited<ReturnType<typeof verifyNativeSession>>,action:EarningsAction,auth:ActorAuthority=defaultAuthority(),
+):Promise<EarningsActor> {
   const application = action === 'statement' || action === 'route:operate' ? 'driver' : 'lunna';
   const result = await auth.resolve({
     userId: identity.userId, sessionId: identity.sessionId, scopeId: auth.scopeId, application, action,

@@ -1,5 +1,5 @@
 import type { PlaceValue } from '@/lib/types';
-import { getStopIdentityKey } from '@/lib/route-stop-utils';
+import { getStopIdentityKey } from './route-stop-utils.ts';
 
 export type PlannedRouteStop = PlaceValue & {
   /** Identidade da parada antes de uma edição. Nunca deve ser persistida. */
