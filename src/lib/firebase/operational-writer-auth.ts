@@ -5,6 +5,7 @@ type WriterProfile = { role?: string; active?: boolean; disabled?: boolean; must
 type Authority = {
   verify: (token: string) => Promise<WriterIdentity>;
   readProfile: (uid: string) => Promise<WriterProfile | undefined>;
+  isRetired?: (uid:string)=>Promise<boolean>;
 };
 
 async function firebaseAuthority(): Promise<Authority> {
@@ -16,6 +17,10 @@ async function firebaseAuthority(): Promise<Authority> {
       return {uid:identity.uid,provider:identity.firebase.sign_in_provider};
     },
     readProfile: async uid => (await adminDb.collection('users').doc(uid).get()).data(),
+    isRetired: async uid => {
+      const transition=(await adminDb.doc('rotaAuthTransition/driver').get()).data();
+      return transition?.mode==='supabase' && (!Array.isArray(transition.driverUids) || transition.driverUids.includes(uid));
+    },
   };
 }
 
@@ -34,5 +39,6 @@ export async function authorizeOperationalWriter(request: Request,authority?: Au
       profile.active===false || profile.disabled===true || profile.mustChangePassword) {
     throw new EarningsError(403,'route_access_denied');
   }
+  if (await auth.isRetired?.(identity.uid)) throw new EarningsError(403,'route_access_denied');
   return identity.uid;
 }

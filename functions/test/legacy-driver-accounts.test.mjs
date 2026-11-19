@@ -23,6 +23,8 @@ test('os quatro callables compilados recusam a ação após autenticação e ant
   let effects=0;
   const effect=()=>{effects++;throw new Error('unexpected side effect');};
   let authorizedRole='admin';
+  let identity='synthetic-operator';
+  const rawRequest={get:()=> 'Bearer synthetic'};
   class HttpsError extends Error { constructor(code,message) {super(message);this.code=code;} }
   const db={
     doc(path) {assert.equal(path,'rotaAuthTransition/driver');return {get:async()=>({data:()=>phase})};},
@@ -41,6 +43,7 @@ test('os quatro callables compilados recusam a ação após autenticação e ant
     'firebase-functions/v1':{region:()=>chained},
     'firebase-admin/app':{initializeApp() {}},
     'firebase-admin/auth':{getAuth:()=>({
+      verifyIdToken:async(_token,check)=>{assert.equal(check,true);return {uid:identity,firebase:{sign_in_provider:'password'}};},
       getUserByEmail:effect,createUser:effect,updateUser:effect,deleteUser:effect,revokeRefreshTokens:effect,
     })},
     'firebase-admin/firestore':{getFirestore:()=>db},
@@ -53,11 +56,50 @@ test('os quatro callables compilados recusam a ação após autenticação e ant
 
   for (const name of ['inviteUser','deleteUser','resetUserPassword','forceLogoutDriver']) {
     const data=name==='inviteUser' ? {email:'synthetic@example.test',role:'driver'}:{uid:'synthetic-driver'};
-    await assert.rejects(exports[name]({auth:{uid:'synthetic-operator'},data}),
+    await assert.rejects(exports[name]({auth:{uid:'synthetic-operator'},data,rawRequest}),
       {code:'failed-precondition',message:/painel nativo/});
   }
   authorizedRole='driver';
-  await assert.rejects(exports.forceLogoutDriver({auth:{uid:'synthetic-driver'},data:{uid:'synthetic-driver'}}),
+  identity='synthetic-driver';
+  await assert.rejects(exports.forceLogoutDriver({auth:{uid:'synthetic-driver'},data:{uid:'synthetic-driver'},rawRequest}),
     {code:'permission-denied'});
+  authorizedRole='admin';
+  await assert.rejects(exports.deleteUser({auth:{uid:identity},data:{uid:'synthetic-other'},rawRequest}),
+    {code:'failed-precondition'});
   assert.equal(effects,0);
+});
+
+test('escritores operacionais passam pela verificação de credencial e perfil antes da primeira escrita',async()=>{
+  const requireCompiled=createRequire(new URL('../lib/index.js',import.meta.url));
+  const exports={};
+  class HttpsError extends Error { constructor(code,message) {super(message);this.code=code;} }
+  let profile={role:'admin',active:false};
+  let door=0;
+  let uid='synthetic-operator';
+  const register=(_options,handler)=>handler;
+  const chain={auth:{user:()=>({onCreate:handler=>handler})},pubsub:{schedule:()=>({onRun:handler=>handler})}};
+  const modules={
+    'firebase-functions/v2/https':{onCall:register,HttpsError},'firebase-functions/v2/firestore':{onDocumentWritten:register},
+    'firebase-functions/v2/scheduler':{onSchedule:register},'firebase-functions/params':{defineString:()=>({})},
+    'firebase-functions/v1':{region:()=>chain},'firebase-admin/app':{initializeApp() {}},
+    'firebase-admin/auth':{getAuth:()=>({verifyIdToken:async(_t,revoked)=>{assert.equal(revoked,true);return {uid,firebase:{sign_in_provider:'password'}};}})},
+    'firebase-admin/firestore':{getFirestore:()=>({
+      doc:()=>({get:async()=>({data:()=>({mode:'supabase',driverUids:['synthetic-cohort']})})}),
+      collection:name=>{if(name!=='users'){door++;throw new Error('arrival at operational store');}
+        return {doc:()=>({get:async()=>({data:()=>profile})})};},
+    })},
+  };
+  runInNewContext(readFileSync(new URL('../lib/index.js',import.meta.url),'utf8'),{exports,
+    require:name=>modules[name] ?? (name==='./legacy-driver-accounts' || name.startsWith('node:')?requireCompiled(name):{})});
+  const data={routeId:'r',name:'R',driverId:'d',changes:[{changeType:'sequence'}]};
+  const request=(actor=uid)=>({auth:{uid:actor},data,rawRequest:{get:()=> 'Bearer synthetic'}});
+  for(const name of ['deleteRoute','updateRouteName','updateRouteDriver','duplicateRoute','notifyRouteChanges','completeRoute','resendRouteToDriver','sendCustomNotification','forceCompleteService']){
+    await assert.rejects(exports[name](request()),{code:'permission-denied'});
+  }
+  profile={role:'admin',active:true}; uid='synthetic-cohort';
+  await assert.rejects(exports.deleteRoute(request()),{code:'failed-precondition'});
+  assert.equal(door,0);
+  uid='synthetic-operator';
+  await assert.rejects(exports.deleteRoute(request()),/arrival at operational store/);
+  assert.equal(door,1);
 });

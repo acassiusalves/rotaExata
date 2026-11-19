@@ -43,7 +43,7 @@ export async function serveDriverAccounts(request:Request) {
 
 export async function serveDriverPassword(request:Request) {
   try {
-    assertDriverPhase();
+    if (!nativeDriverEnabled && process.env.NEXT_PUBLIC_ROTA_EARNINGS_ENABLED!=='true') throw new EarningsError(404,'route_not_found');
     const actor=await verifyNativeSession(request);
     const command=passwordCommand.safeParse(await readJsonBody(request,1024));
     if (!command.success) throw new EarningsError(422,'driver_password_weak');

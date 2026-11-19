@@ -1,5 +1,7 @@
 'use client';
 
+import {locationRequestDelivery} from '@/lib/driver/location-request';
+
 import { useEffect, useRef, useState } from 'react';
 import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
@@ -54,7 +56,7 @@ export function useGeolocationTracking({
   };
 
   const publishLocation = async (position: GeolocationPosition, requestRevision?: string) => {
-    if (!enabled) return;
+    if (!enabled) return false;
     const now = Date.now();
     const { latitude, longitude, accuracy, heading, speed } = position.coords;
 
@@ -74,7 +76,7 @@ export function useGeolocationTracking({
     }
 
     try {
-      await driverCommand(request,endpoint,{kind:'location',routeId,requestRevision,location:{
+      const ack=await driverCommand<{acknowledgedRevision?:string}>(request,endpoint,{kind:'location',routeId,requestRevision,location:{
         lat:latitude,lng:longitude,accuracy,heading:heading ?? null,speed:speed ?? null,
       }});
 
@@ -83,17 +85,19 @@ export function useGeolocationTracking({
       lastSuccessfulUpdateRef.current = now;
       retryCountRef.current = 0;
       setTrackingHealth('healthy');
+      return !requestRevision || ack.acknowledgedRevision===requestRevision;
     } catch (err) {
       console.error('❌ Erro ao atualizar localização:', err);
       setTrackingHealth('warning');
 
       // Retry após falha de conexão
-      if (retryCountRef.current < 3) {
+      if (!requestRevision && retryCountRef.current < 3) {
         retryCountRef.current++;
         retryTimeoutRef.current = setTimeout(() => {
-          publishLocation(position);
+          publishLocation(position,requestRevision);
         }, 5000);
       }
+      return false;
     }
   };
 
@@ -233,40 +237,24 @@ export function useGeolocationTracking({
   };
 
   // Função para forçar atualização imediata da localização
-  const forceLocationUpdate = (requestRevision?:string) => {
+  const forceLocationUpdate = (requestRevision:string)=>new Promise<boolean>(resolve=>{
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation(position);
-        setError(null);
-        // Força atualização ignorando filtros de distância e tempo
-        const now = Date.now();
-        lastUpdateRef.current = 0; // Reset para forçar atualização
-        void publishLocation(position,requestRevision);
+      position=>{
+        setLocation(position);setError(null);
+        void publishLocation(position,requestRevision).then(value=>resolve(value===true),()=>resolve(false));
       },
-      (err) => {
-        console.error('❌ Erro ao obter localização forçada:', err);
-        setError(err);
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000,
-      }
+      err=>{setError(err);resolve(false);},
+      {enableHighAccuracy:true,maximumAge:0,timeout:15000},
     );
-  };
+  });
 
   useEffect(()=>{
     if (!isTracking || !enabled) return;
     let current=true;
-    let since:string|null=null;
-    const refresh=async ()=>{
-      try {
-        const response=await request<{revision:string|null}>(driverQuery(endpoint,'location-request'));
-        if (current && response.revision && response.revision!==since) {
-          since=response.revision;forceLocationUpdate(response.revision);
-        }
-      } catch { /* The next poll honors a pending request after reconnection. */ }
-    };
+    const refresh=locationRequestDelivery(
+      async()=> (await request<{revision:string|null}>(driverQuery(endpoint,'location-request'))).revision,
+      forceLocationUpdate,()=>current,
+    );
     void refresh();
     const timer=setInterval(refresh,8000);
     return()=>{current=false;clearInterval(timer);};

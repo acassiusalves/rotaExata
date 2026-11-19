@@ -70,9 +70,9 @@ Foram preservados no staging privado os 374 pagamentos do snapshot de `2026-11-1
 
 A candidata do PWA utiliza `NEXT_PUBLIC_ROTA_DRIVER_AUTH=supabase` para selecionar o login de motoristas. A operação financeira continua com os próprios controles de ativação. Todos os endpoints do runtime do motorista verificam a fase. A aplicação precisa do projeto e do bucket Firebase de origem na configuração Admin SDK, das credenciais Supabase de servidor e do escopo financeiro correspondente. O login depende também do e-mail verificado no Auth e do vínculo de identidade do diretório. Confira o fechamento do cadastro público e permita o callback `https://rota-exata.vercel.app/driver/conta` no projeto de Auth.
 
-A migração adicional da Luna `20261118232957_rota_driver_account_controls.sql` define o painel e o fluxo de troca de senha do motorista. SHA-256 revisável `e57729fcf772d4ae21cac8c86871ee5205cb01b77e256d4692340d9c72b27caa`. A versão deve acompanhar o identificador registrado pelo provedor na aplicação. O painel vive em `/driver/admin/accounts`. O acesso operacional legado do administrador continua disponível em `/login?admin=1`.
+A migração adicional da Luna `20261118232957_rota_driver_account_controls.sql` define o painel e o fluxo de troca de senha. O SHA-256 revisado é `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. A versão deve acompanhar o identificador registrado pelo provedor na aplicação. O painel vive em `/driver/admin/accounts`. O acesso operacional legado do administrador continua disponível em `/login?admin=1`.
 
-Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. Publique `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver` com a proteção de fase antes da virada. As funções recusam convites legados para motorista e comandos legados sobre a coorte quando o modo nativo entra em vigor. O retorno para o modo legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Aplique as Rules privadas do Storage na mesma janela de corte.
+Componha as Rules sobre a release ativa antes de promover a aplicação. O documento privado `rotaAuthTransition/driver` recebe `mode: 'supabase'` e `driverUids` da coorte reconciliada na janela de corte. O cliente nativo usa o Admin SDK e os aplicativos Firebase de operadores preservam suas permissões. Publique `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver` com a proteção de fase antes da virada. As funções recusam convites legados para motorista e comandos legados sobre a coorte quando o modo nativo entra em vigor. Antes de qualquer alteração nativa de senha, bloqueio ou sessão, o retorno legado exige promover o build correspondente e restaurar `mode: 'firebase'` na mesma janela. Após uma alteração de segurança no destino, mantenha o Firebase da coorte fechado, suspenda o acesso afetado e corrija o destino. Reconcilie previamente credenciais, estado de bloqueio e revogação entre os dois provedores para autorizar um eventual retorno. Preserve a trilha de auditoria e a operação financeira pausada durante a reconciliação. Aplique as Rules privadas do Storage na mesma janela de corte.
 
 Antes de abrir captura, emissão, comandos e extrato, valide as três funções de ponte, a identidade de execução e a aceitação persistente pelo destino. Os pagamentos legados aguardam promoção auditada. A gestão de aparelhos e o push instalado dependem de homologação no dispositivo alvo.
 
@@ -87,4 +87,19 @@ Gere a release pelo comando abaixo. A saída padrão contém o caminho do arquiv
 node --experimental-strip-types scripts/render-storage-cutover.ts "$STORAGE_BASELINE" "$STORAGE_DRIVER_MANIFEST"
 ```
 
-A release rejeita a leitura e a escrita por tokens Firebase da coorte em `delivery-photos`. O acesso de clientes fora da coorte segue as condições de autenticação, tipo da imagem e tamanho da release ativa. Os comprovantes novos são gravados pela API do motorista via Admin SDK. A restauração da release original reabre o SDK da coorte na janela de rollback.
+A release rejeita a leitura e a escrita por tokens Firebase da coorte em `delivery-photos`. O acesso de clientes fora da coorte segue as condições de autenticação, tipo da imagem e tamanho da release ativa. Os comprovantes novos são gravados pela API do motorista via Admin SDK. A restauração da release original reabre o SDK da coorte somente após a autorização e a reconciliação de segurança previstas para o rollback.
+
+
+## Fechamento da fronteira nativa
+
+A coorte reconciliada inclui 30 perfis. Os 15 motoristas estão ativos na origem. Nove têm e-mail verificado e seis passam pela confirmação antes do primeiro acesso. As 25 contas novas preservam dez confirmações e 15 e-mails pendentes. Os cinco reusos pertencem a três administradores e dois gestores ativos e verificados nos dois sistemas. O SMTP próprio está configurado. Valide o callback permitido e o cadastro público fechado antes de ativar. Envie confirmação ou recuperação pelo fluxo optativo da conta quando o usuário iniciar o pedido.
+
+O FCM nativo envia somente identificadores transitórios de entrega. O emissor consulta o destino com a prova privada do dispositivo e o worker revalida a entrega antes de exibir ou abrir o aviso. O destino deriva da origem de `ROTA_EARNINGS_EVENTS_URL` e usa `/api/driver/push-delivery`. O worker antigo em `/sw.js` recebe uma resposta de aposentadoria na fase nativa. A limpeza é limitada aos caches históricos próprios do Rota.
+
+As fotos novas permanecem privadas no Storage. A API `/api/driver/media/[id]` lê o objeto após autorizar a sessão e a parada do titular atual ou o operador ativo. Links de mídia históricos seguem sua autorização original.
+
+Publique os seguintes alvos Firebase antes da abertura da fase nativa.
+
+- Contas legadas com proteção de fase usam `inviteUser`, `deleteUser`, `resetUserPassword` e `forceLogoutDriver`.
+- As operações administrativas usam `updateDriverProfile`, `deleteRoute`, `updateRouteName`, `updateRouteDriver`, `duplicateRoute`, `completeRoute`, `notifyRouteChanges`, `sendCustomNotification`, `resendRouteToDriver` e `forceCompleteService`.
+- Os agendamentos e lógicas de ponte usam `autoCompleteRoutes`, `captureRotaEarnings`, `retryRotaEarnings` e `reconcileRotaEarnings`.

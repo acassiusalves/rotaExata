@@ -1,9 +1,12 @@
-import { createHash,randomUUID } from 'node:crypto';
+import { createHash,randomBytes,randomUUID } from 'node:crypto';
+import { factsHash } from '../../../../functions/src/earnings-source-adapter';
+import { protectedPhotoPath } from '@/lib/driver/photo-policy';
+import { deliveryValidation } from '@/lib/driver/stop-policy';
 import { FieldPath,FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { z } from 'zod';
 import { adminApp,adminDb } from '@/lib/firebase/admin';
-import { driverMediaObject,driverOwnsRoute,driverTimestamp,serializeDriverRoute } from '@/lib/driver/runtime-contract';
+import { activeDriverStop,driverMediaObject,driverOwnsRoute,driverTimestamp,serializeDriverRoute } from '@/lib/driver/runtime-contract';
 import { getRouteChangeNotificationFingerprint } from '@/lib/route-change-fingerprint';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import type { PlaceValue,RouteChangeNotification } from '@/lib/types';
@@ -74,10 +77,7 @@ async function readRoutes(db:FirebaseFirestore.Firestore,actor:DriverAuthority,a
     const body=snap.data();
     if (!driverOwnsRoute(body,actor.sourceUid)) routeUnknown();
     const [notice,settings]=await db.getAll(db.collection('routeChangeNotifications').doc(args.id),db.doc('settings/general'));
-    const general=settings.data();
-    const distance=general?.maxDeliveryDistance;
-    const deliveryValidation={enabled:general?.deliveryDistanceValidation===true,
-      maxDistance:typeof distance==='number' && Number.isFinite(distance) && distance>0 ? distance:0.5};
+    const validation=deliveryValidation(settings.data());
     const data=notice.data() as RouteChangeNotification | undefined;
     const pending=data?.driverId===actor.sourceUid && !data.acknowledged ? {
       notification: { id:notice.id,routeId:args.id,driverId:actor.userId,acknowledged:false,createdAt:driverTimestamp(data.createdAt),
@@ -90,13 +90,13 @@ async function readRoutes(db:FirebaseFirestore.Firestore,actor:DriverAuthority,a
       },
       fingerprint:getRouteChangeNotificationFingerprint(data),
     }:null;
-    return privateJson({route:serializeDriverRoute(snap.id,body!),notice:pending,deliveryValidation});
+    return privateJson({route:serializeDriverRoute(snap.id,body!,factsHash),notice:pending,deliveryValidation:validation});
   }
   const statuses=args.view==='history'?['completed','completed_auto']:['dispatched','in_progress'];
   let query=routes.where('driverId','==',actor.sourceUid).where('status','in',statuses).orderBy(FieldPath.documentId()).limit(51);
   if (args.after) query=query.startAfter(args.after);
   const result=await query.get();
-  return privateJson({routes:result.docs.slice(0,50).map(doc=>serializeDriverRoute(doc.id,doc.data())),
+  return privateJson({routes:result.docs.slice(0,50).map(doc=>serializeDriverRoute(doc.id,doc.data(),factsHash)),
     nextCursor:result.size>50 ? result.docs[49].id:null});
 }
 
@@ -137,19 +137,17 @@ async function upload(db:FirebaseFirestore.Firestore,uid:string,input:Extract<z.
   if (!adminApp || !bucketName || (process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_STORAGE_EMULATOR_HOST!=='127.0.0.1:9198'))
     throw new EarningsError(503,'route_media_unavailable');
   const route=(await db.collection('routes').doc(input.routeId).get()).data();
-  if (!driverOwnsRoute(route,uid)) routeUnknown();
+  if (!driverOwnsRoute(route,uid) || route?.status!=='in_progress') routeUnknown();
   const key=getStopIdentityKey(input.targetStop);
-  if (!key || !(route!.stops as PlaceValue[] | undefined)?.some(stop=>getStopIdentityKey(stop)===key)) routeUnknown();
+  if (!key || !(route!.stops as PlaceValue[] | undefined)?.some(stop=>activeDriverStop(stop) && getStopIdentityKey(stop)===key)) routeUnknown();
   const {bytes,contentType}=bindRouteMediaType(input.data);
   const id=randomUUID();
   const object=driverMediaObject(input.routeId,key,input.mediaKind,id);
   const file=getStorage(adminApp).bucket(bucketName).file(object);
-  const downloadToken=randomUUID();
-  await file.save(bytes,{resumable:false,metadata:{contentType,cacheControl:'private,max-age=0',metadata:{firebaseStorageDownloadTokens:downloadToken}}});
-  const endpoint=process.env.FIRESTORE_EMULATOR_HOST ? 'http://127.0.0.1:9198' : 'https://firebasestorage.googleapis.com';
-  const url=endpoint+'/v0/b/'+encodeURIComponent(bucketName)+'/o/'+encodeURIComponent(object)+'?alt=media&token='+downloadToken;
+  await file.save(bytes,{resumable:false,metadata:{contentType,cacheControl:'private,no-store'}});
+  const url=protectedPhotoPath(id);
   try {
-    await db.collection('driverDeliveryMedia').doc(id).create({uid,routeId:input.routeId,stopKey:key,kind:input.mediaKind,url,at:FieldValue.serverTimestamp()});
+    await db.collection('driverDeliveryMedia').doc(id).create({uid,routeId:input.routeId,stopKey:key,kind:input.mediaKind,url,contentType,at:FieldValue.serverTimestamp()});
   } catch (error) {
     await file.delete({ignoreNotFound:true}).catch(()=>{});
     throw error;
@@ -178,16 +176,20 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
     return privateJson({ok:true});
   }
   if (data.kind==='location') {
-    await db.runTransaction(async tx=>{
+    const acknowledgedRevision=await db.runTransaction(async tx=>{
       const route=db.collection('routes').doc(data.routeId);
       const snap=await tx.get(route);
       if (!driverOwnsRoute(snap.data(),uid) || snap.data()?.status!=='in_progress') routeUnknown();
       const ref=db.collection('locationUpdateRequests').doc(uid);
       const pending=data.requestRevision ? await tx.get(ref):null;
       tx.update(route,{currentLocation:{...data.location,timestamp:FieldValue.serverTimestamp()},lastUpdated:FieldValue.serverTimestamp()});
-      if (pending?.updateTime && data.requestRevision===pending.updateTime.seconds+'.'+pending.updateTime.nanoseconds) tx.delete(ref);
+      if (pending?.updateTime && data.requestRevision===pending.updateTime.seconds+'.'+pending.updateTime.nanoseconds) {
+        tx.delete(ref);
+        return data.requestRevision;
+      }
+      return null;
     });
-    return privateJson({ok:true});
+    return privateJson({ok:true,acknowledgedRevision});
   }
   if (data.kind==='inbox-open') {
     const ref=db.collection('notifications').doc(data.id);
@@ -198,7 +200,7 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
     });
     return privateJson({ok:true});
   }
-  await db.runTransaction(async tx=>{
+  const grant=await db.runTransaction(async tx=>{
     const [settings,profile]=await tx.getAll(prefs,user);
     const body=settings.data() ?? {};
     const revision=Number.isSafeInteger(body.pushRevision) ? body.pushRevision:0;
@@ -206,6 +208,16 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
       throw new EarningsError(409,body.notifications===false?'push-disabled':'preference-changed');
     }
     const previousToken=text(profile.data()?.fcmToken);
+    const sessionBindings=db.collection('driverPushSessions');
+    const currentId=text(profile.data()?.fcmSessionBindingId);
+    const currentRef=currentId ? sessionBindings.doc(currentId):null;
+    const currentSession=currentRef ? (await tx.get(currentRef)).data():null;
+    const reused=data.kind==='push-bind' && actor.native && currentSession?.sessionId===actor.sessionId &&
+      currentSession?.token===data.token && typeof currentSession?.proof==='string';
+    const nextGrant=data.kind==='push-bind' && actor.native ? {
+      id:reused ? currentId! : randomUUID(),proof:reused ? currentSession!.proof as string : randomBytes(32).toString('hex'),
+      userId:actor.userId,sessionId:actor.sessionId!,
+    }:null;
     const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
     const bindings=db.collection('driverPushTokenBindings');
     const binding=data.kind==='push-bind' ? bindings.doc(hash(data.token)):null;
@@ -216,14 +228,22 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
     const oldOwner=old && old.path!==binding?.path ? (await tx.get(old)).data():null;
     if (data.kind==='push-detach' && data.token!==previousToken) return;
     if (priorRef && data.kind==='push-bind' && prior?.fcmToken===data.token) {
-      tx.update(priorRef,{fcmToken:FieldValue.delete(),fcmTokenUpdatedAt:FieldValue.serverTimestamp()});
+      tx.update(priorRef,{fcmToken:FieldValue.delete(),fcmSessionBindingId:FieldValue.delete(),fcmTokenUpdatedAt:FieldValue.serverTimestamp()});
+      if (typeof prior.fcmSessionBindingId==='string') tx.delete(sessionBindings.doc(prior.fcmSessionBindingId));
     }
     if (old && oldOwner?.uid===uid) tx.delete(old);
     if (binding) tx.set(binding,{uid,timestamp:FieldValue.serverTimestamp()});
-    tx.update(user,{fcmToken:data.kind==='push-bind'?data.token:FieldValue.delete(),fcmTokenUpdatedAt:FieldValue.serverTimestamp()});
+    if (currentRef && !reused) tx.delete(currentRef);
+    if (nextGrant && !reused && data.kind==='push-bind') {
+      tx.create(sessionBindings.doc(nextGrant.id),{proof:nextGrant.proof,token:data.token,sourceUid:uid,
+        userId:nextGrant.userId,sessionId:nextGrant.sessionId,createdAt:FieldValue.serverTimestamp()});
+    }
+    tx.update(user,{fcmToken:data.kind==='push-bind'?data.token:FieldValue.delete(),
+      fcmSessionBindingId:nextGrant?.id ?? FieldValue.delete(),fcmTokenUpdatedAt:FieldValue.serverTimestamp()});
     if (data.kind!=='push-detach') tx.set(prefs,{notifications:data.kind==='push-bind',pushRevision:revision+(data.kind==='push-disable'||data.explicit?1:0)},{merge:true});
+    return nextGrant;
   });
-  return privateJson({ok:true});
+  return privateJson({ok:true,grant:grant ?? null});
 }
 
 export async function serveDriverRuntime(request:Request,phase:'native'|'legacy') {

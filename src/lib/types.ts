@@ -20,6 +20,7 @@ export type Payment = {
 
 
 export type PlaceValue = {
+  driverRevision?: string;
   id: string;
   address: string;
   placeId: string;

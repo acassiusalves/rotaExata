@@ -3,6 +3,7 @@
 import { useState,useEffect,useCallback,useRef,useMemo } from 'react';
 import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import {clearDevicePushGrant,persistDevicePushGrant,verifiedDevicePush,type DriverDeviceGrant} from '@/lib/driver/push-device';
 import type { DriverSettings } from '@/lib/driver/runtime-contract';
 import { useToast } from '@/hooks/use-toast';
 import { createPushRegistrar, type PushRegistrationResult } from '@/lib/push-registration';
@@ -12,7 +13,7 @@ const permission = (): NotificationPermission => typeof Notification === 'undefi
 const EVENT = 'rotaexata:push-registration';
 
 export function useFCMToken(userId: string | null, receiveForeground = true) {
-  const {request,endpoint,readOnly}=useDriverRuntime();
+  const {request,endpoint,readOnly,native}=useDriverRuntime();
   const currentUid=useRef(userId);
   currentUid.current=userId;
   const registrar=useMemo(()=>createPushRegistrar({
@@ -27,15 +28,17 @@ export function useFCMToken(userId: string | null, receiveForeground = true) {
     },
     getToken:()=>requestPushPermission(process.env.NEXT_PUBLIC_VAPID_KEY || ''),
     saveToken:async (uid,token,meta)=>{
-      await driverCommand(request,endpoint,{kind:'push-bind',token,...meta});
+      const result=await driverCommand<{grant:DriverDeviceGrant|null}>(request,endpoint,{kind:'push-bind',token,...meta});
+      if (native && (!result.grant || !await persistDevicePushGrant(result.grant))) throw new Error('push_session_changed');
       rememberDriverPushToken(uid,token);
     },
     disableToken:async uid=>{
       await driverCommand(request,endpoint,{kind:'push-disable'});
+      if (native) await clearDevicePushGrant(undefined,false);
       takeDriverPushToken(uid);
       await releaseDriverPushTransport().catch(()=>{});
     },
-  }),[request,endpoint,readOnly]);
+  }),[request,endpoint,readOnly,native]);
   const [result, setResult] = useState<PushRegistrationResult>({ state: 'needs_permission', permission: 'default' });
   const [isRegistering, setIsRegistering] = useState(false);
   const { toast } = useToast();
@@ -74,21 +77,23 @@ export function useFCMToken(userId: string | null, receiveForeground = true) {
     let unsubscribe: (() => void) | undefined;
     void onForegroundNotification(async payload => {
       if (!alive || currentUid.current !== userId) return;
-      const title = payload.data?.title || payload.notification?.title || 'Nova Notificação';
-      const body = payload.data?.body || payload.notification?.body || 'Você tem uma nova mensagem';
+      if (native && (!payload.data || !await verifiedDevicePush(payload.data))) return;
+      if (!alive || currentUid.current!==userId) return;
+      const title = native ? 'RotaExata' : payload.data?.title || payload.notification?.title || 'Nova Notificação';
+      const body = native ? 'Você tem uma atualização. Abra o RotaExata para consultar.' : payload.data?.body || payload.notification?.body || 'Você tem uma nova mensagem';
       toast({ title, description: body, duration: 5000 });
       window.dispatchEvent(new Event('rotaexata:driver-notification'));
       if (permission() === 'granted') {
         try {
           const registration = await navigator.serviceWorker.getRegistration('/firebase-cloud-messaging-push-scope');
           if (alive && currentUid.current === userId) {
-            await registration?.showNotification(title, { body, icon: '/icons/pwa-192.png', tag: payload.data?.routeId || 'notification', data: payload.data });
+            await registration?.showNotification(title, { body, icon: '/icons/pwa-192.png', tag:native ? 'rota-bound:'+payload.data?.deliveryId : payload.data?.routeId || 'notification', data: payload.data });
           }
         } catch { console.warn('Não foi possível mostrar o aviso de sistema. O aviso continua disponível no app.'); }
       }
     }).then(cleanup => { if (alive) unsubscribe = cleanup; else cleanup(); });
     return () => { alive = false; unsubscribe?.(); };
-  },[userId,toast,receiveForeground,readOnly]);
+  },[userId,toast,receiveForeground,readOnly,native]);
 
   return {
     notificationPermission: result.permission,

@@ -46,6 +46,7 @@ const auth_1 = require("firebase-admin/auth");
 const firestore_2 = require("firebase-admin/firestore");
 const messaging_1 = require("firebase-admin/messaging");
 const node_crypto_1 = require("node:crypto");
+const driver_push_1 = require("./driver-push");
 const invite_conflict_1 = require("./invite-conflict");
 const legacy_driver_accounts_1 = require("./legacy-driver-accounts");
 const sync_user_1 = require("./sync-user");
@@ -82,6 +83,21 @@ async function assertLegacyDriverAccountAllowed(action) {
     if ((0, legacy_driver_accounts_1.blocksLegacyDriverAccountAction)(phase.data(), action)) {
         throw new https_1.HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
     }
+}
+async function requireOperationalOperator(req, roles = ADMIN_ROLES) {
+    const token = req.rawRequest?.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+    if (!req.auth || !token || token.length > 16384)
+        throw new https_1.HttpsError("unauthenticated", "Sessão operacional ausente");
+    const verified = await (0, auth_1.getAuth)().verifyIdToken(token, true).catch(() => null);
+    if (!verified || verified.uid !== req.auth.uid || verified.firebase.sign_in_provider === "custom") {
+        throw new https_1.HttpsError("permission-denied", "Sessão operacional inválida");
+    }
+    const profile = (await (0, firestore_2.getFirestore)().collection("users").doc(verified.uid).get()).data();
+    if (!profile || !roles.includes(profile.role) || profile.active === false || profile.disabled === true || profile.mustChangePassword === true) {
+        throw new https_1.HttpsError("permission-denied", "Apenas operadores ativos podem alterar a operação");
+    }
+    await assertLegacyDriverAccountAllowed({ uid: verified.uid });
+    return { uid: verified.uid, profile };
 }
 function generateTemporaryPassword() {
     return `${(0, node_crypto_1.randomBytes)(18).toString("base64url")}Aa1!`;
@@ -193,7 +209,7 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
         throw new https_1.HttpsError("invalid-argument", "email e role são obrigatórios");
     }
     try {
-        await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem convidar usuários");
+        await requireOperationalOperator(req);
         await assertLegacyDriverAccountAllowed({ role });
         const auth = (0, auth_1.getAuth)();
         const db = (0, firestore_2.getFirestore)();
@@ -264,7 +280,7 @@ exports.inviteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async
 exports.deleteUser = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
-    await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem remover usuários");
+    await requireOperationalOperator(req);
     if (!uid) {
         throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
@@ -319,8 +335,9 @@ exports.resetUserPassword = (0, https_1.onCall)({ region: "southamerica-east1" }
     if (!uid) {
         throw new https_1.HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
-    const requesterRole = await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem resetar senhas");
-    const requesterUid = req.auth?.uid || "";
+    const operator = await requireOperationalOperator(req);
+    const requesterRole = operator.profile.role;
+    const requesterUid = operator.uid;
     try {
         await assertLegacyDriverAccountAllowed({ uid });
         const auth = (0, auth_1.getAuth)();
@@ -375,7 +392,7 @@ exports.updateDriverProfile = (0, https_1.onCall)({ region: "southamerica-east1"
     const phone = String(d.phone || "").trim();
     const vehicleType = String(d.vehicle?.type || "").trim();
     const vehiclePlate = String(d.vehicle?.plate || "").trim().toUpperCase();
-    await assertAuthorizedRole(req.auth?.uid, "Apenas administradores, sócios e gestores podem editar motoristas");
+    await requireOperationalOperator(req);
     if (!uid || !displayName) {
         throw new https_1.HttpsError("invalid-argument", "uid e displayName são obrigatórios");
     }
@@ -437,6 +454,7 @@ exports.deleteRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, asyn
     if (!routeId) {
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
+    await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
         // Buscar a rota para verificar se pertence a um serviço
@@ -469,6 +487,7 @@ exports.updateRouteName = (0, https_1.onCall)({ region: "southamerica-east1" }, 
     if (!name) {
         throw new https_1.HttpsError("invalid-argument", "Nome da rota é obrigatório");
     }
+    await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
         await db.collection("routes").doc(routeId).update({ name });
@@ -491,6 +510,7 @@ exports.updateRouteDriver = (0, https_1.onCall)({ region: "southamerica-east1" }
     if (!driverId) {
         throw new https_1.HttpsError("invalid-argument", "ID do motorista é obrigatório");
     }
+    await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
         const routeRef = db.collection("routes").doc(routeId);
@@ -524,6 +544,7 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
     if (!routeId) {
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
+    await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
         const routeDoc = await db.collection("routes").doc(routeId).get();
@@ -564,29 +585,9 @@ exports.duplicateRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, a
 exports.completeRoute = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
-    // Verificar permissão do usuário
-    const auth = req.auth;
-    if (!auth) {
-        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    const auth = await requireOperationalOperator(req, ["admin", "socio"]);
     try {
-        const token = req.rawRequest.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
-        if (!token)
-            throw new https_1.HttpsError("unauthenticated", "Sessão ausente");
-        const verified = await (0, auth_1.getAuth)().verifyIdToken(token, true);
-        if (verified.uid !== auth.uid || verified.firebase.sign_in_provider === "custom") {
-            throw new https_1.HttpsError("permission-denied", "Sessão operacional inválida");
-        }
         const db = (0, firestore_2.getFirestore)();
-        // Buscar role do usuário
-        const userDoc = await db.collection("users").doc(auth.uid).get();
-        const userData = userDoc.data();
-        const userRole = userData?.role || "";
-        // Verificar se o usuário tem permissão (admin ou socio)
-        if ((userRole !== "admin" && userRole !== "socio") || userData?.active === false ||
-            userData?.disabled === true || userData?.mustChangePassword) {
-            throw new https_1.HttpsError("permission-denied", "Apenas administradores e sócios podem marcar rotas como concluídas");
-        }
         if (!routeId) {
             throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
         }
@@ -630,6 +631,7 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
     if (!Array.isArray(changes) || changes.length === 0) {
         throw new https_1.HttpsError("invalid-argument", "changes deve ser um array não vazio");
     }
+    const operator = await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
         // Criar ou atualizar a notificação
@@ -644,7 +646,7 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
         await db.collection("routes").doc(routeId).update({
             pendingChanges: true,
             lastModifiedAt: firestore_2.FieldValue.serverTimestamp(),
-            lastModifiedBy: req.auth?.uid || "admin",
+            lastModifiedBy: operator.uid,
         });
         // Buscar FCM token do motorista
         const driverDoc = await db.collection("users").doc(driverId).get();
@@ -702,7 +704,8 @@ exports.notifyRouteChanges = (0, https_1.onCall)({ region: "southamerica-east1" 
                     },
                 },
             };
-            push = await (0, push_outcome_1.sendPushWithOutcome)(true, () => messaging.send(message));
+            const deliverable = await (0, driver_push_1.driverPushMessage)(db, driverId, driverData, message);
+            push = await (0, push_outcome_1.sendPushWithOutcome)(!!deliverable, () => messaging.send(deliverable));
             console.log("Resultado do push de alteração de rota", { routeId, driverId, ...push });
         }
         await (0, push_outcome_1.persistPushOutcome)(() => db.collection("routeChangeNotifications").doc(routeId)
@@ -722,20 +725,9 @@ exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-eas
     const driverIds = Array.isArray(d.driverIds) ? d.driverIds : [];
     const priority = String(d.priority || "medium").trim();
     const type = String(d.type || "system").trim();
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    await requireOperationalOperator(req);
     try {
         const db = (0, firestore_2.getFirestore)();
-        // Verificar permissão (admin, socio ou gestor)
-        const userDoc = await db.collection("users").doc(auth.uid).get();
-        const userData = userDoc.data();
-        const userRole = userData?.role || "";
-        if (!["admin", "socio", "gestor"].includes(userRole)) {
-            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem enviar notificações customizadas");
-        }
         if (!title || !message) {
             throw new https_1.HttpsError("invalid-argument", "Título e mensagem são obrigatórios");
         }
@@ -790,7 +782,12 @@ exports.sendCustomNotification = (0, https_1.onCall)({ region: "southamerica-eas
                         },
                     },
                 };
-                await messaging.send(pushMessage);
+                const deliverable = await (0, driver_push_1.driverPushMessage)(db, driverId, driverData, pushMessage);
+                if (!deliverable) {
+                    failureCount++;
+                    continue;
+                }
+                await messaging.send(deliverable);
                 successCount++;
                 console.log(`✅ Push notification enviada para motorista ${driverId}`);
             }
@@ -851,24 +848,13 @@ exports.authUserMirror = functionsV1.region("southamerica-east1")
 exports.forceLogoutDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
-    // Verificar autenticação
-    const authContext = req.auth;
-    if (!authContext) {
-        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    await requireOperationalOperator(req);
     if (!uid) {
         throw new https_1.HttpsError("invalid-argument", "UID do motorista é obrigatório");
     }
     try {
         const auth = (0, auth_1.getAuth)();
         const db = (0, firestore_2.getFirestore)();
-        // Verificar permissão (admin, socio ou gestor)
-        const userDoc = await db.collection("users").doc(authContext.uid).get();
-        const userData = userDoc.data();
-        const userRole = userData?.role || "";
-        if (!["admin", "socio", "gestor"].includes(userRole)) {
-            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem forçar logout de motoristas");
-        }
         await assertLegacyDriverAccountAllowed({ uid });
         // Revogar todos os tokens de refresh do usuário
         await auth.revokeRefreshTokens(uid);
@@ -1224,7 +1210,9 @@ exports.autoCompleteRoutes = functionsV1
                         },
                     },
                 };
-                await messaging.send(message);
+                const deliverable = await (0, driver_push_1.driverPushMessage)(db, driverId, driverDoc.data(), message);
+                if (deliverable)
+                    await messaging.send(deliverable);
                 console.log(`✅ Notificação de auto-finalização enviada ao motorista ${driverId}`);
             }
             catch (notifError) {
@@ -1243,23 +1231,12 @@ exports.autoCompleteRoutes = functionsV1
 exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-    if (!routeId) {
+    const auth = await requireOperationalOperator(req, ["admin", "socio"]);
+    const userData = auth.profile;
+    if (!routeId)
         throw new https_1.HttpsError("invalid-argument", "ID da rota é obrigatório");
-    }
     try {
         const db = (0, firestore_2.getFirestore)();
-        // Verificar role do usuário (admin ou socio)
-        const userDoc = await db.collection("users").doc(auth.uid).get();
-        const userData = userDoc.data();
-        const userRole = userData?.role || "";
-        if (userRole !== "admin" && userRole !== "socio") {
-            throw new https_1.HttpsError("permission-denied", "Apenas administradores e sócios podem reenviar rotas");
-        }
         // Buscar a rota
         const routeDoc = await db.collection("routes").doc(routeId).get();
         if (!routeDoc.exists) {
@@ -1354,7 +1331,9 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
                         },
                     },
                 };
-                await messaging.send(message);
+                const deliverable = await (0, driver_push_1.driverPushMessage)(db, driverId, driverDoc.data(), message);
+                if (deliverable)
+                    await messaging.send(deliverable);
                 console.log(`✅ Notificação de reenvio enviada ao motorista ${driverId}`);
             }
         }
@@ -1374,20 +1353,11 @@ exports.resendRouteToDriver = (0, https_1.onCall)({ region: "southamerica-east1"
 // Função para forçar conclusão de um serviço completo (serviço + todas as rotas)
 // Disponível apenas para admins
 exports.forceCompleteService = (0, https_1.onCall)({ region: "southamerica-east1" }, async (req) => {
-    const authContext = req.auth;
+    const authContext = await requireOperationalOperator(req, ["admin", "socio"]);
     const { serviceId } = req.data;
-    if (!authContext) {
-        throw new https_1.HttpsError("unauthenticated", "Usuário não autenticado");
-    }
     const db = (0, firestore_2.getFirestore)();
+    const userData = authContext.profile;
     try {
-        // Verificar se o usuário é admin ou socio
-        const userDoc = await db.collection("users").doc(authContext.uid).get();
-        const userData = userDoc.data();
-        const userRole = userData?.role;
-        if (!["admin", "socio"].includes(userRole)) {
-            throw new https_1.HttpsError("permission-denied", "Apenas administradores podem forçar conclusão de serviços");
-        }
         if (!serviceId || typeof serviceId !== "string") {
             throw new https_1.HttpsError("invalid-argument", "serviceId deve ser fornecido");
         }

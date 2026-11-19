@@ -52,7 +52,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId) || isAppAdmin();
       allow update: if isAppAdmin() || (isOwner(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','active','disabled','permissions','forceLogoutAt']));
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','active','disabled','permissions','forceLogoutAt','fcmSessionBindingId']));
       allow create, delete: if isAppAdmin();
       // Permitir list para usuários autenticados (vendedores precisam ver lista de vendedores para criar pedidos)
       allow list: if isAuthed();

@@ -10,3 +10,15 @@ export function driverReturnPath(value: unknown) {
   }
   return '/my-routes';
 }
+
+export function accountReturnPath(value:unknown) {
+  if (typeof value==='string' && value.startsWith('/') && !value.startsWith('//') && !/[\\\r\n]/.test(value)) {
+    const url=new URL(value,'https://rota-exata.invalid');
+    if (url.origin==='https://rota-exata.invalid') {
+      if (url.pathname==='/driver/conta' || url.pathname.startsWith('/driver/conta/')) return '/my-routes';
+      if (/^\/financeiro(?:\/|$)/.test(url.pathname)) return url.pathname+url.search+url.hash;
+      return driverReturnPath(url.pathname+url.search+url.hash);
+    }
+  }
+  return '/my-routes';
+}

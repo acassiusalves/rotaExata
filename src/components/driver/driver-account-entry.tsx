@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { earningsBrowserClient } from '@/lib/earnings/client';
 import { EarningsShell } from '@/components/earnings/earnings-shell';
+import { accountReturnPath } from '@/lib/driver/mode';
 import { DriverPasswordForm } from './driver-password-form';
 
 type EntryState='loading'|'request'|'invalid'|'verified'|'recovery'|'done';
@@ -31,17 +32,24 @@ async function readCallback():Promise<EntryState> {
   return error || !data.session ? 'invalid':'recovery';
 }
 
-export function DriverAccountEntry() {
+const recoveryReturn='rotaexata-password-return';
+
+export function DriverAccountEntry({next}:{next:string}) {
   const [state,setState]=useState<EntryState>('loading');
   const [notice,setNotice]=useState('');
   const [busy,setBusy]=useState(false);
+  const [destination,setDestination]=useState(next);
   const callback=useRef<Promise<EntryState> | null>(null);
   useEffect(()=>{
     let current=true;
     callback.current ??=readCallback().catch(()=> 'invalid');
-    void callback.current.then(next=>{if (current) setState(next);});
+    void callback.current.then(state=>{
+      if (!current) return;
+      if (state==='recovery') setDestination(accountReturnPath(window.localStorage.getItem(recoveryReturn) ?? next));
+      setState(state);
+    });
     return ()=>{current=false;};
-  },[]);
+  },[next]);
 
   async function submit(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,6 +58,7 @@ export function DriverAccountEntry() {
     try {
       const client=earningsBrowserClient();
       if (!client) throw new Error('authentication unavailable');
+      window.localStorage.setItem(recoveryReturn,destination);
       const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+'/driver/conta'});
       if (error) throw error;
       setNotice('Se houver uma conta para esse e-mail, abra o link recebido neste mesmo navegador.');
@@ -57,7 +66,7 @@ export function DriverAccountEntry() {
     finally {setBusy(false);}
   }
 
-  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><DriverPasswordForm onUpdated={()=>setState('done')} /></main></EarningsShell>;
+  if (state==='recovery') return <EarningsShell portal><main className="px-4 py-6"><DriverPasswordForm onUpdated={()=>{window.localStorage.removeItem(recoveryReturn);setState('done');}} /></main></EarningsShell>;
   return <main className="mx-auto max-w-sm space-y-4 p-6">
     <h1 className="text-xl font-semibold">Acesso à conta Lunna</h1>
     {state==='loading' && <p role="status">Verificando link…</p>}
@@ -70,6 +79,6 @@ export function DriverAccountEntry() {
       <Button disabled={busy} className="w-full">{busy?'Enviando…':'Enviar link de recuperação'}</Button>
       {notice && <p className="text-sm" role="status">{notice}</p>}
     </form>}
-    <Link href="/my-routes" className="block text-sm underline">Voltar para o login</Link>
+    <Link href={destination} className="block text-sm underline">Voltar para o login</Link>
   </main>;
 }

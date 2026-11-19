@@ -56,3 +56,11 @@ O Firebase Messaging permanece como transporte. Entrega de push em aparelho, reg
 
 
 O corte do Storage foi composto sobre uma cópia da release ativa. No emulador, tokens Firebase de dois motoristas sintéticos perderam leitura e escrita no caminho de comprovantes. O operador autenticado manteve acesso válido. O emulador recusou acesso anônimo, MIME incompatível e arquivo no limite de 5 MiB. O acesso administrativo de servidor funcionou e o rollback restaurou o acesso da coorte.
+
+## Verificação após a revisão do corte
+
+A homologação integrada repetiu a emissão de **R$ 37,00**, a aprovação, a baixa, e a leitura restrita ao motorista. Houve três eventos Realtime para o titular e zero para a outra conta. A API recusou conclusão sem comprovante, respondeu ao replay idêntico sem duplicar o registro de atividade e recusou a revisão desatualizada. Uma parada desvinculada ficou fora do roteiro e da contagem de conclusão.
+
+O comprovante novo foi gravado no Storage emulado e lido pela API privada. O titular leu a imagem, a outra conta recebeu 404 e o token revogado recebeu 401. A validação de push aceitou somente a associação da sessão ativa e recusou a prova após revogação. Os testes do emissor e do worker usaram mensagens sintéticas, inclusive entrega atrasada após troca de conta.
+
+No Chrome, uma falha 503 preservou a foto e a observação da confirmação e bloqueou a escrita até a revalidação. O motorista saiu de Meus ganhos offline, recarregou e permaneceu desconectado após reconectar. O operador sintético recuperou a senha via Mailpit e PKCE e voltou ao painel original. A senha da conta de teste foi restaurada.

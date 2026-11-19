@@ -48,11 +48,18 @@ function serializePlace(value: unknown) {
     ...(source.completedAt ? {completedAt:driverTimestamp(source.completedAt)}:{}),
   } as unknown as PlaceValue;
 }
-export function serializeDriverRoute(id: string,data: RecordValue): DriverRoute {
+export function activeDriverStop(value:unknown) {
+  return !object(value).unlinkedAt;
+}
+
+export function serializeDriverRoute(id: string,data: RecordValue,revision?:(value:unknown)=>string): DriverRoute {
+  const stops=Array.isArray(data.stops) ? data.stops:[];
+  const active=stops.filter(activeDriverStop);
   return {
     ...pick(data,['code','status','distanceMeters','duration','encodedPolyline','pendingChanges','currentStopIndex','source','serviceId','serviceCode']),
     id,name: typeof data.name==='string' ? data.name : 'Rota',
-    stops: Array.isArray(data.stops) ? data.stops.map(serializePlace):[],
+    ...(active.length!==stops.length ? {encodedPolyline:''}:{}),
+    stops: active.map(stop=>({...serializePlace(stop),...(revision ? {driverRevision:revision(stop)}:{})})),
     origin:serializePlace(data.origin),
     driverInfo:pick(object(data.driverInfo),['name','vehicle','plate']),
     plannedDate:driverTimestamp(data.plannedDate), completedAt:driverTimestamp(data.completedAt ?? data.autoCompletedAt),startedAt:driverTimestamp(data.startedAt),

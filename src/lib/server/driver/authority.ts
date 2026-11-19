@@ -3,7 +3,7 @@ import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { requireEarningsActor } from '@/lib/server/earnings/actor';
 import { EarningsError } from '@/lib/server/earnings/transport';
 
-export type DriverAuthority = { sourceUid: string; userId: string; scopeId?: string; readOnly?: boolean; native:boolean };
+export type DriverAuthority = { sourceUid: string; userId: string; scopeId?: string; sessionId?:string; readOnly?: boolean; native:boolean };
 
 export async function driverAuthority(request: Request, phase:'native'|'legacy', write=false):Promise<DriverAuthority> {
   if (phase==='native') {
@@ -13,7 +13,7 @@ export async function driverAuthority(request: Request, phase:'native'|'legacy',
         process.env.FIREBASE_PROJECT_ID!==process.env.ROTA_EARNINGS_SOURCE_PROJECT) {
       throw new EarningsError(503,'route_unavailable');
     }
-    return { sourceUid:actor.sourceUid!,userId:actor.userId,scopeId:actor.scopeId,native:true };
+    return { sourceUid:actor.sourceUid!,userId:actor.userId,scopeId:actor.scopeId,sessionId:actor.sessionId,native:true };
   }
   if (nativeDriverEnabled) throw new EarningsError(403,'route_access_denied');
   const token=request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];

@@ -1,6 +1,8 @@
 
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Dialog,
@@ -42,7 +44,6 @@ import { Timestamp, collection, query, where, orderBy, limit, onSnapshot, getDoc
 import { db } from '@/lib/firebase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import Image from 'next/image';
 import { RouteMapDialog, RouteDocument } from './route-map-dialog';
 import { LunnaBadge } from './lunna-badge';
 
@@ -322,15 +323,13 @@ export function RouteDetailsDialog({
                           {stop.photoUrl && (
                             <div>
                                 <h5 className="text-xs font-semibold mb-1">Comprovante:</h5>
-                                <a href={stop.photoUrl} target="_blank" rel="noopener noreferrer">
-                                    <Image
+                                <DeliveryPhoto expand
                                         src={stop.photoUrl}
                                         alt={`Comprovante da parada ${index + 1}`}
                                         width={200}
                                         height={150}
                                         className="rounded-md object-cover border"
                                     />
-                                </a>
                             </div>
                           )}
                         </>

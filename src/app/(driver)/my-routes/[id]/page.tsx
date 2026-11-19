@@ -80,6 +80,7 @@ export default function RouteDetailsPage() {
   }
 
   const [selectedStop, setSelectedStop] = React.useState<PlaceValue | null>(null);
+  const confirmationAttempt=React.useRef<{signature:string;requestId:string;media:Partial<Record<'delivery'|'attempt',{id:string;url:string}>>} | undefined>(undefined);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
   const [isAcknowledging, setIsAcknowledging] = React.useState(false);
   const { toast } = useToast();
@@ -302,12 +303,17 @@ export default function RouteDetailsPage() {
     }
 
     const targetStop={id:selectedStop.id,pointCode:selectedStop.pointCode,placeId:selectedStop.placeId,orderNumber:selectedStop.orderNumber};
+    const signature=JSON.stringify([targetStop,selectedStop.driverRevision,data]);
+    const attempt=confirmationAttempt.current?.signature===signature ? confirmationAttempt.current :
+      {signature,requestId:crypto.randomUUID(),media:{}};
+    confirmationAttempt.current=attempt;
     const media:{delivery?:string;attempt?:string}={};
     async function resolvePhoto(value:string|undefined,previous:string|undefined,kind:'delivery'|'attempt') {
       if (!value) return null;
       if (value===previous) return previous;
       if (!value.startsWith('data:')) throw new Error('Foto inválida.');
-      const uploaded=await driverCommand<{id:string;url:string}>(request,endpoint,{kind:'upload',routeId,targetStop,mediaKind:kind,data:value});
+      const uploaded=attempt.media[kind] ?? await driverCommand<{id:string;url:string}>(request,endpoint,{kind:'upload',routeId,targetStop,mediaKind:kind,data:value});
+      attempt.media[kind]=uploaded;
       media[kind]=uploaded.id;
       return uploaded.url;
     }
@@ -326,7 +332,7 @@ export default function RouteDetailsPage() {
       };
 
       const result = await routeAction<{ updatedStop: PlaceValue; stopIndex: number; wasPreviouslyFinalized: boolean }>('confirm', {
-        targetStop,media,patch:deliveryPatch,
+        targetStop,media,patch:deliveryPatch,requestId:attempt.requestId,expectedRevision:selectedStop.driverRevision,
       });
 
       const updatedStop=result.updatedStop;
@@ -341,6 +347,7 @@ export default function RouteDetailsPage() {
             : 'A falha na entrega foi registrada.'),
       });
 
+      confirmationAttempt.current=undefined;
       setIsConfirmDialogOpen(false);
       setSelectedStop(null);
     } catch (error) {
@@ -365,6 +372,7 @@ export default function RouteDetailsPage() {
   };
 
   const handleOpenConfirmDialog = (stop: PlaceValue) => {
+    confirmationAttempt.current=undefined;
     setSelectedStop(stop);
     setIsConfirmDialogOpen(true);
   };
@@ -656,7 +664,7 @@ export default function RouteDetailsPage() {
           customerName={selectedStop.customerName}
           address={selectedStop.address}
           complement={selectedStop.complemento}
-          viewOnly={route.status === 'completed'}
+          viewOnly={route.status === 'completed' || route.status==='completed_auto' || readOnly}
           stopLocation={
             selectedStop.lat && selectedStop.lng
               ? {

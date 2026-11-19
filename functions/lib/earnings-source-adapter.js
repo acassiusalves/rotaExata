@@ -102,7 +102,7 @@ function baseFacts(data) {
         forced: Boolean(data.forceCompletedBy),
         origin: originLat !== null && originLng !== null ? { lat: originLat, lng: originLng } : null,
         distanceMeters: meters === 0 && !hasComputedPath ? null : meters,
-        stops: (Array.isArray(data.stops) ? data.stops : []).slice(0, 1001).map(projectedStop),
+        stops: (Array.isArray(data.stops) ? data.stops : []).filter(stop => !record(stop).unlinkedAt).slice(0, 1001).map(projectedStop),
     };
 }
 function plannedFingerprint(data) {

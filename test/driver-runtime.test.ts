@@ -19,3 +19,11 @@ test('media identifiers bind the object to the real route and stop', () => {
     'delivery-photos/r1/s1/e5b9bc74-4460-4d06-b9e4-629b2588011f');
   assert.throws(() => driverMediaObject('r1','../s1','delivery','invalid'));
 });
+
+test('a rota ativa exclui destino desvinculado e a linha antiga que passava por ele',()=>{
+  const projected=serializeDriverRoute('route-1',{status:'in_progress',encodedPolyline:'old-path',stops:[
+    {id:'delivered',deliveryStatus:'completed'},{id:'moved',unlinkedAt:'2026-11-18T13:00:00Z'},
+  ]});
+  assert.deepEqual(projected.stops.map(stop=>stop.id),['delivered']);
+  assert.equal(projected.encodedPolyline,'');
+});

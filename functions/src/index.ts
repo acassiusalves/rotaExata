@@ -4,13 +4,14 @@ import {onSchedule} from "firebase-functions/v2/scheduler";
 import {protectCompletion} from "./earnings-source-adapter";
 import {captureFinancialRoute,reconcileFinancialRoutes,retryCapturedFinancialRoutes} from "./earnings-source-bridge";
 
-import {onCall,HttpsError} from "firebase-functions/v2/https";
+import {onCall,HttpsError,type CallableRequest} from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
+import {driverPushMessage} from "./driver-push";
 import {checkInviteConflict} from "./invite-conflict";
 import {blocksLegacyDriverAccountAction, type LegacyDriverAccountAction} from "./legacy-driver-accounts";
 import {buildSyncPatch} from "./sync-user";
@@ -56,6 +57,21 @@ async function assertLegacyDriverAccountAllowed(action: LegacyDriverAccountActio
   if (blocksLegacyDriverAccountAction(phase.data(), action)) {
     throw new HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
   }
+}
+
+async function requireOperationalOperator(req: CallableRequest, roles: string[] = ADMIN_ROLES) {
+  const token = req.rawRequest?.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+  if (!req.auth || !token || token.length > 16384) throw new HttpsError("unauthenticated","Sessão operacional ausente");
+  const verified = await getAuth().verifyIdToken(token,true).catch(() => null);
+  if (!verified || verified.uid!==req.auth.uid || verified.firebase.sign_in_provider==="custom") {
+    throw new HttpsError("permission-denied","Sessão operacional inválida");
+  }
+  const profile=(await getFirestore().collection("users").doc(verified.uid).get()).data();
+  if (!profile || !roles.includes(profile.role) || profile.active===false || profile.disabled===true || profile.mustChangePassword===true) {
+    throw new HttpsError("permission-denied","Apenas operadores ativos podem alterar a operação");
+  }
+  await assertLegacyDriverAccountAllowed({uid:verified.uid});
+  return {uid:verified.uid,profile};
 }
 
 function generateTemporaryPassword(): string {
@@ -197,10 +213,7 @@ export const inviteUser = onCall(
       );
     }
     try{
-      await assertAuthorizedRole(
-        req.auth?.uid,
-        "Apenas administradores, sócios e gestores podem convidar usuários"
-      );
+      await requireOperationalOperator(req);
 
       await assertLegacyDriverAccountAllowed({role});
 
@@ -287,10 +300,7 @@ export const deleteUser = onCall(
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
-    await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem remover usuários"
-    );
+    await requireOperationalOperator(req);
 
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
@@ -363,11 +373,9 @@ export const resetUserPassword = onCall(
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
 
-    const requesterRole = await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem resetar senhas"
-    );
-    const requesterUid = req.auth?.uid || "";
+    const operator=await requireOperationalOperator(req);
+    const requesterRole=operator.profile.role;
+    const requesterUid=operator.uid;
 
     try {
       await assertLegacyDriverAccountAllowed({uid});
@@ -447,10 +455,7 @@ export const updateDriverProfile = onCall(
     const vehicleType = String(d.vehicle?.type || "").trim();
     const vehiclePlate = String(d.vehicle?.plate || "").trim().toUpperCase();
 
-    await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem editar motoristas"
-    );
+    await requireOperationalOperator(req);
 
     if (!uid || !displayName) {
       throw new HttpsError("invalid-argument", "uid e displayName são obrigatórios");
@@ -535,6 +540,8 @@ export const deleteRoute = onCall(
       throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
 
+    await requireOperationalOperator(req);
+
     try {
       const db = getFirestore();
 
@@ -581,6 +588,8 @@ export const updateRouteName = onCall(
       throw new HttpsError("invalid-argument", "Nome da rota é obrigatório");
     }
 
+    await requireOperationalOperator(req);
+
     try {
       const db = getFirestore();
       await db.collection("routes").doc(routeId).update({ name });
@@ -608,6 +617,8 @@ export const updateRouteDriver = onCall(
     if (!driverId) {
       throw new HttpsError("invalid-argument", "ID do motorista é obrigatório");
     }
+
+    await requireOperationalOperator(req);
 
     try {
       const db = getFirestore();
@@ -650,6 +661,8 @@ export const duplicateRoute = onCall(
     if (!routeId) {
       throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
+
+    await requireOperationalOperator(req);
 
     try {
       const db = getFirestore();
@@ -702,35 +715,10 @@ export const completeRoute = onCall(
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
-    // Verificar permissão do usuário
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    const auth = await requireOperationalOperator(req,["admin","socio"]);
 
     try {
-      const token = req.rawRequest.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
-      if (!token) throw new HttpsError("unauthenticated","Sessão ausente");
-      const verified = await getAuth().verifyIdToken(token,true);
-      if (verified.uid!==auth.uid || verified.firebase.sign_in_provider==="custom") {
-        throw new HttpsError("permission-denied","Sessão operacional inválida");
-      }
-      const db = getFirestore();
-
-      // Buscar role do usuário
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      // Verificar se o usuário tem permissão (admin ou socio)
-      if ((userRole !== "admin" && userRole !== "socio") || userData?.active===false ||
-          userData?.disabled===true || userData?.mustChangePassword) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores e sócios podem marcar rotas como concluídas"
-        );
-      }
-
+      const db=getFirestore();
       if (!routeId) {
         throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
       }
@@ -781,6 +769,8 @@ export const notifyRouteChanges = onCall(
       throw new HttpsError("invalid-argument", "changes deve ser um array não vazio");
     }
 
+    const operator = await requireOperationalOperator(req);
+
     try {
       const db = getFirestore();
 
@@ -797,7 +787,7 @@ export const notifyRouteChanges = onCall(
       await db.collection("routes").doc(routeId).update({
         pendingChanges: true,
         lastModifiedAt: FieldValue.serverTimestamp(),
-        lastModifiedBy: req.auth?.uid || "admin",
+        lastModifiedBy: operator.uid,
       });
 
       // Buscar FCM token do motorista
@@ -858,7 +848,8 @@ export const notifyRouteChanges = onCall(
           },
         };
 
-        push = await sendPushWithOutcome(true, () => messaging.send(message));
+        const deliverable=await driverPushMessage(db,driverId,driverData,message);
+        push=await sendPushWithOutcome(!!deliverable,()=>messaging.send(deliverable!));
         console.log("Resultado do push de alteração de rota", {routeId, driverId, ...push});
       }
 
@@ -883,26 +874,9 @@ export const sendCustomNotification = onCall(
     const priority = String(d.priority || "medium").trim();
     const type = String(d.type || "system").trim();
 
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
+    await requireOperationalOperator(req);
     try {
-      const db = getFirestore();
-
-      // Verificar permissão (admin, socio ou gestor)
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (!["admin", "socio", "gestor"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem enviar notificações customizadas"
-        );
-      }
+      const db=getFirestore();
 
       if (!title || !message) {
         throw new HttpsError("invalid-argument", "Título e mensagem são obrigatórios");
@@ -964,7 +938,9 @@ export const sendCustomNotification = onCall(
             },
           };
 
-          await messaging.send(pushMessage);
+          const deliverable=await driverPushMessage(db,driverId,driverData,pushMessage);
+          if (!deliverable) {failureCount++;continue;}
+          await messaging.send(deliverable);
           successCount++;
           console.log(`✅ Push notification enviada para motorista ${driverId}`);
         } catch (error: any) {
@@ -1031,11 +1007,7 @@ export const forceLogoutDriver = onCall(
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
-    // Verificar autenticação
-    const authContext = req.auth;
-    if (!authContext) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    await requireOperationalOperator(req);
 
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do motorista é obrigatório");
@@ -1044,18 +1016,6 @@ export const forceLogoutDriver = onCall(
     try {
       const auth = getAuth();
       const db = getFirestore();
-
-      // Verificar permissão (admin, socio ou gestor)
-      const userDoc = await db.collection("users").doc(authContext.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (!["admin", "socio", "gestor"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem forçar logout de motoristas"
-        );
-      }
 
       await assertLegacyDriverAccountAllowed({uid});
 
@@ -1489,7 +1449,8 @@ export const autoCompleteRoutes = functionsV1
             },
           };
 
-          await messaging.send(message);
+          const deliverable=await driverPushMessage(db,driverId,driverDoc.data(),message);
+          if (deliverable) await messaging.send(deliverable);
           console.log(`✅ Notificação de auto-finalização enviada ao motorista ${driverId}`);
         } catch (notifError) {
           console.error(`❌ Erro ao notificar motorista ${driverId}:`, notifError);
@@ -1511,30 +1472,11 @@ export const resendRouteToDriver = onCall(
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
-    if (!routeId) {
-      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
-    }
-
+    const auth=await requireOperationalOperator(req,["admin","socio"]);
+    const userData=auth.profile;
+    if (!routeId) throw new HttpsError("invalid-argument","ID da rota é obrigatório");
     try {
-      const db = getFirestore();
-
-      // Verificar role do usuário (admin ou socio)
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (userRole !== "admin" && userRole !== "socio") {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores e sócios podem reenviar rotas"
-        );
-      }
+      const db=getFirestore();
 
       // Buscar a rota
       const routeDoc = await db.collection("routes").doc(routeId).get();
@@ -1646,7 +1588,8 @@ export const resendRouteToDriver = onCall(
             },
           };
 
-          await messaging.send(message);
+          const deliverable=await driverPushMessage(db,driverId,driverDoc.data(),message);
+          if (deliverable) await messaging.send(deliverable);
           console.log(`✅ Notificação de reenvio enviada ao motorista ${driverId}`);
         }
       } catch (notifError) {
@@ -1668,28 +1611,11 @@ export const resendRouteToDriver = onCall(
 export const forceCompleteService = onCall(
   { region: "southamerica-east1" },
   async (req) => {
-    const authContext = req.auth;
-    const { serviceId } = req.data;
-
-    if (!authContext) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
-    const db = getFirestore();
-
+    const authContext=await requireOperationalOperator(req,["admin","socio"]);
+    const {serviceId}=req.data;
+    const db=getFirestore();
+    const userData=authContext.profile;
     try {
-      // Verificar se o usuário é admin ou socio
-      const userDoc = await db.collection("users").doc(authContext.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role;
-
-      if (!["admin", "socio"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem forçar conclusão de serviços"
-        );
-      }
-
       if (!serviceId || typeof serviceId !== "string") {
         throw new HttpsError("invalid-argument", "serviceId deve ser fornecido");
       }

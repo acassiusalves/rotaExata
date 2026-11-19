@@ -1,3 +1,5 @@
+import { activeDriverStop } from '@/lib/driver/runtime-contract';
+import { factsHash } from '../../../../../functions/src/earnings-source-adapter';
 import { FieldPath } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { adminDb } from '@/lib/firebase/admin';
@@ -17,9 +19,9 @@ function projectRoute(doc: FirebaseFirestore.DocumentSnapshot) {
   return {
     id: doc.id, code: data.code ?? null, name: data.name ?? null, status: data.status, plannedDate: data.plannedDate ?? null,
     distanceMeters: data.distanceMeters ?? null, duration: data.duration ?? null, pendingChanges: Boolean(data.pendingChanges),
-    stops: (Array.isArray(data.stops) ? data.stops : []).map(stop => ({
+    stops: (Array.isArray(data.stops) ? data.stops : []).filter(activeDriverStop).map(stop => ({
       id: stop.id, pointCode: stop.pointCode, placeId: stop.placeId, address: stop.address, customerName: stop.customerName,
-      lat: stop.lat, lng: stop.lng, deliveryStatus: stop.deliveryStatus, wentToLocation: stop.wentToLocation,
+      driverRevision:factsHash(stop), lat: stop.lat, lng: stop.lng, deliveryStatus: stop.deliveryStatus, wentToLocation: stop.wentToLocation,
     })),
   };
 }

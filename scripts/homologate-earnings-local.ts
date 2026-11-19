@@ -27,6 +27,7 @@ async function main() {
   assert.equal(process.env.ROTA_EARNINGS_SOURCE_PROJECT,'demo-rotaexata-driver');
   assert.equal(process.env.FIREBASE_PROJECT_ID,'demo-rotaexata-driver');
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
+  assert.equal(process.env.FIREBASE_STORAGE_EMULATOR_HOST,'127.0.0.1:9198');
   assert.ok(!process.env.FIREBASE_PRIVATE_KEY && !process.env.GOOGLE_APPLICATION_CREDENTIALS,'Only emulator configuration is allowed');
   const fixture: Fixture = JSON.parse(await readFile(process.argv[2],'utf8'));
   assert.equal(fixture.sourceProject,process.env.FIREBASE_PROJECT_ID);
@@ -37,6 +38,9 @@ async function main() {
   const { adminDb } = await import('../src/lib/firebase/admin.ts');
   assert.ok(adminDb,'Firestore emulator is required');
   const native = await import('../src/app/api/driver/routes/route.ts');
+  const runtime=await import('../src/app/api/driver/runtime/route.ts');
+  const photos=await import('../src/app/api/driver/media/[id]/route.ts');
+  const pushes=await import('../src/app/api/driver/push-delivery/route.ts');
   const payment = await import('../src/app/api/financeiro/pagamentos/route.ts');
   const statement = await import('../src/app/api/driver/earnings/route.ts');
   const rules = await import('../src/app/api/financeiro/regras/route.ts');
@@ -48,6 +52,7 @@ async function main() {
     const result = await client.auth.signInWithPassword({ email:user.email,password:user.password });
     assert.ok(!result.error && result.data.session,'Native Supabase session');
     assert.equal(result.data.session.user.id,user.id);
+    await client.realtime.setAuth(result.data.session.access_token);
     return { ...user,client,token:result.data.session.access_token };
   }));
   const operator = clients.find(user => user.kind === 'admin');
@@ -69,7 +74,10 @@ async function main() {
     await Promise.all(drivers.map(user => adminDb.collection('users').doc(user.legacySubject).set({ role:'driver',active:true,totalDeliveries:0 })));
     await ref.set({
       driverId:driver.legacySubject,status:'dispatched', plannedDate:new Date(), distanceMeters:12500,
-      origin:{lat:0,lng:0},stops:[{ id:'fixture-1',lat:0,lng:0,city:'Goiânia',state:'GO',isLunnaOrder:false }],
+      origin:{lat:0,lng:0},stops:[
+        {id:'fixture-1',lat:0,lng:0,city:'Goiânia',state:'GO',isLunnaOrder:false},
+        {id:'fixture-moved',lat:1,lng:1,unlinkedAt:new Date()},
+      ],
     });
     assert.equal((await native.GET(req('/api/driver/routes?id='+routeId,driver.token))).status,200);
     assert.equal((await native.GET(req('/api/driver/routes?id='+routeId,other.token))).status,404);
@@ -77,9 +85,36 @@ async function main() {
     assert.equal((await mutate(other.token,'start')).status,403);
     assert.equal((await mutate(driver.token,'start')).status,200);
     assert.equal((await mutate(driver.token,'finish')).status,409);
-    assert.equal((await mutate(driver.token,'confirm',{ targetStop:{ id:'fixture-1' },patch:{
-      deliveryStatus:'completed',notes:null,failureReason:null,wentToLocation:null,payments:[],deliveredItemIds:[],photoUrl:null,attemptPhotoUrl:null,
-    } })).status,200);
+    const view=await (await native.GET(req('/api/driver/routes?id='+routeId,driver.token))).json();
+    assert.deepEqual(view.route.stops.map((stop:{id:string})=>stop.id),['fixture-1']);
+    const attempt={
+      requestId:randomUUID(),expectedRevision:view.route.stops[0].driverRevision,targetStop:{id:'fixture-1'},
+      patch:{deliveryStatus:'completed',notes:null,failureReason:null,wentToLocation:null,payments:[],deliveredItemIds:[],photoUrl:null,attemptPhotoUrl:null},
+    };
+    assert.equal((await mutate(driver.token,'confirm',attempt)).status,422);
+    const upload=await runtime.POST(req('/api/driver/runtime',driver.token,'POST',{
+      kind:'upload',routeId,targetStop:{id:'fixture-1'},mediaKind:'delivery',
+      data:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXe8AAAAASUVORK5CYII=',
+    }));
+    assert.equal(upload.status,200);
+    const receipt=await upload.json();
+    assert.match(receipt.url,/^\/api\/driver\/media\/[a-f0-9-]+$/);
+    const confirmation={...attempt,patch:{...attempt.patch,photoUrl:receipt.url},media:{delivery:receipt.id}};
+    const confirmed=await mutate(driver.token,'confirm',confirmation);
+    assert.equal(confirmed.status,200);
+    const firstResponse=await confirmed.json();
+    const retransmit=await mutate(driver.token,'confirm',confirmation);
+    assert.deepEqual(await retransmit.json(),firstResponse);
+    assert.equal((await mutate(driver.token,'confirm',{...confirmation,requestId:randomUUID()})).status,409);
+    assert.equal((await mutate(driver.token,'confirm',{...confirmation,patch:{...confirmation.patch,notes:'conflict'}})).status,409);
+    assert.equal((await mutate(driver.token,'confirm',{...confirmation,requestId:randomUUID(),targetStop:{id:'fixture-moved'}})).status,409);
+    const activity=await adminDb.collection('activity_log').where('routeId','==',routeId).get();
+    assert.equal(activity.size,1,'Duplicate confirmations must not add an activity');
+    const getPhoto=(token:string)=>photos.GET(req(receipt.url,token),{params:Promise.resolve({id:receipt.id})});
+    const ownPhoto=await getPhoto(driver.token);
+    assert.equal(ownPhoto.status,200);
+    assert.match((await ownPhoto.json()).src,/^data:image\/png;base64,/);
+    assert.equal((await getPhoto(other.token)).status,404);
     assert.equal((await mutate(driver.token,'finish')).status,200);
 
     stage = 'realtime';
@@ -131,7 +166,20 @@ async function main() {
     while (received<3 && Date.now()<deadline) await new Promise(resolve => setTimeout(resolve,150));
     assert.ok(received>=3,`Own Realtime INSERT and UPDATE events (own: ${received}, other: ${denied})`);
     assert.equal(denied,0,'Other driver receipts invisible in Realtime');
-    console.log(JSON.stringify({ start:true,confirm:true,finish:true,proof:true,exactCents:result.total_cents,statuses:['pending','approved','paid'],
+    stage='push session and media revocation';
+    const prefs=await (await runtime.GET(req('/api/driver/runtime?resource=preferences',driver.token))).json();
+    const bind=await runtime.POST(req('/api/driver/runtime',driver.token,'POST',{kind:'push-bind',
+      token:'synthetic_'+randomUUID(),explicit:true,preferenceRevision:prefs.pushRevision,
+    }));
+    assert.equal(bind.status,200);
+    const grant=(await bind.json()).grant;
+    const validate=()=>pushes.POST(req('/api/driver/push-delivery',driver.token,'POST',{bindingId:grant.id,proof:grant.proof}));
+    assert.equal((await validate()).status,200);
+    const revoked=await driver.client.auth.signOut({scope:'local'});
+    assert.equal(revoked.error,null);
+    assert.equal((await getPhoto(driver.token)).status,401);
+    assert.equal((await validate()).status,404);
+    console.log(JSON.stringify({ receiptProtected:true,idempotentConfirmation:true,detachedExcluded:true,boundPushRevoked:true,start:true,confirm:true,finish:true,proof:true,exactCents:result.total_cents,statuses:['pending','approved','paid'],
       pendingOnce:true,otherDriverRestRows:invisible.data?.length,ownRealtimeEvents:received,otherRealtimeEvents:denied }));
   } catch (error) {
     console.error('Homologação local falhou na etapa',stage,error instanceof Error ? error.message : 'erro');

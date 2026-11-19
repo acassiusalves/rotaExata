@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext,useCallback,useContext,useEffect,useMemo,useState,type ReactNode } from 'react';
+import { createContext,useCallback,useContext,useEffect,useMemo,useRef,useState,type ReactNode } from 'react';
 import { usePathname,useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,14 @@ function RuntimeProfile({request,userId,email,signOut,native,children}:{
   const [error,setError]=useState('');
   const [passwordRequired,setPasswordRequired]=useState(false);
   const [revision,setRevision]=useState(0);
+  const [stale,setStale]=useState(false);
+  const valid=useRef(false);
+  const guardRequest=useCallback(<T,>(path:string,init?:RequestInit)=>{
+    if (init?.method && init.method.toUpperCase()!=='GET' && !valid.current) {
+      return Promise.reject(new EarningsRequestError(409,'earnings_session_revalidating'));
+    }
+    return request<T>(path,init);
+  },[request]);
   const writePresence=useCallback((online:boolean)=>request(endpoint,{method:'POST',body:JSON.stringify({kind:'presence',online})}),[request,endpoint]);
 
   useEffect(()=>{
@@ -49,10 +57,16 @@ function RuntimeProfile({request,userId,email,signOut,native,children}:{
           await signOut(); return;
         }
         initial=current.forceLogoutAt ?? null;
+        valid.current=true;setStale(false);
         setState(current);setError('');setPasswordRequired(false);
         if (native && !current.readOnly) void writePresence(true).catch(()=>{});
       } catch (failure) {
         if (alive) {
+          valid.current=false;
+          if (!(failure instanceof EarningsRequestError) || (failure.status!==401 && failure.status!==403)) {
+            setStale(true);
+            return;
+          }
           setPasswordRequired(native && failure instanceof EarningsRequestError && failure.code==='platform_password_change_required');
           setError(failure instanceof EarningsRequestError && failure.status===403 ? 'Esta conta não tem acesso às rotas.' : 'Não foi possível carregar sua conta.');
           if (failure instanceof EarningsRequestError && failure.status===401) void signOut();
@@ -69,27 +83,36 @@ function RuntimeProfile({request,userId,email,signOut,native,children}:{
   },[request,endpoint,revision,native,signOut,writePresence]);
 
   const out=useCallback(async ()=>{
+    if (native) {
+      if (valid.current) void writePresence(false).catch(()=>{});
+      await signOut();
+      return;
+    }
     if (!state?.readOnly) {
       const token=takeDriverPushToken(userId);
       if (token) {
         await driverCommand(request,endpoint,{kind:'push-detach',token}).catch(()=>{});
         await releaseDriverPushTransport().catch(()=>{});
       }
-      if (native) await writePresence(false).catch(()=>{});
     }
     await signOut();
   },[native,state?.readOnly,signOut,writePresence,request,endpoint,userId]);
 
-  const value=useMemo(()=>state ? {request,endpoint,userId,native,signOut:out,readOnly:state.readOnly,
+  const value=useMemo(()=>state ? {request:guardRequest,endpoint,userId,native,signOut:out,readOnly:state.readOnly,
     profile:{...state.profile,email:email ?? state.profile.email},
-  }:null,[state,request,endpoint,userId,native,out,email]);
+  }:null,[state,guardRequest,endpoint,userId,native,out,email]);
 
   if (passwordRequired) return <main className="px-4 py-6"><DriverPasswordForm onUpdated={()=>setPasswordRequired(false)} /></main>;
   if (error) return <div className="mx-auto max-w-sm space-y-3 p-6" role="alert"><p>{error}</p>
     <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button>
     <Button variant="ghost" onClick={()=>void out()}>Sair</Button></div>;
+  if (!value && stale) return <div className="space-y-3 p-6" role="status"><p>O acesso está sendo verificado.</p>
+    <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button></div>;
   if (!value) return <div className="grid min-h-60 place-items-center" role="status"><Loader2 className="animate-spin" aria-label="Carregando perfil" /></div>;
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  return <Context.Provider value={value}>
+    {stale && <p className="p-3 text-sm text-muted-foreground" role="status">Verificando sessão. Aguarde para salvar alterações.</p>}
+    {children}
+  </Context.Provider>;
 }
 
 function NativeRuntime({children}:{children:ReactNode}) {

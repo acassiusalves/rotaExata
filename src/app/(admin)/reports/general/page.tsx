@@ -1,5 +1,7 @@
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   FileText,
@@ -765,6 +767,7 @@ export default function ReportsPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization:'Bearer '+await auth.currentUser?.getIdToken(),
         },
         body: JSON.stringify({ items }),
       });
@@ -1883,11 +1886,11 @@ export default function ReportsPage() {
                         <div className="col-span-2">
                           <label className="text-sm font-medium text-muted-foreground">Foto do Local (Comprovante de Tentativa)</label>
                           <div className="mt-2">
-                            <img
+                            <DeliveryPhoto
                               src={selectedDelivery.attemptPhotoUrl}
                               alt="Foto da tentativa de entrega"
                               className="rounded-lg border max-w-md cursor-pointer hover:opacity-90 transition-opacity"
-                              onClick={() => window.open(selectedDelivery.attemptPhotoUrl, '_blank')}
+                              expand
                             />
                             <p className="text-xs text-muted-foreground mt-1">Clique para ampliar</p>
                           </div>
@@ -2036,7 +2039,7 @@ export default function ReportsPage() {
                       <label className="text-sm font-medium text-muted-foreground mb-2 block">
                         Foto da Entrega
                       </label>
-                      <img
+                      <DeliveryPhoto
                         src={selectedDelivery.photoUrl}
                         alt="Comprovante"
                         className="w-full rounded-lg border"

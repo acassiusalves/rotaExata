@@ -1,8 +1,10 @@
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { adminDb } from '@/lib/firebase/admin';
-import { plannedFingerprint, protectCompletion, sourceStopKey, timestampIso } from '../../../../functions/src/earnings-source-adapter';
+import { factsHash, plannedFingerprint, protectCompletion, sourceStopKey, timestampIso } from '../../../../functions/src/earnings-source-adapter';
 import { getRouteChangeNotificationFingerprint } from '@/lib/route-change-fingerprint';
+import { activeDriverStop } from '@/lib/driver/runtime-contract';
+import { confirmationReplay,deliveryDistanceProblem,deliveryValidation,stopConfirmationProblem } from '@/lib/driver/stop-policy';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { clearRouteChangeFlags, updateStopByIdentity } from '@/lib/route-stop-reconciliation';
 import type { PlaceValue, RouteChangeNotification } from '@/lib/types';
@@ -14,7 +16,8 @@ const stopIdentity = z.object({
   placeId: z.string().max(150).optional(), orderNumber: z.string().max(150).optional(),
 });
 const nullableText = (size: number) => z.string().max(size).nullable();
-const photoUrl = z.string().url().max(4096).regex(/^https:\/\/|^http:\/\/127\.0\.0\.1:9198\//).nullable();
+const photoUrl = z.union([z.string().url().max(4096).regex(/^https:\/\/|^http:\/\/127\.0\.0\.1:9198\//),
+  z.string().regex(/^\/api\/driver\/media\/[0-9a-f-]{36}$/i)]).nullable();
 const patch = z.object({
   deliveryStatus: z.enum(['completed','failed']),
   notes: nullableText(4000),
@@ -31,7 +34,7 @@ const patch = z.object({
 const actions = z.discriminatedUnion('action', [
   z.object({ action: z.literal('start'), routeId }).strict(),
   z.object({ action: z.literal('finish'), routeId }).strict(),
-  z.object({ action: z.literal('confirm'), routeId, targetStop: stopIdentity, patch, media:z.object({delivery:z.string().uuid().optional(),attempt:z.string().uuid().optional()}).optional() }).strict(),
+  z.object({ action: z.literal('confirm'), routeId, targetStop: stopIdentity, patch, requestId:z.string().uuid().optional(),expectedRevision:z.string().regex(/^[a-f0-9]{64}$/).optional(),media:z.object({delivery:z.string().uuid().optional(),attempt:z.string().uuid().optional()}).optional() }).strict(),
   z.object({ action: z.literal('acknowledge'), routeId, fingerprint: z.string().min(1).max(60000) }).strict(),
 ]);
 
@@ -79,8 +82,9 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       }
       if (input.action === 'finish') {
         if (data.status === 'completed') return { status: 200, body: { ok: true } };
-        const finalized = stops.filter(stop => stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed');
-        if (data.status !== 'in_progress' || !stops.length || finalized.length * 5 < stops.length * 4) {
+        const active=stops.filter(activeDriverStop);
+        const finalized = active.filter(stop => stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed');
+        if (data.status !== 'in_progress' || !active.length || finalized.length * 5 < active.length * 4) {
           return { status: 409, body: { code: 'route_not_ready' } };
         }
         const closed = { status: 'completed', completedAt: now };
@@ -90,12 +94,36 @@ export async function performDriverRouteAction(request: Request, uid: string, au
         return { status: 200, body: { ok: true } };
       }
 
-      const editable = ['dispatched','in_progress','completed','completed_auto'].includes(data.status);
-      if (!editable) return { status: 409, body: { code: 'route_invalid_state' } };
+      const problem=(code:string,status=422)=>({status,body:{code}});
+      const commandRef=authority.bindMedia && input.requestId
+        ? db.collection('driverRouteCommands').doc(factsHash([uid,input.routeId,input.requestId])) : null;
+      if (authority.bindMedia && (!commandRef || !input.expectedRevision)) return problem('route_invalid_request',400);
+      const digest=factsHash(input);
+      const previous=commandRef ? (await tx.get(commandRef)).data() : undefined;
+      if (previous) return confirmationReplay(previous as {digest:string},digest,'','')==='replay'
+        ? {status:200,body:previous.response}:problem('route_request_conflict',409);
+
       const visited = input.patch.deliveryStatus === 'failed' ? input.patch.wentToLocation : null;
+      if (authority.bindMedia) {
+        const failure=stopConfirmationProblem(data.status,{...input.patch,reason:input.patch.failureReason,visited});
+        if (failure) return problem(failure,failure==='route_invalid_state' ? 409:422);
+      } else if (!['dispatched','in_progress','completed','completed_auto'].includes(data.status)) {
+        return problem('route_invalid_state',409);
+      }
       const driverPatch = { ...input.patch, wentToLocation: visited, completedAt: now } as unknown as Partial<PlaceValue>;
       const mutation = updateStopByIdentity(stops,input.targetStop,driverPatch);
+      if (!activeDriverStop(mutation.previousStop)) return problem('route_stop_changed',409);
       if (authority.bindMedia) {
+        const current=factsHash(mutation.previousStop);
+        if (confirmationReplay(undefined,digest,input.expectedRevision!,current)!=='new') return problem('route_stop_changed',409);
+        const settings=deliveryValidation((await tx.get(db.doc('settings/general'))).data());
+        if (settings.enabled && input.patch.deliveryStatus==='completed') {
+          const location=data.currentLocation;
+          const measured=location?.timestamp?.toMillis?.();
+          const validTime=typeof measured==='number' && measured<=now.toMillis() && now.toMillis()-measured<=120000;
+          const failure=deliveryDistanceProblem(validTime ? location:undefined,mutation.previousStop,settings.maxDistance);
+          if (failure) return problem(failure);
+        }
         const stopKey=getStopIdentityKey(mutation.previousStop);
         for (const [kind,field] of [['delivery','photoUrl'],['attempt','attemptPhotoUrl']] as const) {
           const url=input.patch[field];
@@ -118,7 +146,11 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const linkedOrders=orderCandidates?.docs.filter(order=>order.data().rotaExataRouteId===input.routeId) ?? [];
       const prior = mutation.previousStop.deliveryStatus;
       const wasPreviouslyFinalized = prior === 'completed' || prior === 'failed';
-      const updatedStop = wasPreviouslyFinalized ? { ...mutation.updatedStop, editedByDriver: true, editedAt: now } : mutation.updatedStop;
+      const retainedTime=prior===input.patch.deliveryStatus && (mutation.previousStop.wentToLocation ?? null)===visited &&
+        timestampIso(mutation.previousStop.completedAt) ? mutation.previousStop.completedAt:now;
+      const updatedStop = wasPreviouslyFinalized
+        ? { ...mutation.updatedStop, completedAt:retainedTime, editedByDriver:true,editedAt:now }
+        : mutation.updatedStop;
       const updatedStops = [...mutation.stops];
       updatedStops[mutation.index] = updatedStop;
       tx.update(routeRef, { stops: updatedStops, currentStopIndex: mutation.index + 1, updatedAt: now });
@@ -152,10 +184,12 @@ export async function performDriverRouteAction(request: Request, uid: string, au
 
       const key = sourceStopKey(updatedStop as unknown as Record<string, unknown>);
       if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {
-        const confirmation = { status: input.patch.deliveryStatus, visited, workedAt: timestampIso(now) };
+        const confirmation = { status: input.patch.deliveryStatus, visited, workedAt:timestampIso(updatedStop.completedAt) };
         tx.set(evidenceRef, { start: { ...evidence.start, confirmations: { ...evidence.start.confirmations, [key]: confirmation } } }, { merge: true });
       }
-      return { status: 200, body: { updatedStop, stopIndex: mutation.index, wasPreviouslyFinalized } };
+      const response={updatedStop,stopIndex:mutation.index,wasPreviouslyFinalized};
+      if (commandRef) tx.create(commandRef,{digest,response,createdAt:now});
+      return { status:200,body:response };
     });
     return Response.json(result.body, { status: result.status, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {

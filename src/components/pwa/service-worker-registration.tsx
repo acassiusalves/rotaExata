@@ -61,10 +61,9 @@ export function ServiceWorkerRegistration() {
 
     const registerServiceWorker = async () => {
       try {
-        const swExists = await hasAppServiceWorker();
-
-        const script = swExists ? APP_SERVICE_WORKER_URL :
-          nativeDriverEnabled && process.env.NODE_ENV==='production' ? ONLINE_SERVICE_WORKER_URL : null;
+        const script = nativeDriverEnabled
+          ? process.env.NODE_ENV==='production' ? ONLINE_SERVICE_WORKER_URL:null
+          : await hasAppServiceWorker() ? APP_SERVICE_WORKER_URL:null;
         if (!script) {
           console.log('[SW] Service Worker não encontrado, limpando registros antigos');
           await cleanupOldServiceWorkers('sw.js ausente');

@@ -1,3 +1,4 @@
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { driverAuthority } from '@/lib/server/driver/authority';
 import { EarningsError } from '@/lib/server/earnings/transport';
 import { adminAuth, adminDb } from '@/lib/firebase/admin';
@@ -22,6 +23,12 @@ export async function reportRequestContext(request: Request,phase:'native'|'lega
   }
   const auth = adminAuth;
   if (!adminDb || !auth) throw new ReportRequestError('Serviço de chamados indisponível.', 503);
-  const actor = await authenticateReportActor(request, adminDb, (token) => auth.verifyIdToken(token));
+  const actor = await authenticateReportActor(request, adminDb, (token) => auth.verifyIdToken(token,true));
+  const transition=(await adminDb.doc('rotaAuthTransition/driver').get()).data();
+  if ((nativeDriverEnabled && actor.role==='driver') ||
+      (transition?.mode==='supabase' &&
+        (actor.role==='driver' || !Array.isArray(transition.driverUids) || transition.driverUids.includes(actor.uid)))) {
+    throw new ReportRequestError('Entre com a conta Lunna para acessar seus chamados.',403);
+  }
   return { db: adminDb, actor };
 }

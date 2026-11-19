@@ -1,3 +1,7 @@
+import {authorizeOperationalWriter} from '@/lib/firebase/operational-writer-auth';
+import {EarningsError,earningsErrorResponse} from '@/lib/server/earnings/transport';
+import {isProtectedPhoto,protectedPhotoPrefix} from '@/lib/driver/photo-policy';
+import {readDeliveryPhoto} from '@/lib/server/driver/media';
 import { NextResponse } from "next/server";
 import { analyzePaymentReceipt } from "@/ai/flows/analyze-payment-receipt";
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
@@ -228,6 +232,7 @@ function parseFirestoreDocument(doc: any): any {
 
 export async function POST(req: Request) {
   try {
+    await authorizeOperationalWriter(req);
     // Rate limiting (mais restritivo para AI - consome mais recursos)
     const clientIP = getClientIP(req);
     const rateLimitResult = rateLimit(clientIP, rateLimitConfigs.write);
@@ -292,7 +297,12 @@ export async function POST(req: Request) {
 
           try {
             // Call AI to analyze the receipt
-            const aiResult = await analyzePaymentReceipt({ imageUrl: item.photoUrl });
+            const stored=stops[item.stopIndex]?.photoUrl;
+            if (typeof stored!=='string' || stored!==item.photoUrl) throw new Error('Comprovante não corresponde à parada.');
+            const photo=isProtectedPhoto(stored)
+              ? await readDeliveryPhoto(stored.slice(protectedPhotoPrefix.length),{routeId})
+              : stored;
+            const aiResult = await analyzePaymentReceipt({imageUrl:photo});
 
             result.extractedValue = aiResult.extractedValue;
             result.success = aiResult.success;
@@ -388,6 +398,7 @@ export async function POST(req: Request) {
     });
 
   } catch (e: any) {
+    if (e instanceof EarningsError) return earningsErrorResponse(e);
     console.error("Failed to process reconciliation:", e);
     return NextResponse.json({
       error: "SERVER_ERROR",

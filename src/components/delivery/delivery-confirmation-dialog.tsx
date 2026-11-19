@@ -1,5 +1,7 @@
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Dialog,
@@ -588,7 +590,7 @@ export function DeliveryConfirmationDialog({
                   // Modo visualização: apenas mostrar a foto se existir
                   existingData?.attemptPhotoUrl ? (
                     <div className="relative">
-                      <img src={existingData.attemptPhotoUrl} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={existingData.attemptPhotoUrl} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic">Nenhuma foto registrada</p>
@@ -632,7 +634,7 @@ export function DeliveryConfirmationDialog({
                       </>
                     ) : (
                       <div className="relative">
-                        <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                        <DeliveryPhoto src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                         <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
@@ -662,7 +664,7 @@ export function DeliveryConfirmationDialog({
                       </div>
                     ) : (
                       <div className="relative">
-                        <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                        <DeliveryPhoto src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                         <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
@@ -681,7 +683,7 @@ export function DeliveryConfirmationDialog({
                   <Label>Foto da Entrega</Label>
                   {existingData?.photoUrl ? (
                     <div className="relative">
-                      <img src={existingData.photoUrl} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={existingData.photoUrl} alt="Foto da entrega" className="w-full rounded-lg" />
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic">Nenhuma foto registrada</p>
@@ -711,7 +713,7 @@ export function DeliveryConfirmationDialog({
                     </>
                   ) : (
                     <div className="relative">
-                      <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
                       <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
@@ -731,7 +733,7 @@ export function DeliveryConfirmationDialog({
                     </div>
                   ) : (
                     <div className="relative">
-                      <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
                       <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}

@@ -1,6 +1,8 @@
 
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Home,
@@ -455,7 +457,7 @@ export default function MonitoringPage() {
                       Foto da Entrega
                     </h3>
                     <div className="rounded-lg overflow-hidden border">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.photoUrl}
                         alt="Foto da entrega"
                         className="w-full h-auto"
