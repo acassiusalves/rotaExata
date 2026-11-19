@@ -196,7 +196,7 @@ export default function RulesPage() {
       </div>
       <div className={panel}>
         <h2 className="font-semibold">Bônus</h2>
-        <RateField id="rule-lunna" label="Por pedido Lunna entregue (R$)" value={draft.lunna} onChange={value => update({lunna:value})} />
+        <RateField id="rule-lunna" label="Por parada Lunna concluída (R$)" value={draft.lunna} onChange={value => update({lunna:value})} />
         <div className="space-y-3">
           <p className="text-sm font-medium">Volume de entregas concluídas</p>
           {draft.volume.map((tier,index) => <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]" key={index}>

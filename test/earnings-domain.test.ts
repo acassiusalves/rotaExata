@@ -97,3 +97,19 @@ test('the rule editor accepts observed Goiás labels and reopens their canonical
   assert.deepEqual(saved.zones[0].cities,[{name:'goiania',uf:'go'},{name:'aparecida de goiania',uf:'go'}]);
   assert.deepEqual(definition([{name:'Goiânia - GO',uf:'MG'}]),[{code:'city_uf_conflict'}]);
 });
+
+test('contradictory terminal state suffixes are a review in both rule and route inputs',()=>{
+  const parse=(cities:unknown)=>normalizeRule({mode:'zone',zones:[{cities,priceCents:500}]});
+  for (const city of ['Goiânia - MG - GO','Goiânia - GO - MG','Goiânia - MG - Goiás','Goiânia/GO - MG']) {
+    assert.deepEqual(parse(city),[{code:'city_uf_conflict'}],city);
+    assert.deepEqual(parse([{name:city,uf:'GO'}]),[{code:'city_uf_conflict'}],city);
+    assert.deepEqual(quote({...base,stops:[{...base.stops[0],city,state:'GO'}]},zone),
+      [{code:'city_uf_conflict',stopId:'1'}],city);
+  }
+  for (const city of ['Goiânia - GO - GO','Goiânia - GO - Goiás','Goiânia - Goiás - GO','Goiânia/GO - GO']) {
+    assert.deepEqual(parse(city),parse('Goiânia/GO'),city);
+    const quoted=quote({...base,stops:[{...base.stops[0],city,state:null}]},zone);
+    assert.ok(!Array.isArray(quoted),city);
+    assert.equal(quoted.totalCents,500,city);
+  }
+});

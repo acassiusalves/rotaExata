@@ -92,15 +92,16 @@ function fold(value: string) {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function municipalityIdentity(value: string, state?: string | null) {
+function municipalityIdentity(value: string, state?: string | null, ruleInput = false) {
   const city = fold(value);
-  const qualified = /^(.+?) - (?:(?:([a-z]{2}) - )?goias|go)$/.exec(city);
+  const qualified = /^(.+?)\s*[\/-]\s*(goias|[a-z]{2})(?:\s*[\/-]\s*(goias|[a-z]{2}))?$/.exec(city);
   const declaredState = state ? fold(state) : undefined;
   const explicitUf = declaredState === 'goias' ? 'go' : declaredState || undefined;
-  const suffixUf = qualified ? 'go' : undefined;
-  const conflict = !!((qualified?.[2] && qualified[2] !== suffixUf) ||
-    (suffixUf && explicitUf && explicitUf !== suffixUf));
-  return { name: qualified?.[1] ?? city, uf: explicitUf ?? suffixUf, conflict };
+  const firstUf = qualified?.[2] === 'goias' ? 'go' : qualified?.[2];
+  const secondUf = qualified?.[3] === 'goias' ? 'go' : qualified?.[3];
+  const conflict = !!(firstUf && ((secondUf && firstUf !== secondUf) || (explicitUf && firstUf !== explicitUf)));
+  const accepted = qualified && (ruleInput || firstUf === 'go');
+  return { name: accepted ? qualified[1] : city, uf: explicitUf ?? (accepted ? firstUf : undefined), conflict };
 }
 
 export function normalizeRule(input: unknown): EarningsRule | EarningsIssue[] {
@@ -122,9 +123,9 @@ export function normalizeRule(input: unknown): EarningsRule | EarningsIssue[] {
     ...zone,
     cities: zone.cities.map(city => {
       const [name, state] = typeof city === 'string'
-        ? city.split(/\s*[\/-]\s*(?=[A-Za-z]{2}$)/)
+        ? [city, undefined]
         : [city.name, city.uf ?? city.fullName?.match(/,\s*([A-Za-z]{2})$/)?.[1]];
-      const normalized = municipalityIdentity(name, state);
+      const normalized = municipalityIdentity(name, state, true);
       conflictingCityUf ||= normalized.conflict;
       return { name: normalized.name, ...(normalized.uf ? { uf: normalized.uf } : {}) };
     }),
