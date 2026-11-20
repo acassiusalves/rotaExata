@@ -19,7 +19,7 @@ const docId=z.string().min(1).max(150).regex(/^[^/]+$/);
 const token=z.string().min(20).max(4096).regex(/^[\w:-]+$/);
 const selection=z.object({resource:z.enum(['routes','profile','preferences','inbox','location-request']),id:docId.optional(),
   view:z.enum(['active','history']).optional(),after:docId.optional()}).strict();
-const identity=z.object({id:z.string().max(150).optional(),pointCode:z.string().max(150).optional(),placeId:z.string().max(150).optional(),
+const identity=z.object({id:z.string().max(150).optional(),pointCode:z.string().max(150).optional(),placeId:z.string().optional(),
   orderNumber:z.string().max(150).optional()}).strict();
 const location=z.object({
   lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180),accuracy:z.number().min(0).max(1000000),

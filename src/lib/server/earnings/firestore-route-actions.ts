@@ -13,7 +13,7 @@ import { earningsErrorResponse, readJsonBody } from './transport';
 const routeId = z.string().min(1).max(150).regex(/^[^/]+$/);
 const stopIdentity = z.object({
   id: z.string().max(150).optional(), pointCode: z.string().max(150).optional(),
-  placeId: z.string().max(150).optional(), orderNumber: z.string().max(150).optional(),
+  placeId: z.string().optional(), orderNumber: z.string().max(150).optional(),
 });
 const nullableText = (size: number) => z.string().max(size).nullable();
 const photoUrl = z.union([z.string().url().max(4096).regex(/^https:\/\/|^http:\/\/127\.0\.0\.1:9198\//),
