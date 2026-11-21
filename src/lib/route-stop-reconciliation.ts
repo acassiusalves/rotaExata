@@ -110,6 +110,10 @@ function mergeWithLatestExecution(latest: PlaceValue, planned: PlaceValue): Plac
     ...stripTransientFields(planned),
   } as Record<string, unknown>;
 
+  for (const field of ['city', 'state', 'cidade', 'uf']) {
+    if (hasOwn(planned, field) && merged[field] === '') delete merged[field];
+  }
+
   for (const field of EXECUTION_FIELDS) {
     if (hasOwn(latest, field)) merged[field] = (latest as Record<string, unknown>)[field];
     else delete merged[field];

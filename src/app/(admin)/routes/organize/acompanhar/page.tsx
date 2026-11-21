@@ -81,6 +81,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
+import { geocodedMunicipality } from '@/lib/geocoded-municipality';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -1962,6 +1963,7 @@ export default function OrganizeRoutePage() {
                 placeId: place.place_id,
                 lat: location.lat(),
                 lng: location.lng(),
+                ...geocodedMunicipality(place.address_components),
               });
             } else {
               console.warn(`Geocoding failed for "${address}": ${status}`);
@@ -1978,20 +1980,22 @@ export default function OrganizeRoutePage() {
   );
 
   const reverseGeocode = React.useCallback(
-    (lat: number, lng: number): Promise<Partial<typeof manualService> | null> => {
+    (lat: number, lng: number): Promise<(Partial<typeof manualService> & { uf?: string }) | null> => {
       return new Promise((resolve) => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
             const place = results[0];
-            const address: Partial<typeof manualService> = {};
+            const address: Partial<typeof manualService> & { uf?: string } = {};
 
             const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
 
             address.rua = get('route');
             address.numero = get('street_number');
             address.bairro = get('sublocality_level_1') || get('political');
-            address.cidade = get('administrative_area_level_2');
+            const { city, state } = geocodedMunicipality(place.address_components);
+            address.cidade = city;
+            address.uf = state;
             address.cep = get('postal_code');
 
             resolve(address);
@@ -2241,18 +2245,21 @@ export default function OrganizeRoutePage() {
       return;
     }
 
-    let geocoded;
+    let geocoded: Omit<PlaceValue, 'id'> | null;
 
     // Se temos lat/lng do mapa ajustado, usar essas coordenadas
-    if (lat && lng) {
+    if (lat != null && lng != null) {
       const addressString = numero
         ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
         : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const address = await reverseGeocode(lat, lng).catch(() => null);
       geocoded = {
         lat,
         lng,
         address: addressString,
         placeId: stopToEdit.stop.placeId || `manual-${Date.now()}`,
+        city: address?.cidade,
+        state: address?.uf,
       };
     } else {
       // Caso contrário, geocodificar o endereço
@@ -2263,9 +2270,15 @@ export default function OrganizeRoutePage() {
     }
 
     if (geocoded) {
-      const updatedStop: PlaceValue = {
+      const updatedStop: PlaceValue & { uf?: string } = {
         ...geocoded,
         id: stopToEdit.stop.id,
+        ...(stopToEdit.stop.pointCode ? { pointCode: stopToEdit.stop.pointCode } : {}),
+        // Campos vazios comunicam ao planejamento a remoção de valores anteriores.
+        city: geocoded.city ?? '',
+        state: geocoded.state ?? '',
+        cidade: '',
+        uf: '',
         address: geocoded.address,
         customerName: editService.customerName,
         phone: editService.phone,

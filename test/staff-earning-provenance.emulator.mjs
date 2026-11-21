@@ -16,6 +16,7 @@ const { staffPlanBatchSchema }=await loadModule('../src/lib/staff/route-plan-con
 const { routeFacts }=await loadModule('../functions/src/earnings-source-adapter.ts');
 const { calculateEarnings,normalizeRouteFacts,normalizeRule }=await loadModule('../src/lib/earnings/domain.ts');
 const { getStopIdentityKey }=await loadModule('../src/lib/route-stop-utils.ts');
+const { geocodedMunicipality }=await loadModule('../src/lib/geocoded-municipality.ts');
 
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
 
@@ -228,6 +229,54 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
       const result=routeRef();
       await applyStaffPlanBatch(db,actor,{commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,[manual])]});
       assert.equal(quote((await result.get()).data()).lunna,null);
+    });
+    await t.test('geocoded municipality survives draft creation and dispatch without assuming an absent UF',async()=>{
+      const municipality={types:['administrative_area_level_2','political'],long_name:'Goiânia',short_name:'Goiânia'};
+      const locality={types:['locality','political'],long_name:'Localidade de teste',short_name:'Localidade'};
+      const state={types:['administrative_area_level_1','political'],long_name:'Goiás',short_name:'GO'};
+      assert.deepEqual(geocodedMunicipality([locality,state]),{city:'Localidade de teste',state:'GO'});
+      assert.deepEqual(geocodedMunicipality(null),{});
+      const {city,state:oldState,...address}=stop;
+      for (const [components,expected] of [
+        [[municipality,locality,state],{city:'Goiânia',state:'GO'}],
+        [[municipality],{city:'Goiânia'}],
+      ]) {
+        const found=geocodedMunicipality(components);
+        assert.deepEqual(found,expected);
+        const planned={...address,...found};
+        const created=await createStaffDraft(db,actor,{...draft,stops:[planned],commandId:commandId()});
+        const projected=quote(await arrangeAndDispatch(routeRef(created.routeId),[planned]));
+        assert.equal(projected.lunna,false);
+        if (expected.state) assert.equal(projected.value.totalCents,500);
+        else assert.deepEqual(projected.value.map(issue=>issue.code),['unmatched_zone']);
+      }
+    });
+    await t.test('editing a dispatched stop replaces old municipality aliases and preserves its manual provenance',async()=>{
+      const ref=routeRef();
+      const previous={...stop,cidade:'Município anterior',uf:'MG',pointCode:'RT-SYNTHETIC-001',isLunnaOrder:false};
+      await ref.create({name:draft.name,status:'dispatched',code:'RT-SYNTHETIC',driverId:driver.id,
+        origin,plannedDate:completedAt,...metrics,stops:[previous]});
+      async function editMunicipality(city,state) {
+        const planned={...stop,lat:-16.69,pointCode:previous.pointCode,
+          address:'Endereço selecionado no mapa',city,state,cidade:'',uf:''};
+        const input=staffPlanPayload(commandId(),{existingPlans:[{routeId:ref.id,expectedStatus:'dispatched',
+          baseStops:[previous],plannedStops:[planned]}]});
+        await applyStaffPlanBatch(db,actor,input);
+        return (await ref.get()).data();
+      }
+      const corrected=await editMunicipality('Goiânia','GO');
+      assert.equal(corrected.stops[0].id,stop.id);
+      assert.equal(corrected.stops[0].pointCode,previous.pointCode);
+      assert.equal(corrected.stops[0].isLunnaOrder,false);
+      assert.equal(corrected.stops[0].cidade,undefined);
+      assert.equal(corrected.stops[0].uf,undefined);
+      assert.equal(quote(corrected).value.totalCents,500);
+
+      const unresolved=await editMunicipality('','');
+      assert.equal(unresolved.stops[0].city,undefined);
+      assert.equal(unresolved.stops[0].state,undefined);
+      assert.equal(unresolved.stops[0].isLunnaOrder,false);
+      assert.deepEqual(quote(unresolved).value.map(issue=>issue.code),['unmatched_zone']);
     });
     async function serviceDispatch(linkedFacts,existing) {
       const service=db.collection('services').doc();

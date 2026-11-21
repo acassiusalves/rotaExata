@@ -62,6 +62,7 @@ import { useRouter } from 'next/navigation';
 import { FALLBACK_ORIGIN, isLegacyBadOrigin,isValidOrigin } from '@/lib/default-origin';
 import { useStaff,useStaffWorkspace } from '@/components/staff/staff-session';
 import { staffPlannedPlaceSchema } from '@/lib/staff/route-contract';
+import { geocodedMunicipality } from '@/lib/geocoded-municipality';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 
 const initialSavedOrigins = [
@@ -313,7 +314,12 @@ export default function NewRoutePage() {
     const newStops = [...stops];
     if (place) {
       const safeId = place.id || place.placeId || `${place.placeId || 'p'}-${Date.now()}`;
-      newStops[index] = { ...newStops[index], ...place, id: String(safeId) };
+      const replacement: PlaceValue & { uf?: string } = {
+        ...newStops[index], ...place, id: String(safeId), city: place.city, state: place.state,
+      };
+      delete replacement.cidade;
+      delete replacement.uf;
+      newStops[index] = replacement;
       setStops(newStops);
     }
   };
@@ -347,6 +353,7 @@ export default function NewRoutePage() {
                 placeId: place.place_id,
                 lat: location.lat(),
                 lng: location.lng(),
+                ...geocodedMunicipality(place.address_components),
               });
             } else {
               console.warn(`Geocoding failed for "${address}": ${status}`);
@@ -1131,6 +1138,7 @@ export default function NewRoutePage() {
                           <AutocompleteInput
                               id={`stop-${index}`}
                               placeholder="Endereço da parada..."
+                              includeMunicipality
                               value={stop}
                               onChange={(place) => handleStopChange(index, place)}
                           />
