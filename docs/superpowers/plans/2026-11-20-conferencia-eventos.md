@@ -7,7 +7,7 @@
 ## Global Constraints
 Preservar Source/provas/374 historicos; nao criar pagamentos ou decisoes reais automaticamente. Reusar login/papeis/MFA, tarifa e writer existentes. Sem push para repositorio publico.
 ## Review Focus
-- Previa e confirmacao com Source, ator, tarifa ou corpo diferentes devem falhar.
+- Previa e confirmacao com Source, ator, tarifa ou corpo diferentes devem falhar; distinguir E/W/F para nao bloquear atualizacoes operacionais legitimas.
 - Retry autenticado apos ACK perdido devolve recibo mesmo com evento fora da fila.
 - Corrida worker/revisao, legado e dois operadores nunca emitem dois lancamentos.
 - Falta de confirmacao difere de resultado divergente; nao aceitar lacuna inventada.
