@@ -6,6 +6,7 @@ import {
 } from '../../route-stop-mutations.ts';
 import { RouteStructureConflictError } from '../../route-stop-reconciliation.ts';
 import { staffPlanBatchSchema,type StaffPlanBatch } from '../../staff/route-plan-contract.ts';
+import { staffManualStopDigest,staffManualStopId } from './editor-commands.ts';
 import { staffRouteRevision } from './route-commands.ts';
 import type { PlaceValue } from '../../types';
 import { getStopIdentityKey } from '../../route-stop-utils.ts';
@@ -60,20 +61,44 @@ async function wasCreatedByStaffDraft(db:Firestore,tx:Transaction,draft:Document
     receipt.get('routeId')===undefined && /^[a-f0-9]{64}$/.test(receipt.get('fingerprint')));
 }
 
-function standaloneDraftStopKeys(draft:DocumentSnapshot,selected:PlaceValue[]) {
-  const staysStandalone=(stop:PlaceValue & Record<string,unknown>)=>
-    !stop.orderNumber && !stop.lunnaClientCode && !Array.isArray(stop.items) && stop.isLunnaOrder!==true &&
+function staysStandalone(stop:PlaceValue & Record<string,unknown>) {
+  return !stop.orderNumber && !stop.lunnaClientCode && !Array.isArray(stop.items) && stop.isLunnaOrder!==true &&
     !stop.previousRouteId && !stop.fromRouteId && !stop.isRedelivery && !stop.operationType && !stop.hasExchangeItems;
+}
+
+async function standaloneDraftStopKeys(
+  db:Firestore,tx:Transaction,draft:DocumentSnapshot,selected:PlaceValue[],planned:unknown[],
+) {
   const identities=new Map<string,boolean>();
   const original=draft.get('stops');
   for (const stop of Array.isArray(original) ? original:[]) {
     const key=getStopIdentityKey(stop);
     if (key) identities.set(key,!identities.has(key) && staysStandalone(stop));
   }
-  return new Set(selected.flatMap(stop=>{
+  const keys=new Set<string>();
+  const candidates=new Map<string,{key:string;digest:string}>();
+  selected.forEach((stop,index)=>{
     const key=getStopIdentityKey(stop);
-    return key && identities.get(key) && staysStandalone(stop as PlaceValue & Record<string,unknown>) ? [key]:[];
-  }));
+    if (!key || !staysStandalone(stop as PlaceValue & Record<string,unknown>)) return;
+    if (typeof stop.id!=='string' || !staffManualStopId.test(stop.id)) {
+      if (identities.get(key)) keys.add(key);
+      return;
+    }
+    const digest=staffManualStopDigest(stop);
+    if (digest && digest===staffManualStopDigest(planned[index])) candidates.set(stop.id,{key,digest});
+  });
+  if (candidates.size) {
+    const receipts=await tx.getAll(...Array.from(candidates.keys(),id=>db.collection('rotaStaffCommands').doc(id)));
+    const draftCreation=staffRouteRevision(draft.createTime);
+    for (const receipt of receipts) {
+      const candidate=candidates.get(receipt.id)!;
+      if (receipt.get('kind')==='add-manual-stop' && receipt.get('entityId')===draft.id &&
+          receipt.get('draftCreation')===draftCreation && receipt.get('stopDigest')===candidate.digest) {
+        keys.add(candidate.key);
+      }
+    }
+  }
+  return keys;
 }
 
 function canonicalServiceStops<T extends {orderNumber?:string}>(stops:T[],service:DocumentSnapshot) {
@@ -168,7 +193,7 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     const source=draft.get('source');
     const proved=(source==null || source==='rota-exata') && (orderIds==null || (Array.isArray(orderIds) && !orderIds.length)) &&
       await wasCreatedByStaffDraft(db,tx,draft);
-    provedStandaloneDraft=proved ? standaloneDraftStopKeys(draft,selected.stops):new Set();
+    provedStandaloneDraft=proved ? await standaloneDraftStopKeys(db,tx,draft,selected.stops,target.plannedStops):new Set();
     const updated=arranged.map((route:{key:string})=>route.key===selected.key ? {...route,dispatched:true}:route);
     writes.push(()=>{
       if (updated.every((route:{dispatched:boolean})=>route.dispatched)) tx.delete(draft.ref);
@@ -189,6 +214,16 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
       ...(plan.metadata?.status==='dispatched' ? {dispatchedAt:FieldValue.serverTimestamp()}:{}),
     }};
   }) as unknown as ExistingRoutePlan[];
+  const previousKeys=new Set<string>();
+  const previousIds=new Set<string>();
+  for (const doc of routeDocs) {
+    const stops=doc.get('stops');
+    for (const stop of Array.isArray(stops) ? stops:[]) {
+      const key=getStopIdentityKey(stop);
+      if (key) previousKeys.add(key);
+      if (stop?.id!=null) previousIds.add(String(stop.id).trim().toLowerCase());
+    }
+  }
   const newInput=batch.newRoutes ?? [];
   const standaloneCount=service ? 0:newInput.length;
   const counter=db.doc('counters/routeCode');
@@ -204,7 +239,10 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     const moved=new Set(batch.transferIntents?.filter(intent=>intent.targetRouteId===routeId).map(intent=>intent.stopKey));
     const canonicalStops=service ? canonicalServiceStops(plannedStops,service):plannedStops.map(stop=>{
       const key=getStopIdentityKey(stop);
-      return key && !stop.orderNumber && !moved.has(stop._originalStopKey?.trim() ?? key) &&
+      const sourceKey=stop._originalStopKey?.trim() || key;
+      return key && sourceKey && !stop.orderNumber && !moved.has(sourceKey) &&
+        !previousKeys.has(sourceKey) && !previousKeys.has(key) &&
+        (stop.id==null || !previousIds.has(String(stop.id).trim().toLowerCase())) &&
         (!provedStandaloneDraft || provedStandaloneDraft.has(key)) ? {...stop,isLunnaOrder:false}:stop;
     });
     const serviceCode=service?.get('code') ?? '';
@@ -267,12 +305,6 @@ async function applyDispatchLinks(
         writes.push(()=>tx.update(order.ref,{logisticsStatus:'em_rota',rotaExataRouteId:route.routeId,
           rotaExataRouteCode:code ?? null,updatedAt:FieldValue.serverTimestamp()}));
       }
-    }
-    if (routeNumbers.length) {
-      const provenOrders=new Set(routeNumbers);
-      route.stops=route.stops.map(stop=>stop.orderNumber && provenOrders.has(stop.orderNumber) ?
-        {...stop,isLunnaOrder:true}:stop);
-      if (!newRoute) writes.push(()=>tx.update(target,{stops:route.stops}));
     }
   }
   for (const [serviceId,summary] of serviceLinks) {

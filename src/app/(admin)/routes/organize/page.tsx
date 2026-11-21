@@ -405,7 +405,7 @@ const EditableRouteName: React.FC<{
 };
 
 export default function OrganizeRoutePage() {
-  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, requestLocation:requestDriverLocation, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, code:generateRouteCode, user, draftKey, native } = useRouteEditor();
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, addManualStop, requestLocation:requestDriverLocation, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, code:generateRouteCode, user, draftKey, native } = useRouteEditor();
   const router = useRouter();
   const { toast } = useToast();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
@@ -1185,8 +1185,11 @@ export default function OrganizeRoutePage() {
             if (status === 'OK' && results && results[0]) {
               const place = results[0];
               const location = place.geometry.location;
+              const component = (type: string) => place.address_components?.find(part => part.types.includes(type));
               resolve({
                 id: `geocoded-${place.place_id}-${Date.now()}`,
+                city: component('administrative_area_level_2')?.long_name ?? component('locality')?.long_name,
+                state: component('administrative_area_level_1')?.short_name,
                 address: place.formatted_address,
                 placeId: place.place_id,
                 lat: location.lat(),
@@ -1588,15 +1591,26 @@ export default function OrganizeRoutePage() {
     const geocoded = await geocodeAddress(addressString);
 
     if (geocoded) {
-      const newStop: PlaceValue = {
+      let registeredStop: PlaceValue = {
         ...geocoded,
         id: `manual-${Date.now()}`,
-        address: geocoded.address,
         customerName: manualService.customerName,
         phone: manualService.phone,
         notes: manualService.notes,
-        isNewlyAdded: true, // Marcar como recém-adicionado
       };
+      if (native && routeData?.isDraft && routeData.draftRouteId) {
+        try {
+          registeredStop = await addManualStop(routeData.draftRouteId, registeredStop);
+        } catch {
+          toast({
+            variant: 'destructive',
+            title: 'Serviço não adicionado',
+            description: 'Recarregue o rascunho e tente novamente.',
+          });
+          return;
+        }
+      }
+      const newStop = { ...registeredStop, isNewlyAdded: true };
 
       // Add to selected route or unassigned
       if (selectedRouteForNewService === 'unassigned') {

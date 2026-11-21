@@ -12,7 +12,7 @@ import { staffWorkspaceKey } from '@/lib/staff/workspace';
 import { collectStaffPages,staffPollDelay } from '@/lib/staff/query-pages';
 import { staffRouteDates } from '@/lib/staff/route-dates';
 import { editorStop,staffPlanPayload } from '@/lib/staff/editor-payload';
-import { staffArrangementSchema,type StaffEditorRead } from '@/lib/staff/editor-contract';
+import { staffArrangementSchema,staffManualStopSchema,type StaffEditorRead } from '@/lib/staff/editor-contract';
 import type { PlaceValue,RouteInfo } from '@/lib/types';
 import { resolveRoutePlanMetrics,type RouteMetrics,type ExistingRoutePlan,type RoutePlanBatchInput,type SavedRoutePlanBatch } from '@/lib/route-stop-mutations';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
@@ -216,8 +216,19 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
 
   async function patch(command:EditorRow) {
     const fingerprint=JSON.stringify(command);
-    await request('/api/staff/routes/editor',post(editorBody({...command,commandId:commitId(fingerprint)}),'PATCH'));
+    const result=await request<{stop?:PlaceValue}>('/api/staff/routes/editor',
+      post(editorBody({...command,commandId:commitId(fingerprint)}),'PATCH'));
     ids.delete(fingerprint);
+    return result;
+  }
+
+  async function addManualStop(draftId:string,stop:PlaceValue) {
+    const current=(await readDocument(routeRef(draftId),true)).data();
+    const {id,orderNumber,pointCode,_originalStopKey,...fields}=editorStop(stop);
+    const result=await patch({kind:'add-manual-stop',routeId:draftId,revision:current.revision,
+      stop:staffManualStopSchema.parse(fields)});
+    if (!result.stop) throw new Error('O ponto não foi registrado no rascunho.');
+    return result.stop;
   }
 
   async function update(reference:EditorRef,data:EditorRow) {
@@ -393,7 +404,7 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
   }
 
   return {
-    readDocument,readList,watch,update,remove,createRoute,createServicePair,unlinkStop,requestLocation,batch,call,sequence,computeRoute,defaultOrigin,sendNotice,
+    readDocument,readList,watch,update,remove,createRoute,addManualStop,createServicePair,unlinkStop,requestLocation,batch,call,sequence,computeRoute,defaultOrigin,sendNotice,
     notify:async(data:EditorRow)=>{
       if (!nativeStaffEnabled) return (await loadLegacy()).addNotification(data);
       return {id:noticeIdFrom(notices,data.routeId)};

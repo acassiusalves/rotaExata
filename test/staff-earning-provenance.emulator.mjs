@@ -11,6 +11,7 @@ const { createStaffDraft }=await loadModule('../src/lib/server/staff/route-draft
 const { applyStaffEditorCommand }=await loadModule('../src/lib/server/staff/editor-commands.ts');
 const { applyStaffPlanBatch }=await loadModule('../src/lib/server/staff/route-plan.ts');
 const { applyStaffRouteCommand,staffRouteRevision }=await loadModule('../src/lib/server/staff/route-commands.ts');
+const { staffPlanPayload }=await loadModule('../src/lib/staff/editor-payload.ts');
 const { staffPlanBatchSchema }=await loadModule('../src/lib/staff/route-plan-contract.ts');
 const { routeFacts }=await loadModule('../functions/src/earnings-source-adapter.ts');
 const { calculateEarnings,normalizeRouteFacts,normalizeRule }=await loadModule('../src/lib/earnings/domain.ts');
@@ -58,16 +59,16 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
   const routeInput=(ref,plannedStops)=>({routeId:ref.id,plannedStops,data:{
     name:draft.name,origin,status:'dispatched',driverId:driver.id,plannedDate:completedAt,...metrics,
   }});
-  async function arrangeAndDispatch(ref) {
+  async function arrangeAndDispatch(ref,stops=[stop],plannedStops=stops) {
     await applyStaffEditorCommand(db,actor,{kind:'arrange',routeId:ref.id,commandId:commandId(),
       revision:staffRouteRevision((await ref.get()).updateTime),
-      routes:[{key:'A',name:draft.name,stops:[stop],info:metrics}],
+      routes:[{key:'A',name:draft.name,stops,info:metrics}],
     });
     const result=routeRef();
-    const batch={commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,[stop])],
+    const batch={commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,plannedStops)],
       draftDispatch:{routeId:ref.id,revision:staffRouteRevision((await ref.get()).updateTime),key:'A'}};
     assert.equal(staffPlanBatchSchema.safeParse({...batch,newRoutes:[routeInput(result,[{...stop,isLunnaOrder:true}])]}).success,false);
-    await applyStaffPlanBatch(db,actor,batch);
+    await applyStaffPlanBatch(db,actor,staffPlanPayload(batch.commandId,batch));
     return (await result.get()).data();
   }
   try {
@@ -121,20 +122,82 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
       if (result.existingRoutes[0].noticeId) docs.push(db.doc('rotaStaffRouteNotices/'+result.existingRoutes[0].noticeId));
       assert.equal(quote((await target.get()).data()).lunna,null);
     });
-    await t.test('a service dispatch proves a Lunna stop from its linked order and keeps the bonus',async()=>{
+    await t.test('a removed stop added to a new route without a transfer intent keeps its unknown classification',async()=>{
+      const legacy=routeRef();
+      const target=routeRef();
+      await legacy.create({status:'dispatched',driverId:driver.id,stops:[stop],source:'rota-exata'});
+      const result=await applyStaffPlanBatch(db,actor,{commandId:commandId(),
+        existingPlans:[{routeId:legacy.id,baseStops:[{id:stop.id}],plannedStops:[]}],
+        newRoutes:[routeInput(target,[stop])],
+      });
+      docs.push(db.doc('routeChangeNotifications/'+legacy.id));
+      if (result.existingRoutes[0].noticeId) docs.push(db.doc('rotaStaffRouteNotices/'+result.existingRoutes[0].noticeId));
+      assert.equal(quote((await target.get()).data()).lunna,null);
+    });
+    await t.test('Adicionar Serviço issues a private receipt for the new stop saved only in organizedRoutes',async()=>{
+      const created=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
+      const ref=routeRef(created.routeId);
+      const {id,...manual}=stop;
+      const command={kind:'add-manual-stop',routeId:ref.id,commandId:commandId(),
+        revision:staffRouteRevision((await ref.get()).updateTime),stop:manual};
+      const added=await applyStaffEditorCommand(db,actor,command);
+      docs.push(db.doc('rotaStaffCommands/'+added.stop.id));
+      assert.notEqual(added.stop.id,id);
+      assert.deepEqual((await applyStaffEditorCommand(db,actor,command)).stop,added.stop);
+      assert.equal((await ref.get()).get('stops')[0].id,id);
+      const projected=quote(await arrangeAndDispatch(ref,[added.stop]));
+      assert.equal(projected.lunna,false);
+      assert.equal(projected.value.totalCents,500);
+    });
+    await t.test('manual stop proof rejects spoofed flags, stale revisions, modified points and draft copies',async()=>{
+      const created=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
+      const ref=routeRef(created.routeId);
+      const {id,...manual}=stop;
+      const command={kind:'add-manual-stop',routeId:ref.id,commandId:commandId(),
+        revision:staffRouteRevision((await ref.get()).updateTime),stop:manual};
+      await assert.rejects(applyStaffEditorCommand(db,actor,{...command,stop:{...manual,id,isLunnaOrder:false}}),
+        error=>error.name==='ZodError');
+      await assert.rejects(applyStaffEditorCommand(db,actor,{...command,revision:'000000000001.000000000'}),
+        error=>error.code==='staff_route_conflict');
+      const added=await applyStaffEditorCommand(db,actor,command);
+      docs.push(db.doc('rotaStaffCommands/'+added.stop.id));
+      const copy=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
+      assert.equal(quote(await arrangeAndDispatch(routeRef(copy.routeId),[added.stop])).lunna,null);
+      assert.equal(quote(await arrangeAndDispatch(ref,[added.stop],[{...added.stop,notes:'Conteúdo diferente'}])).lunna,null);
+    });
+    async function serviceDispatch(linkedFacts,existing) {
       const service=db.collection('services').doc();
       const order=db.collection('orders').doc();
       const route=routeRef();
       const linked={...stop,orderNumber:'SYN-'+order.id};
+      const archived={...stop,id:'archived-stop',unlinkedAt:completedAt};
       docs.push(service,order);
-      await service.create({code:'LNS-SYNTHETIC',status:'organizing',routeIds:[],allStops:[linked]});
+      await service.create({code:'LNS-SYNTHETIC',status:'organizing',routeIds:existing ? [route.id]:[],
+        allStops:[{...linked,...linkedFacts}]});
       await order.create({number:linked.orderNumber,rotaExataServiceId:service.id});
-      const input={commandId:commandId(),existingPlans:[],newRoutes:[routeInput(route,[linked])],
-        serviceLink:{serviceId:service.id,routeIds:[route.id]}};
+      if (existing) await route.create({name:draft.name,origin,plannedDate:completedAt,
+        status:'draft',stops:[{...linked,...linkedFacts},archived],serviceId:service.id,code:'LNS-SYNTHETIC-A',...metrics});
+      const input={commandId:commandId(),
+        existingPlans:existing ? [{routeId:route.id,expectedStatus:'draft',baseStops:[{id:linked.id,orderNumber:linked.orderNumber}],plannedStops:[linked],
+          metadata:{status:'dispatched',driverId:driver.id}}]:[],
+        ...(existing ? {}:{newRoutes:[routeInput(route,[linked])],serviceLink:{serviceId:service.id,routeIds:[route.id]}})};
       assert.equal(staffPlanBatchSchema.safeParse({...input,newRoutes:[routeInput(route,[{...linked,isLunnaOrder:false}])]}).success,false);
       await applyStaffPlanBatch(db,actor,input);
       assert.equal((await order.get()).get('rotaExataRouteId'),route.id);
-      const projected=quote((await route.get()).data());
+      return {result:(await route.get()).data(),archived};
+    }
+    await t.test('dispatching a saved service draft preserves archived stops and its linked orders',async()=>{
+      const {result,archived}=await serviceDispatch({},true);
+      assert.deepEqual(result.stops.find(row=>row.id===archived.id),archived);
+    });
+    await t.test('an operational link alone does not attest the Lunna bonus',async()=>{
+      const {result}=await serviceDispatch({},false);
+      assert.equal(quote(result).lunna,null);
+    });
+    await t.test('a linked stop with existing commercial facts preserves the Lunna bonus',async()=>{
+      const {result}=await serviceDispatch({lunnaClientCode:'SYN-CLIENT'},false);
+      assert.equal(result.stops[0].isLunnaOrder,undefined);
+      const projected=quote(result);
       assert.equal(projected.lunna,true);
       assert.equal(projected.value.totalCents,600);
     });
