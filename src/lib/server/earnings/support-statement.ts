@@ -6,12 +6,16 @@ import { resolveEarningsActor, verifyNativeSession, type ActorAuthority, type Ea
 import { actorRpc, privateJson } from './store.ts';
 import { EarningsError, earningsErrorResponse, readJsonBody } from './transport.ts';
 
+const cursorDate = z.string().datetime({offset:true}).refine(value =>
+  // PostgreSQL has no year zero and accepts numeric offsets only through ±15:59.
+  !value.startsWith('0000-') && /(?:Z|[+-](?:0\d|1[0-5]):?[0-5]\d)$/.test(value));
+
 const inputSchema = z.object({
   sourceUid: z.string().min(1).max(128).refine(value =>
     value.trim() === value && value !== '.' && value !== '..' && !/[\/\\\s\x00-\x1f\x7f]/u.test(value)),
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).refine(value => value >= '1900-01' && value <= '2200-01'),
   status: z.enum(earningsStatuses).optional(),
-  after: z.string().datetime({offset:true}).optional(),
+  after: cursorDate.optional(),
   afterId: z.string().uuid().optional(),
   limit: z.number().int().min(1).max(100).default(50),
   reason: z.string().trim().min(1).max(1000).refine(value => !value.includes('\0')),

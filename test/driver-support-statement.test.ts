@@ -84,3 +84,35 @@ test('rejects invalid strict inputs without reading a statement',async()=>{
     assert.equal(f.reads(),0);
   }
 });
+
+test('rejects timestamps PostgreSQL cannot parse before requesting a statement',async()=>{
+  for (const after of [
+    '2026-11-19T12:00:00+16:00', '2026-11-19T12:00:00-16:00', '2026-11-19T12:00:00+99:99',
+    '2026-11-19T12:00:00+00:90', '2026-11-19T12:00:00+0060', '2026-02-29T12:00:00Z',
+    '0000-01-01T12:00:00Z',
+  ]) {
+    const f=fixture();
+    const response=await postSupportStatement(request({...body,after,afterId:userId}),f);
+    assert.equal(response.status,422,after);
+    assert.deepEqual(await response.json(),{code:'earnings_invalid_request'});
+    assert.equal(f.reads(),0);
+  }
+});
+
+test('passes valid cursor timestamps through with their offset and microseconds intact',async()=>{
+  for (const after of [
+    '2026-11-19T12:00:00+15:59', '2026-11-19T12:00:00Z', '2024-02-29T12:00:00.123456-15:59',
+    '2026-11-19T12:00:00.123456+1559',
+  ]) {
+    let forwarded:unknown;
+    const response=await postSupportStatement(request({...body,after,afterId:userId}),{
+      ...fixture(),
+      read:async(_actor,params)=>{
+        forwarded=params.p_after_date;
+        return statement;
+      },
+    });
+    assert.equal(response.status,200,after);
+    assert.equal(forwarded,after);
+  }
+});
