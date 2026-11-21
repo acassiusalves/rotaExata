@@ -1210,20 +1210,21 @@ export default function OrganizeRoutePage() {
   );
 
   const reverseGeocode = React.useCallback(
-    (lat: number, lng: number): Promise<Partial<typeof manualService> | null> => {
+    (lat: number, lng: number): Promise<(Partial<typeof manualService> & { uf?: string }) | null> => {
       return new Promise((resolve) => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
             const place = results[0];
-            const address: Partial<typeof manualService> = {};
+            const address: Partial<typeof manualService> & { uf?: string } = {};
 
             const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
 
             address.rua = get('route');
             address.numero = get('street_number');
             address.bairro = get('sublocality_level_1') || get('political');
-            address.cidade = get('administrative_area_level_2');
+            address.cidade = get('administrative_area_level_2') || get('locality');
+            address.uf = place.address_components.find(c => c.types.includes('administrative_area_level_1'))?.short_name;
             address.cep = get('postal_code');
 
             resolve(address);
@@ -1480,11 +1481,14 @@ export default function OrganizeRoutePage() {
       const addressString = numero
         ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
         : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const address = await reverseGeocode(lat, lng);
       geocoded = {
         lat,
         lng,
         address: addressString,
         placeId: stopToEdit.stop.placeId || `manual-${Date.now()}`,
+        city: address?.cidade,
+        state: address?.uf,
       };
     } else {
       // Caso contrário, geocodificar o endereço

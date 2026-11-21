@@ -6,7 +6,7 @@ import {
 } from '../../route-stop-mutations.ts';
 import { RouteStructureConflictError } from '../../route-stop-reconciliation.ts';
 import { staffPlanBatchSchema,type StaffPlanBatch } from '../../staff/route-plan-contract.ts';
-import { staffManualStopDigest,staffManualStopId } from './editor-commands.ts';
+import { assertDistinctStaffArrangedStops,normalizedStaffStopId,staffManualStopId,staffManualStopPrefix } from './editor-commands.ts';
 import { staffRouteRevision } from './route-commands.ts';
 import type { PlaceValue } from '../../types';
 import { getStopIdentityKey } from '../../route-stop-utils.ts';
@@ -61,13 +61,14 @@ async function wasCreatedByStaffDraft(db:Firestore,tx:Transaction,draft:Document
     receipt.get('routeId')===undefined && /^[a-f0-9]{64}$/.test(receipt.get('fingerprint')));
 }
 
-function staysStandalone(stop:PlaceValue & Record<string,unknown>) {
+function staysStandalone(stop:Partial<PlaceValue> & Record<string,unknown>) {
   return !stop.orderNumber && !stop.lunnaClientCode && !Array.isArray(stop.items) && stop.isLunnaOrder!==true &&
     !stop.previousRouteId && !stop.fromRouteId && !stop.isRedelivery && !stop.operationType && !stop.hasExchangeItems;
 }
 
 async function standaloneDraftStopKeys(
-  db:Firestore,tx:Transaction,draft:DocumentSnapshot,selected:PlaceValue[],planned:unknown[],
+  db:Firestore,tx:Transaction,draft:DocumentSnapshot,selected:PlaceValue[],
+  target:NonNullable<StaffPlanBatch['newRoutes']>[number],writes:Array<()=>void>,
 ) {
   const identities=new Map<string,boolean>();
   const original=draft.get('stops');
@@ -76,26 +77,28 @@ async function standaloneDraftStopKeys(
     if (key) identities.set(key,!identities.has(key) && staysStandalone(stop));
   }
   const keys=new Set<string>();
-  const candidates=new Map<string,{key:string;digest:string}>();
+  const candidates=new Map<string,{key:string;standalone:boolean}>();
   selected.forEach((stop,index)=>{
     const key=getStopIdentityKey(stop);
-    if (!key || !staysStandalone(stop as PlaceValue & Record<string,unknown>)) return;
-    if (typeof stop.id!=='string' || !staffManualStopId.test(stop.id)) {
-      if (identities.get(key)) keys.add(key);
+    if (!key) return;
+    const id=normalizedStaffStopId(stop);
+    const standalone=staysStandalone(stop as PlaceValue & Record<string,unknown>) && staysStandalone(target.plannedStops[index]);
+    if (!id.startsWith(staffManualStopPrefix)) {
+      if (identities.get(key) && standalone) keys.add(key);
       return;
     }
-    const digest=staffManualStopDigest(stop);
-    if (digest && digest===staffManualStopDigest(planned[index])) candidates.set(stop.id,{key,digest});
+    if (staffManualStopId.test(id)) candidates.set(id,{key,standalone});
   });
   if (candidates.size) {
     const receipts=await tx.getAll(...Array.from(candidates.keys(),id=>db.collection('rotaStaffCommands').doc(id)));
     const draftCreation=staffRouteRevision(draft.createTime);
     for (const receipt of receipts) {
+      if (receipt.get('kind')!=='add-manual-stop' || receipt.get('entityId')!==draft.id ||
+          receipt.get('draftCreation')!==draftCreation) continue;
+      if (receipt.get('consumedRouteId')) throw new EarningsError(409,'staff_route_conflict');
+      writes.push(()=>tx.update(receipt.ref,{consumedRouteId:target.routeId}));
       const candidate=candidates.get(receipt.id)!;
-      if (receipt.get('kind')==='add-manual-stop' && receipt.get('entityId')===draft.id &&
-          receipt.get('draftCreation')===draftCreation && receipt.get('stopDigest')===candidate.digest) {
-        keys.add(candidate.key);
-      }
+      if (candidate.standalone) keys.add(candidate.key);
     }
   }
   return keys;
@@ -182,21 +185,24 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
   if (draft && batch.draftDispatch) {
     if (!draft.exists || draft.get('status')!=='draft' || draft.get('serviceId') ||
         staffRouteRevision(draft.updateTime)!==batch.draftDispatch.revision) throw new EarningsError(409,'staff_route_conflict');
-    const arranged=draft.get('organizedRoutes') ?? [];
+    const arranged=draft.get('organizedRoutes');
+    if (!Array.isArray(arranged)) throw new EarningsError(409,'staff_route_conflict');
+    assertDistinctStaffArrangedStops(arranged);
     const selected=arranged.find((route:{key:string;dispatched:boolean})=>route.key===batch.draftDispatch!.key && !route.dispatched);
     const target=batch.newRoutes![0];
-    if (!selected || !Array.isArray(selected.stops) ||
-        selected.stops.map(getStopIdentityKey).join('\0')!==target.plannedStops.map(getStopIdentityKey).join('\0')) {
+    if (!selected || selected.stops.length!==target.plannedStops.length ||
+        target.plannedStops.some((stop,index)=>getStopIdentityKey(stop)!==getStopIdentityKey(selected.stops[index]) ||
+          normalizedStaffStopId(stop)!==normalizedStaffStopId(selected.stops[index]))) {
       throw new EarningsError(409,'staff_route_conflict');
     }
     const orderIds=draft.get('lunnaOrderIds');
     const source=draft.get('source');
     const proved=(source==null || source==='rota-exata') && (orderIds==null || (Array.isArray(orderIds) && !orderIds.length)) &&
       await wasCreatedByStaffDraft(db,tx,draft);
-    provedStandaloneDraft=proved ? await standaloneDraftStopKeys(db,tx,draft,selected.stops,target.plannedStops):new Set();
-    const updated=arranged.map((route:{key:string})=>route.key===selected.key ? {...route,dispatched:true}:route);
+    provedStandaloneDraft=proved ? await standaloneDraftStopKeys(db,tx,draft,selected.stops,target,writes):new Set();
+    const updated=arranged.map((route:{key:string;dispatched?:boolean})=>route.key===selected.key ? {...route,dispatched:true}:route);
     writes.push(()=>{
-      if (updated.every((route:{dispatched:boolean})=>route.dispatched)) tx.delete(draft.ref);
+      if (updated.every(route=>route.dispatched)) tx.delete(draft.ref);
       else tx.update(draft.ref,{organizedRoutes:updated,updatedAt:FieldValue.serverTimestamp()});
     });
   }
@@ -221,7 +227,8 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     for (const stop of Array.isArray(stops) ? stops:[]) {
       const key=getStopIdentityKey(stop);
       if (key) previousKeys.add(key);
-      if (stop?.id!=null) previousIds.add(String(stop.id).trim().toLowerCase());
+      const id=normalizedStaffStopId(stop);
+      if (id) previousIds.add(id);
     }
   }
   const newInput=batch.newRoutes ?? [];
@@ -240,10 +247,11 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     const canonicalStops=service ? canonicalServiceStops(plannedStops,service):plannedStops.map(stop=>{
       const key=getStopIdentityKey(stop);
       const sourceKey=stop._originalStopKey?.trim() || key;
+      const id=normalizedStaffStopId(stop);
+      const standalone=provedStandaloneDraft ? key && provedStandaloneDraft.has(key) : !id.startsWith(staffManualStopPrefix);
       return key && sourceKey && !stop.orderNumber && !moved.has(sourceKey) &&
-        !previousKeys.has(sourceKey) && !previousKeys.has(key) &&
-        (stop.id==null || !previousIds.has(String(stop.id).trim().toLowerCase())) &&
-        (!provedStandaloneDraft || provedStandaloneDraft.has(key)) ? {...stop,isLunnaOrder:false}:stop;
+        !previousKeys.has(sourceKey) && !previousKeys.has(key) && !previousIds.has(id) && standalone
+        ? {...stop,isLunnaOrder:false}:stop;
     });
     const serviceCode=service?.get('code') ?? '';
     let code='RT-'+String(currentCount+index+1).padStart(4,'0');

@@ -59,17 +59,34 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
   const routeInput=(ref,plannedStops)=>({routeId:ref.id,plannedStops,data:{
     name:draft.name,origin,status:'dispatched',driverId:driver.id,plannedDate:completedAt,...metrics,
   }});
-  async function arrangeAndDispatch(ref,stops=[stop],plannedStops=stops) {
-    await applyStaffEditorCommand(db,actor,{kind:'arrange',routeId:ref.id,commandId:commandId(),
-      revision:staffRouteRevision((await ref.get()).updateTime),
-      routes:[{key:'A',name:draft.name,stops,info:metrics}],
-    });
+  const group=(key,stops)=>({key,name:draft.name,stops,info:metrics});
+  async function arrange(ref,routes) {
+    return applyStaffEditorCommand(db,actor,{kind:'arrange',routeId:ref.id,commandId:commandId(),
+      revision:staffRouteRevision((await ref.get()).updateTime),routes});
+  }
+  async function dispatch(ref,stops,key='A') {
     const result=routeRef();
-    const batch={commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,plannedStops)],
-      draftDispatch:{routeId:ref.id,revision:staffRouteRevision((await ref.get()).updateTime),key:'A'}};
+    const batch={commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,stops)],
+      draftDispatch:{routeId:ref.id,revision:staffRouteRevision((await ref.get()).updateTime),key}};
     assert.equal(staffPlanBatchSchema.safeParse({...batch,newRoutes:[routeInput(result,[{...stop,isLunnaOrder:true}])]}).success,false);
-    await applyStaffPlanBatch(db,actor,staffPlanPayload(batch.commandId,batch));
+    const input=staffPlanPayload(batch.commandId,batch);
+    await applyStaffPlanBatch(db,actor,input);
+    assert.equal((await applyStaffPlanBatch(db,actor,input)).replayed,true);
     return (await result.get()).data();
+  }
+  async function arrangeAndDispatch(ref,stops=[stop],plannedStops=stops) {
+    await arrange(ref,[group('A',stops)]);
+    return dispatch(ref,plannedStops);
+  }
+  async function manualDraft() {
+    const created=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
+    const ref=routeRef(created.routeId);
+    const {id,...fields}=stop;
+    const command={kind:'add-manual-stop',routeId:ref.id,commandId:commandId(),
+      revision:staffRouteRevision((await ref.get()).updateTime),stop:fields};
+    const added=await applyStaffEditorCommand(db,actor,command);
+    docs.push(db.doc('rotaStaffCommands/'+added.stop.id));
+    return {ref,manual:added.stop};
   }
   try {
     await t.test('a BFF draft remains provable after an edit and prices the standalone stop at 500 cents',async()=>{
@@ -149,7 +166,7 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
       assert.equal(projected.lunna,false);
       assert.equal(projected.value.totalCents,500);
     });
-    await t.test('manual stop proof rejects spoofed flags, stale revisions, modified points and draft copies',async()=>{
+    await t.test('manual stop proof rejects spoofed flags, stale revisions and draft copies',async()=>{
       const created=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
       const ref=routeRef(created.routeId);
       const {id,...manual}=stop;
@@ -163,7 +180,54 @@ test('staff planning classifies only stops with dispatch provenance',async t=>{
       docs.push(db.doc('rotaStaffCommands/'+added.stop.id));
       const copy=await createStaffDraft(db,actor,{...draft,commandId:commandId()});
       assert.equal(quote(await arrangeAndDispatch(routeRef(copy.routeId),[added.stop])).lunna,null);
-      assert.equal(quote(await arrangeAndDispatch(ref,[added.stop],[{...added.stop,notes:'Conteúdo diferente'}])).lunna,null);
+    });
+    await t.test('Editar Serviço preserves manual origin after notes, optional fields and map address change',async()=>{
+      const {ref,manual}=await manualDraft();
+      const edited={...manual,notes:'Deixar com a portaria',phone:'',orderNumber:'',
+        timeWindowStart:'',timeWindowEnd:'',complemento:'',address:'Outro endereço de teste',
+        lat:-16.69,lng:-49.27,city:'Goiânia',state:'GO'};
+      const projected=quote(await arrangeAndDispatch(ref,[edited]));
+      assert.equal(projected.lunna,false);
+      assert.equal(projected.value.totalCents,500);
+    });
+    await t.test('order hints suppress manual classification on either side of dispatch',async()=>{
+      const a=await manualDraft();
+      const linked={...a.manual,orderNumber:'SYN-ORDER'};
+      assert.equal(quote(await arrangeAndDispatch(a.ref,[linked])).lunna,null);
+      const b=await manualDraft();
+      await arrange(b.ref,[group('A',[b.manual])]);
+      const before=await b.ref.get();
+      await b.ref.update({organizedRoutes:[{...before.get('organizedRoutes')[0],
+        stops:[{...b.manual,pointCode:'SYN-POINT',lunnaClientCode:'SYN-CLIENT'}]}]});
+      assert.equal(quote(await dispatch(b.ref,[{...b.manual,pointCode:'SYN-POINT'}])).lunna,null);
+    });
+    await t.test('the editor rejects duplicate stop ids before and after dispatching the first group',async()=>{
+      const {ref,manual}=await manualDraft();
+      const collision={...manual,id:manual.id.toUpperCase(),pointCode:'SYN-DIFFERENT-POINT'};
+      await assert.rejects(arrange(ref,[group('A',[manual]),group('B',[collision])]),error=>error.status===409);
+      await arrange(ref,[group('A',[manual]),group('B',[stop])]);
+      assert.equal(quote(await dispatch(ref,[manual])).lunna,false);
+      await assert.rejects(arrange(ref,[group('B',[collision])]),error=>error.status===409);
+      assert.equal(quote(await dispatch(ref,[stop],'B')).lunna,false);
+    });
+    await t.test('the dispatcher rejects duplicate stop ids persisted outside the editor and reuse after first dispatch',async()=>{
+      const {ref,manual}=await manualDraft();
+      const collision={...manual,pointCode:'SYN-DIFFERENT-POINT'};
+      await ref.update({organizedRoutes:[group('A',[manual]),group('B',[collision])]});
+      await assert.rejects(dispatch(ref,[manual]),error=>error.status===409);
+      await arrange(ref,[group('A',[manual]),group('B',[stop])]);
+      assert.equal(quote(await dispatch(ref,[manual])).lunna,false);
+      const after=await ref.get();
+      await ref.update({organizedRoutes:[after.get('organizedRoutes')[0],group('B',[collision])]});
+      await assert.rejects(dispatch(ref,[collision],'B'),error=>error.status===409);
+      await ref.update({organizedRoutes:[group('B',[manual])]});
+      await assert.rejects(dispatch(ref,[manual],'B'),error=>error.status===409);
+    });
+    await t.test('a reserved manual id stays unknown in direct plans without its draft',async()=>{
+      const {manual}=await manualDraft();
+      const result=routeRef();
+      await applyStaffPlanBatch(db,actor,{commandId:commandId(),existingPlans:[],newRoutes:[routeInput(result,[manual])]});
+      assert.equal(quote((await result.get()).data()).lunna,null);
     });
     async function serviceDispatch(linkedFacts,existing) {
       const service=db.collection('services').doc();

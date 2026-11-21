@@ -2,15 +2,33 @@ import { randomUUID } from 'node:crypto';
 import { FieldValue,type Firestore } from 'firebase-admin/firestore';
 import { factsHash } from '../../../../functions/src/earnings-source-adapter.ts';
 import { staffEditorCommandSchema,type StaffEditorCommand } from '../../staff/editor-contract.ts';
-import { routeDocumentId,staffPlannedPlaceSchema } from '../../staff/route-contract.ts';
+import { routeDocumentId } from '../../staff/route-contract.ts';
+import { getStopIdentityKey } from '../../route-stop-utils.ts';
+import type { PlaceValue } from '../../types';
 import { EarningsError } from '../earnings/transport.ts';
 import { staffRouteRevision } from './route-commands.ts';
 
 type EditorActor={userId:string;sourceUid?:string;name:string};
+export const staffManualStopPrefix='staff-manual-';
 export const staffManualStopId=/^staff-manual-[a-f0-9-]{36}$/;
-export function staffManualStopDigest(stop:unknown) {
-  const planned=staffPlannedPlaceSchema.safeParse(stop);
-  return planned.success ? factsHash(planned.data):null;
+
+export function normalizedStaffStopId(stop:Partial<PlaceValue> | null | undefined) {
+  return stop?.id==null ? '':String(stop.id).trim().toLowerCase();
+}
+
+export function assertDistinctStaffArrangedStops(routes:{stops:Partial<PlaceValue>[]}[]) {
+  const identities=new Set<string>();
+  const ids=new Set<string>();
+  for (const route of routes) {
+    if (!Array.isArray(route?.stops)) throw new EarningsError(409,'staff_route_conflict');
+    for (const stop of route.stops) {
+      const key=getStopIdentityKey(stop);
+      const id=normalizedStaffStopId(stop);
+      if ((key && identities.has(key)) || (id && ids.has(id))) throw new EarningsError(409,'staff_route_conflict');
+      if (key) identities.add(key);
+      if (id) ids.add(id);
+    }
+  }
 }
 
 const activeStatuses=['draft','pending','dispatched','in_progress'];
@@ -47,16 +65,18 @@ export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,val
           throw new EarningsError(409,'staff_route_conflict');
         }
         const pending=command.routes.map(route=>({...route,dispatched:false}));
-        tx.update(target,{organizedRoutes:[...saved,...pending],
-          routeNames:Object.fromEntries([...saved,...pending].map(route=>[route.key,route.name])),updatedAt:stamp()});
+        const organizedRoutes=[...saved,...pending];
+        assertDistinctStaffArrangedStops(organizedRoutes);
+        tx.update(target,{organizedRoutes,
+          routeNames:Object.fromEntries(organizedRoutes.map(route=>[route.key,route.name])),updatedAt:stamp()});
         break;
       }
       case 'add-manual-stop': {
         if (data.status!=='draft' || data.serviceId) throw new EarningsError(409,'staff_route_conflict');
-        manualStop={...command.stop,id:'staff-manual-'+randomUUID()};
+        manualStop={...command.stop,id:staffManualStopPrefix+randomUUID()};
         tx.create(db.collection('rotaStaffCommands').doc(manualStop.id),{
           kind:command.kind,entityId,draftCreation:staffRouteRevision(snapshot.createTime),
-          stopDigest:staffManualStopDigest(manualStop),createdAt:stamp(),
+          createdAt:stamp(),
         });
         break;
       }
