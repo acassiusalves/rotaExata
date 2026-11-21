@@ -35,10 +35,13 @@ export type SourceReviewRow = {
 };
 export type SourceReviewDetail = SourceReviewRow & {
   watermark:string; action:SourceReviewAction|null; blockedReason:string|null; ruleVersion:number|null;
-  stops:{ id:string; number:number; status:'completed'|'failed'; visited:boolean|null; city:string|null }[];
+  stops:{
+    id:string; number:number; status:'completed'|'failed'; visited:boolean|null; city:string|null;
+    reference:{kind:'order'|'point';code:string}|null;
+  }[];
 };
 export type SourceReviewPreview = {
-  previewDigest:string; totalCents:number; ruleVersion:number;
+  previewDigest:string; totalCents:number; ruleVersion:number; driverName:string|null;
   items:{ component:EarningsItem['component']; cents:number; stopNumber:number|null }[];
 };
 export type SourceReviewResult = {earningId:string; status:'pending'; totalCents:number};

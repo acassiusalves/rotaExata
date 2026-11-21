@@ -41,7 +41,7 @@ function reasonLabel(reason:string|null) {
   return (reason && reasonLabels[reason]) || 'Verificação da rota pendente';
 }
 function routeLabel(row:SourceReviewRow) {
-  return row.eventType==='snapshot' ? row.routeReference : 'Registro técnico';
+  return row.eventType==='snapshot' ? row.routeReference : 'Registro técnico · '+row.routeReference;
 }
 function outcomeLabel(stop:SourceReviewDetail['stops'][number]) {
   if (stop.status==='completed') return 'Entrega registrada';
@@ -123,6 +123,7 @@ function ReviewForm({detail,onIssued,onReload}:{
     {stale ? <Button type="button" variant="outline" onClick={onReload}>Atualizar conferência</Button> :
       draft ? <section className="space-y-3">
         <h3 className="font-semibold">Prévia do valor a conferir</h3>
+        {draft.preview.driverName && <p className="text-sm">Motorista {draft.preview.driverName}</p>}
         <ul className="divide-y text-sm">
           {draft.preview.items.map((item,index)=><li key={index} className="flex justify-between gap-3 py-2">
             <span>{earningsComponentLabel[item.component]}{item.stopNumber ? ' · Parada '+item.stopNumber : ''}</span>
@@ -146,7 +147,10 @@ function ReviewForm({detail,onIssued,onReload}:{
           const previous=preparedInput?.decision.stops[index];
           return <fieldset key={stop.id} disabled={busy} className="space-y-3 rounded-md border p-3">
             <legend className="px-1 text-sm font-medium">Parada {stop.number}{stop.city ? ' · '+stop.city : ''}</legend>
-            <p className="text-sm text-muted-foreground">{outcomeLabel(stop)}</p>
+            <p className="text-sm text-muted-foreground">
+              {stop.reference && (stop.reference.kind==='order'?'Pedido ':'Ponto ')+stop.reference.code+' · '}
+              {outcomeLabel(stop)}
+            </p>
             {detail.action==='complete_uf' && <div className="space-y-1">
               <Label htmlFor={'review-uf-'+index}>UF comprovada</Label>
               <select id={'review-uf-'+index} name={'uf-'+index} required

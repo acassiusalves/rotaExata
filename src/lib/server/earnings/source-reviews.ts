@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { factsHash,firestoreRevision,plannedFingerprint,protectCompletion,routeFacts,sourceSnapshot,timestampIso } from '../../../../functions/src/earnings-source-adapter.ts';
+import { factsHash,firestoreRevision,plannedFingerprint,protectCompletion,routeFacts,sourceSnapshot,sourceStopKey,timestampIso } from '../../../../functions/src/earnings-source-adapter.ts';
 import { calculateEarnings,municipalityIdentity,normalizeRouteFacts,normalizeRule,type EarningsRule } from '../../earnings/domain.ts';
 import type {
   SourceReviewAction,SourceReviewConfirmInput,SourceReviewDecision,SourceReviewDetail,SourceReviewPreview,
@@ -13,7 +13,7 @@ import { EarningsError } from './transport.ts';
 const date = z.string().datetime({offset:true});
 const contextSchema = z.object({
   eventId:z.string(),routeId:z.string().min(1).max(150).refine(id=>!id.includes('/') && id!=='.' && id!=='..'),
-  routeReference:z.string(),driverName:z.string().nullable(),sourceProject:z.string(),
+  routeReference:z.string(),driverName:z.string().nullable(),driverId:z.string().uuid().nullable(),sourceProject:z.string(),
   eventType:z.enum(['snapshot','deleted','gap']),reason:z.string().nullable(),
   sourceTime:date,workedAt:date.nullable(),issueFrom:date.nullable(),blockedReason:z.string().nullable(),
   facts:z.record(z.unknown()),factsFingerprint:z.string(),sourceRevision:z.string(),watermark:z.string(),
@@ -64,6 +64,7 @@ function missingConfirmations(source:Source,facts:ReturnType<typeof routeFacts>)
 function reviewCandidate(context:Context,source:Source|null):Candidate|{blockedReason:string} {
   if (context.eventType!=='snapshot') return reviewBlock('technical_event');
   if (context.blockedReason) return reviewBlock(context.blockedReason);
+  if (!context.driverId) return reviewBlock('driver_unmapped');
   if (context.reason!=='source_unproven' && !/^unmatched_zone(,unmatched_zone)*$/.test(context.reason ?? '')) {
     return reviewBlock('unsupported_reason');
   }
@@ -105,10 +106,27 @@ function reviewCandidate(context:Context,source:Source|null):Candidate|{blockedR
   return {action:'complete_uf',stops,facts:proof,rule};
 }
 
-function reviewStops(candidate:Candidate):SourceReviewDetail['stops'] {
+function operationalCode(value:unknown) {
+  const code=typeof value==='string' ? value.trim():'';
+  return /^[A-Za-z0-9][A-Za-z0-9./_-]{0,63}$/.test(code) ? code:null;
+}
+
+function reviewStops(candidate:Candidate,source:Source|null):SourceReviewDetail['stops'] {
+  const references=new Map<string,SourceReviewDetail['stops'][number]['reference']>();
+  const sourceStops=source?.data.stops;
+  for (const value of Array.isArray(sourceStops) ? sourceStops:[]) {
+    const stop=record(value);
+    if (!stop || stop.unlinkedAt) continue;
+    const id=sourceStopKey(stop);
+    if (!id) continue;
+    const order=operationalCode(stop.orderNumber);
+    const point=operationalCode(stop.pointCode);
+    references.set(id,order ? {kind:'order',code:order}:point ? {kind:'point',code:point}:null);
+  }
   return candidate.stops.map(stop=>({
     id:stop.id!,number:candidate.facts.stops.indexOf(stop)+1,
     status:stop.status==='failed'?'failed':'completed',visited:stop.visited,city:stop.city,
+    reference:references.get(stop.id!) ?? null,
   }));
 }
 
@@ -118,18 +136,22 @@ export function sourceReviewDetails(context:Context,source:Source|null):SourceRe
   return {
     eventId,routeReference,driverName,workedAt,sourceTime,eventType,reason,watermark,ruleVersion:context.rule?.version ?? null,
     ...('blockedReason' in candidate ? {...candidate,action:null,stops:[]} :
-      {blockedReason:null,action:candidate.action,stops:reviewStops(candidate)}),
+      {blockedReason:null,action:candidate.action,stops:reviewStops(candidate,source)}),
   };
 }
 
-function matchingUf(rule:EarningsRule,city:string,uf:string) {
+function cityForUfPricing(rule:EarningsRule,city:string,uf:string) {
   const municipality=municipalityIdentity(city,uf,true);
-  return !municipality.conflict && rule.zones.some(zone=>zone.cities.some(c=>c.name===municipality.name && c.uf===municipality.uf));
+  if (municipality.conflict || !rule.zones.some(zone=>zone.cities.some(c=>c.name===municipality.name && c.uf===municipality.uf))) {
+    throw new EarningsError(422,'earnings_invalid_review_uf');
+  }
+  const original=municipalityIdentity(city,null,true);
+  return original.uf ? municipality.name:city;
 }
 
 export function prepareSourceReview(actor:PublicActor,context:Context,source:Source|null,decision:SourceReviewDecision) {
   const candidate=reviewCandidate(context,source);
-  if (!source || !context.rule || 'blockedReason' in candidate) {
+  if (!source || !context.rule || !context.driverId || 'blockedReason' in candidate) {
     if ('blockedReason' in candidate && candidate.blockedReason==='source_changed') throw new EarningsError(409,'earnings_review_revision_conflict');
     throw new EarningsError(422,'earnings_invalid_review');
   }
@@ -139,11 +161,14 @@ export function prepareSourceReview(actor:PublicActor,context:Context,source:Sou
     throw new EarningsError(422,'earnings_invalid_review');
   }
 
+  const ufEnrichment:{stopId:string;originalCity:string;pricedCity:string;uf:string}[]=[];
   const stops = candidate.facts.stops.map(stop=>{
     const change=changesById.get(stop.id ?? '');
     if (!change || !('uf' in change)) return stop;
-    if (!stop.city || !matchingUf(candidate.rule,stop.city,change.uf)) throw new EarningsError(422,'earnings_invalid_review_uf');
-    return {...stop,state:change.uf};
+    if (!stop.city) throw new EarningsError(422,'earnings_invalid_review_uf');
+    const city=cityForUfPricing(candidate.rule,stop.city,change.uf);
+    ufEnrichment.push({stopId:change.stopId,originalCity:stop.city,pricedCity:city,uf:change.uf});
+    return {...stop,city,state:change.uf};
   });
   const facts=normalizeRouteFacts({...candidate.facts,stops});
   if (Array.isArray(facts)) throw new EarningsError(422,'earnings_invalid_review');
@@ -151,7 +176,8 @@ export function prepareSourceReview(actor:PublicActor,context:Context,source:Sou
   if (Array.isArray(quote)) throw new EarningsError(422,'earnings_invalid_review_uf');
   const basis={
     sourceRevision:context.sourceRevision,watermark:context.watermark,factsFingerprint:context.factsFingerprint,
-    ruleId:context.rule.id,ruleVersion:context.rule.version,readRevision:source.readRevision,proofRevision:source.proofRevision,proofDigest:factsHash(source.proof),
+    ruleId:context.rule.id,ruleVersion:context.rule.version,driverId:context.driverId,
+    readRevision:source.readRevision,proofRevision:source.proofRevision,proofDigest:factsHash(source.proof),ufEnrichment,
   };
   const previewDigest=factsHash({scopeId:actor.scopeId,userId:actor.userId,eventId:context.eventId,basis,decision,quote});
   return {basis,quote,previewDigest};
@@ -199,7 +225,7 @@ export async function previewSourceReview(actor:EarningsActor,input:SourceReview
   const prepared=prepareSourceReview(actor,context,await readReviewSource(context),input.decision);
   const stops=context.facts.stops as {id:string}[];
   return {
-    previewDigest:prepared.previewDigest,ruleVersion:context.rule!.version,totalCents:prepared.quote.totalCents,
+    previewDigest:prepared.previewDigest,ruleVersion:context.rule!.version,totalCents:prepared.quote.totalCents,driverName:context.driverName,
     items:prepared.quote.items.map(item=>({
       component:item.component,cents:item.cents,stopNumber:item.stopId ? stops.findIndex(stop=>stop.id===item.stopId)+1:null,
     })),
@@ -209,13 +235,22 @@ export async function previewSourceReview(actor:EarningsActor,input:SourceReview
 export async function confirmSourceReview(actor:EarningsActor,input:SourceReviewConfirmInput) {
   const {requestId,...request}=input;
   const args={p_request_id:requestId,p_request_body:request};
-  const receipt=await actorRpc<SourceReviewResult|null>(actor,'rota_earnings_source_review_receipt',args);
+  const readReceipt=()=>actorRpc<SourceReviewResult|null>(actor,'rota_earnings_source_review_receipt',args);
+  const receipt=await readReceipt();
   if (receipt) return receipt;
-  const context=await readContext(actor,input.eventId);
-  checkWatermark(context,input);
-  const prepared=prepareSourceReview(actor,context,await readReviewSource(context),input.decision);
-  if (prepared.previewDigest!==input.previewDigest) throw new EarningsError(409,'earnings_review_revision_conflict');
-  return actorRpc<SourceReviewResult>(actor,'rota_earnings_source_review_confirm',{
-    ...args,p_expected:prepared.basis,p_quote:prepared.quote,
-  });
+  try {
+    const context=await readContext(actor,input.eventId);
+    checkWatermark(context,input);
+    const prepared=prepareSourceReview(actor,context,await readReviewSource(context),input.decision);
+    if (prepared.previewDigest!==input.previewDigest) throw new EarningsError(409,'earnings_review_revision_conflict');
+    return await actorRpc<SourceReviewResult>(actor,'rota_earnings_source_review_confirm',{
+      ...args,p_expected:prepared.basis,p_quote:prepared.quote,
+    });
+  } catch (failure) {
+    if (failure instanceof EarningsError && (failure.status===404 || failure.status===409)) {
+      const concurrent=await readReceipt();
+      if (concurrent) return concurrent;
+    }
+    throw failure;
+  }
 }
