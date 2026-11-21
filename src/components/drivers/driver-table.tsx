@@ -163,6 +163,7 @@ function formatPendingHeadline(driver: Driver): string {
 const getDriverColumns = (
   onViewDetailsClick: (driver: Driver) => void,
   onEditClick: (driver: Driver) => void,
+  onViewEarnings?: (driver: Driver) => void,
 ): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
@@ -421,6 +422,9 @@ const getDriverColumns = (
                     <DropdownMenuItem onClick={() => onViewDetailsClick(driver)}>
                        Ver Detalhes
                     </DropdownMenuItem>
+                    {onViewEarnings && <DropdownMenuItem onSelect={() => onViewEarnings(driver)}>
+                      Ver ganhos (suporte)
+                    </DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => onEditClick(driver)}>
                        Editar
                     </DropdownMenuItem>
@@ -432,17 +436,18 @@ const getDriverColumns = (
   },
 ];
 
-export function DriverTable({drivers,onViewDetailsClick,onEditClick}:{
+export function DriverTable({drivers,onViewDetailsClick,onEditClick,onViewEarnings}:{
   drivers:Driver[];
   onViewDetailsClick:(driver:Driver)=>void;
   onEditClick:(driver:Driver)=>void;
+  onViewEarnings?:(driver:Driver)=>void;
 }) {
   // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick),[onViewDetailsClick,onEditClick]);
+  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick,onViewEarnings),[onViewDetailsClick,onEditClick,onViewEarnings]);
 
   const table = useReactTable({
     data: drivers,

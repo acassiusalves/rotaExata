@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback,useState } from 'react';
+import { useCallback,useEffect,useState } from 'react';
 import Link from 'next/link';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent } from '@/components/ui/card';
 import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import { DriverTable } from '@/components/drivers/driver-table';
+import { DriverSupportStatementDialog } from '@/components/drivers/driver-support-statement-dialog';
 import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
 import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
 import { staffDriverAssignments,type StaffDriverAssignment } from '@/lib/staff/driver-assignments';
@@ -21,7 +22,11 @@ type WireDriver=Omit<Driver,'lastSeenAt'> & {lastSeenAt:string|null;revision:str
 type StaffDriver=Driver & {revision:string};
 
 export default function DriversPage() {
-  const {request,paths}=useStaff();
+  const {request,paths,role,userId,scopeId,revision,policyRevision,rotaPolicyRevision}=useStaff();
+  const canViewEarnings=role==='admin' && paths.includes('/drivers') && paths.includes('/financeiro/pagamentos');
+  const [supportTarget,setSupportTarget]=useState<Driver|null>(null);
+  const supportSession=JSON.stringify([userId,scopeId,revision,policyRevision,rotaPolicyRevision]);
+  useEffect(()=>{setSupportTarget(null);},[supportSession,canViewEarnings]);
   const {toast}=useToast();
   const [isRefreshing,setIsRefreshing]=useState(false);
   const [detailsId,setDetailsId]=useState<string|null>(null);
@@ -70,8 +75,11 @@ export default function DriversPage() {
         <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
       </div> : loading ? <DriverTableSkeleton /> :
         <DriverTable drivers={rows} onViewDetailsClick={driver=>setDetailsId(driver.id)}
-          onEditClick={driver=>setEdited(rows.find(row=>row.id===driver.id) ?? null)} />}
+          onEditClick={driver=>setEdited(rows.find(row=>row.id===driver.id) ?? null)}
+          onViewEarnings={canViewEarnings ? setSupportTarget : undefined} />}
     </CardContent></Card>
+    {canViewEarnings && supportTarget && <DriverSupportStatementDialog key={supportSession+supportTarget.id}
+      target={supportTarget} onClose={()=>setSupportTarget(null)} />}
     <DriverDetailsDialog isOpen={!!details} onClose={()=>setDetailsId(null)} driver={details} />
     <EditDriverDialog isOpen={!!edited} onClose={()=>setEdited(null)} onSaved={refresh} driver={edited} revision={edited?.revision} />
   </div>;

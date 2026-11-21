@@ -29,6 +29,9 @@ export type StatementPage = {
   rows: StatementRow[]; totals: EarningsTotals; nextCursor: EarningsCursor | null;
   progress: { routeId: string; routeReference: string; status:'processing'|'review'; workedAt:string|null }[];
 };
+export type SupportStatementPage = StatementPage & {
+  target: { sourceUid: string; driverId: string; name: string };
+};
 const brl = new Intl.NumberFormat('pt-BR',{ style: 'currency', currency: 'BRL' });
 
 export function displayCents(cents: number | string | undefined) {

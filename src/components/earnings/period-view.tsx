@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,11 +55,13 @@ export function useEarningsPeriod<Page extends { nextCursor: EarningsCursor | nu
 export function PeriodFilters({ month,status,setMonth,setStatus }: {
   month: string; status: string; setMonth: (value: string) => void; setStatus: (value: string) => void;
 }) {
+  const monthId = useId();
+  const statusId = useId();
   return <div className="flex flex-wrap items-end gap-3">
-    <div className="space-y-1"><Label htmlFor="earnings-month">Competência</Label>
-      <Input type="month" id="earnings-month" value={month} onChange={event => setMonth(event.target.value)} /></div>
-    <div className="space-y-1"><Label htmlFor="earnings-status">Situação</Label>
-      <select id="earnings-status" className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={event => setStatus(event.target.value)}>
+    <div className="space-y-1"><Label htmlFor={monthId}>Competência</Label>
+      <Input type="month" id={monthId} value={month} onChange={event => setMonth(event.target.value)} /></div>
+    <div className="space-y-1"><Label htmlFor={statusId}>Situação</Label>
+      <select id={statusId} className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={event => setStatus(event.target.value)}>
         <option value="">Todas</option>
         {earningsStatuses.map(value => <option key={value} value={value}>{earningsStatusLabel[value]}</option>)}
       </select></div>
