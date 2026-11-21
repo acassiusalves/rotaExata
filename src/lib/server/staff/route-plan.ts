@@ -50,6 +50,32 @@ function transactionGateway(db:Firestore,tx:Transaction,writes:Array<()=>void>) 
 
 const serviceStopFields=['expectedValue','items','hasExchangeItems','operationType','lunnaClientCode'] as const;
 
+async function wasCreatedByStaffDraft(db:Firestore,tx:Transaction,draft:DocumentSnapshot) {
+  const createdAt=draft.createTime;
+  if (!createdAt) return false;
+  const receipts=await tx.get(db.collection('rotaStaffCommands')
+    .where('resultRouteId','==',draft.id).select('routeId','fingerprint'));
+  // Draft creation writes the private receipt in the same commit. Other route commands carry routeId.
+  return receipts.docs.some(receipt=>receipt.createTime?.isEqual(createdAt)===true &&
+    receipt.get('routeId')===undefined && /^[a-f0-9]{64}$/.test(receipt.get('fingerprint')));
+}
+
+function standaloneDraftStopKeys(draft:DocumentSnapshot,selected:PlaceValue[]) {
+  const staysStandalone=(stop:PlaceValue & Record<string,unknown>)=>
+    !stop.orderNumber && !stop.lunnaClientCode && !Array.isArray(stop.items) && stop.isLunnaOrder!==true &&
+    !stop.previousRouteId && !stop.fromRouteId && !stop.isRedelivery && !stop.operationType && !stop.hasExchangeItems;
+  const identities=new Map<string,boolean>();
+  const original=draft.get('stops');
+  for (const stop of Array.isArray(original) ? original:[]) {
+    const key=getStopIdentityKey(stop);
+    if (key) identities.set(key,!identities.has(key) && staysStandalone(stop));
+  }
+  return new Set(selected.flatMap(stop=>{
+    const key=getStopIdentityKey(stop);
+    return key && identities.get(key) && staysStandalone(stop as PlaceValue & Record<string,unknown>) ? [key]:[];
+  }));
+}
+
 function canonicalServiceStops<T extends {orderNumber?:string}>(stops:T[],service:DocumentSnapshot) {
   const all=service.get('allStops');
   const byNumber=new Map<string,Record<string,unknown>[]>();
@@ -127,6 +153,7 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     }
   }
   const draft=await (batch.draftDispatch ? tx.get(db.collection('routes').doc(batch.draftDispatch.routeId)):null);
+  let provedStandaloneDraft:Set<string>|undefined;
   if (draft && batch.draftDispatch) {
     if (!draft.exists || draft.get('status')!=='draft' || draft.get('serviceId') ||
         staffRouteRevision(draft.updateTime)!==batch.draftDispatch.revision) throw new EarningsError(409,'staff_route_conflict');
@@ -137,6 +164,11 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
         selected.stops.map(getStopIdentityKey).join('\0')!==target.plannedStops.map(getStopIdentityKey).join('\0')) {
       throw new EarningsError(409,'staff_route_conflict');
     }
+    const orderIds=draft.get('lunnaOrderIds');
+    const source=draft.get('source');
+    const proved=(source==null || source==='rota-exata') && (orderIds==null || (Array.isArray(orderIds) && !orderIds.length)) &&
+      await wasCreatedByStaffDraft(db,tx,draft);
+    provedStandaloneDraft=proved ? standaloneDraftStopKeys(draft,selected.stops):new Set();
     const updated=arranged.map((route:{key:string})=>route.key===selected.key ? {...route,dispatched:true}:route);
     writes.push(()=>{
       if (updated.every((route:{dispatched:boolean})=>route.dispatched)) tx.delete(draft.ref);
@@ -169,7 +201,12 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
   const childCodes=new Set(existingChildren?.docs.map(doc=>doc.get('code')));
   const newRoutes=newInput.map(({routeId,data,plannedStops},index)=>{
     const {status,routeKey,...other}=data;
-    const canonicalStops=service ? canonicalServiceStops(plannedStops,service):plannedStops;
+    const moved=new Set(batch.transferIntents?.filter(intent=>intent.targetRouteId===routeId).map(intent=>intent.stopKey));
+    const canonicalStops=service ? canonicalServiceStops(plannedStops,service):plannedStops.map(stop=>{
+      const key=getStopIdentityKey(stop);
+      return key && !stop.orderNumber && !moved.has(stop._originalStopKey?.trim() ?? key) &&
+        (!provedStandaloneDraft || provedStandaloneDraft.has(key)) ? {...stop,isLunnaOrder:false}:stop;
+    });
     const serviceCode=service?.get('code') ?? '';
     let code='RT-'+String(currentCount+index+1).padStart(4,'0');
     if (service) {
@@ -230,6 +267,12 @@ async function applyDispatchLinks(
         writes.push(()=>tx.update(order.ref,{logisticsStatus:'em_rota',rotaExataRouteId:route.routeId,
           rotaExataRouteCode:code ?? null,updatedAt:FieldValue.serverTimestamp()}));
       }
+    }
+    if (routeNumbers.length) {
+      const provenOrders=new Set(routeNumbers);
+      route.stops=route.stops.map(stop=>stop.orderNumber && provenOrders.has(stop.orderNumber) ?
+        {...stop,isLunnaOrder:true}:stop);
+      if (!newRoute) writes.push(()=>tx.update(target,{stops:route.stops}));
     }
   }
   for (const [serviceId,summary] of serviceLinks) {
