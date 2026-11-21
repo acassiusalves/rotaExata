@@ -77,6 +77,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
+import { geocodedMunicipality, geocodedStopEdit } from '@/lib/geocoded-municipality';
 import { useRouter, useParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -2363,6 +2364,7 @@ export default function RouteAcompanharPage() {
                 placeId: place.place_id,
                 lat: location.lat(),
                 lng: location.lng(),
+                ...geocodedMunicipality(place.address_components),
               });
             } else {
               console.warn(`Geocoding failed for "${address}": ${status}`);
@@ -2379,20 +2381,22 @@ export default function RouteAcompanharPage() {
   );
 
   const reverseGeocode = React.useCallback(
-    (lat: number, lng: number): Promise<Partial<typeof manualService> | null> => {
+    (lat: number, lng: number): Promise<(Partial<typeof manualService> & { uf?: string }) | null> => {
       return new Promise((resolve) => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
             const place = results[0];
-            const address: Partial<typeof manualService> = {};
+            const address: Partial<typeof manualService> & { uf?: string } = {};
 
             const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
 
             address.rua = get('route');
             address.numero = get('street_number');
             address.bairro = get('sublocality_level_1') || get('political');
-            address.cidade = get('administrative_area_level_2');
+            const { city, state } = geocodedMunicipality(place.address_components);
+            address.cidade = city;
+            address.uf = state;
             address.cep = get('postal_code');
 
             resolve(address);
@@ -2467,7 +2471,11 @@ export default function RouteAcompanharPage() {
 
   const handleEditServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
-    setEditService(prev => ({...prev, [id]: value}));
+    const addressEdited = ['rua', 'numero', 'bairro', 'cidade', 'cep'].includes(id);
+    setEditService(prev => ({
+      ...prev, [id]: value,
+      ...(addressEdited && value !== prev[id as keyof typeof prev] ? { lat: null, lng: null } : {}),
+    }));
 
     if (id === 'locationLink') {
       handleEditLocationLinkPaste(value);
@@ -2589,6 +2597,8 @@ export default function RouteAcompanharPage() {
         bairro: newBairro,
         cidade: newCidade,
         cep: newCep,
+        ...(newRua !== prev.rua || newBairro !== prev.bairro || newCidade !== prev.cidade || newCep !== prev.cep
+          ? { lat: null, lng: null } : {}),
       }));
 
       toast({ title: "Endereço encontrado!", description: "Os campos foram preenchidos. Clique em 'Salvar Alterações' para atualizar o mapa." });
@@ -2644,18 +2654,21 @@ export default function RouteAcompanharPage() {
       return;
     }
 
-    let geocoded;
+    let geocoded: Omit<PlaceValue, 'id'> | null;
 
     // Se temos lat/lng do mapa ajustado, usar essas coordenadas
-    if (lat && lng) {
+    if (lat != null && lng != null) {
       const addressString = numero
         ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
         : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const address = await reverseGeocode(lat, lng).catch(() => null);
       geocoded = {
         lat,
         lng,
         address: addressString,
         placeId: stopToEdit.stop.placeId || `manual-${Date.now()}`,
+        city: address?.cidade,
+        state: address?.uf,
       };
     } else {
       // Caso contrário, geocodificar o endereço
@@ -2666,10 +2679,8 @@ export default function RouteAcompanharPage() {
     }
 
     if (geocoded) {
-      const updatedStop: PlaceValue = {
-        ...geocoded,
-        id: stopToEdit.stop.id,
-        address: geocoded.address,
+      const updatedStop = {
+        ...geocodedStopEdit(stopToEdit.stop, geocoded, lat != null && lng != null),
         customerName: editService.customerName,
         phone: editService.phone,
         orderNumber: editService.orderNumber,

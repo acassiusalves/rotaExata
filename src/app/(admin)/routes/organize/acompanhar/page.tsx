@@ -81,7 +81,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { PlaceValue, RouteInfo, Driver, DriverLocationWithInfo } from '@/lib/types';
-import { geocodedMunicipality } from '@/lib/geocoded-municipality';
+import { geocodedMunicipality, geocodedStopEdit } from '@/lib/geocoded-municipality';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -2070,7 +2070,11 @@ export default function OrganizeRoutePage() {
 
   const handleEditServiceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
-    setEditService(prev => ({...prev, [id]: value}));
+    const addressEdited = ['rua', 'numero', 'bairro', 'cidade', 'cep'].includes(id);
+    setEditService(prev => ({
+      ...prev, [id]: value,
+      ...(addressEdited && value !== prev[id as keyof typeof prev] ? { lat: null, lng: null } : {}),
+    }));
 
     if (id === 'locationLink') {
       handleEditLocationLinkPaste(value);
@@ -2190,6 +2194,8 @@ export default function OrganizeRoutePage() {
         bairro: newBairro,
         cidade: newCidade,
         cep: newCep,
+        ...(newRua !== prev.rua || newBairro !== prev.bairro || newCidade !== prev.cidade || newCep !== prev.cep
+          ? { lat: null, lng: null } : {}),
       }));
 
       toast({ title: "Endereço encontrado!", description: "Os campos foram preenchidos. Clique em 'Salvar Alterações' para atualizar o mapa." });
@@ -2270,16 +2276,8 @@ export default function OrganizeRoutePage() {
     }
 
     if (geocoded) {
-      const updatedStop: PlaceValue & { uf?: string } = {
-        ...geocoded,
-        id: stopToEdit.stop.id,
-        ...(stopToEdit.stop.pointCode ? { pointCode: stopToEdit.stop.pointCode } : {}),
-        // Campos vazios comunicam ao planejamento a remoção de valores anteriores.
-        city: geocoded.city ?? '',
-        state: geocoded.state ?? '',
-        cidade: '',
-        uf: '',
-        address: geocoded.address,
+      const updatedStop = {
+        ...geocodedStopEdit(stopToEdit.stop, geocoded, lat != null && lng != null),
         customerName: editService.customerName,
         phone: editService.phone,
         orderNumber: editService.orderNumber,
@@ -3631,6 +3629,8 @@ export default function OrganizeRoutePage() {
       bairro: targetStop.bairro || '',
       cidade: targetStop.cidade || '',
       notes: targetStop.notes || '',
+      lat: targetStop.lat ?? null,
+      lng: targetStop.lng ?? null,
     });
 
     // Open edit dialog
