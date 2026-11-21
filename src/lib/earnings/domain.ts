@@ -92,7 +92,7 @@ function fold(value: string) {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function municipalityIdentity(value: string, state?: string | null, ruleInput = false) {
+export function municipalityIdentity(value: string, state?: string | null, ruleInput = false) {
   const city = fold(value);
   const qualified = /^(.+?)\s*[\/-]\s*(goias|[a-z]{2})(?:\s*[\/-]\s*(goias|[a-z]{2}))?$/.exec(city);
   const declaredState = state ? fold(state) : undefined;

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogHeader } from '@/components/ui/dialog';
 import { earningsMessage, useEarnings } from '@/components/earnings/earnings-shell';
+import { SourceReviewPanel } from '@/components/earnings/source-review-panel';
 import { EarningsStatusBadge, PeriodFilters, PeriodMessage, PeriodTotals, useEarningsPeriod } from '@/components/earnings/period-view';
 import {
   displayCents, displayWorkedAt, earningsComponentLabel, type EarningsCursor, type EarningsStatus, type EarningsTotals,
@@ -154,7 +155,7 @@ function PaymentDetails({ payment,onCommit }: { payment: Detail; onCommit: () =>
 }
 
 export default function PaymentsPage() {
-  const { request } = useEarnings();
+  const { request,userId } = useEarnings();
   const period = useEarningsPeriod<PaymentPage>(endpoint);
   const [paymentId,setPaymentId] = useState<string | null>(null);
   const [detail,setDetail] = useState<Detail | null>(null);
@@ -178,6 +179,7 @@ export default function PaymentsPage() {
       <p className="mt-1 text-sm text-muted-foreground">Confira os lançamentos e registre aprovação e baixa de cada rota.</p></div>
     <PeriodFilters {...period} />
     <PeriodMessage online={period.online} error={period.error} loading={!result} retry={period.refresh} />
+    <SourceReviewPanel key={userId+period.month} month={period.month} onIssued={period.refresh} />
     {result && <>
       <PeriodTotals totals={result.totals} />
       {(result.processing > 0 || result.review > 0 || result.stagingOnly > 0) && <details className="rounded-lg border bg-muted/40 p-3 text-sm">
