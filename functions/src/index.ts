@@ -1661,14 +1661,16 @@ export const resendRouteToDriver = onCall(
 export const reopenRoute = onCall(
   {region: "southamerica-east1"},
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const reason = String(d.reason || "").trim();
 
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    // Mesma porta de entrada das demais acoes operacionais desta base: sessao
+    // Firebase propria (nunca token customizado de impersonacao), operador
+    // ativo e papel admin/socio.
+    const auth = await requireOperationalOperator(req, ["admin", "socio"]);
+    const userData = auth.profile;
     if (!routeId) {
       throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
@@ -1680,16 +1682,6 @@ export const reopenRoute = onCall(
     }
 
     const db = getFirestore();
-    const userDoc = await db.collection("users").doc(auth.uid).get();
-    const userData = userDoc.data();
-    const userRole = userData?.role || "";
-    if (userRole !== "admin" && userRole !== "socio") {
-      throw new HttpsError(
-        "permission-denied",
-        "Apenas administradores e sócios podem reabrir rotas"
-      );
-    }
-
     const adminName = userData?.displayName || userData?.email || auth.uid;
     const routeRef = db.collection("routes").doc(routeId);
 
@@ -1818,7 +1810,7 @@ export const reopenRoute = onCall(
           const notificationBody =
             "Uma rota foi reaberta para você. Acesse o app para concluí-la.";
 
-          await getMessaging().send({
+          const message = {
             data: {
               routeId,
               type: "route_reopened",
@@ -1840,7 +1832,12 @@ export const reopenRoute = onCall(
               },
               fcmOptions: {link: `/my-routes/${routeId}`},
             },
-          });
+          };
+
+          const deliverable = await driverPushMessage(
+            db, driverId, driverDoc.data(), message
+          );
+          if (deliverable) await getMessaging().send(deliverable);
         }
       } catch (notifError) {
         console.error("❌ Erro ao notificar motorista na reabertura:", notifError);
