@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {defaultStaffPolicy,staffOperationAllowed} from '../src/lib/staff/access.ts';
 import {historyReopenSchema} from '../src/lib/staff/history-contract.ts';
 import {serviceStatsAfterReopen} from '../src/lib/staff/service-after-reopen.ts';
+import {reopenRefusalMessage} from '../src/lib/staff/reopen-errors.ts';
 
 const revision='001700000000.000000000';
 const commandId='f673df4e-d057-4f61-bf2a-37ff2a39105c';
@@ -31,6 +32,13 @@ test('reopen is restricted to admin and socio and follows the history page polic
   assert.equal(staffOperationAllowed({...manager,role:'admin'},'route:reopen'),true);
   const restricted={...manager,role:'admin' as const,rotaPolicy:{...policy,inactivePages:['/history/rotas']}};
   assert.equal(staffOperationAllowed(restricted,'route:reopen'),false);
+});
+
+test('only the payment refusal has a dedicated message; other codes keep the generic handling',()=>{
+  assert.match(reopenRefusalMessage('staff_route_payment_closed')!,/pagamento aprovado ou pago/);
+  assert.equal(reopenRefusalMessage('staff_route_conflict'),null);
+  assert.equal(reopenRefusalMessage('staff_driver_unavailable'),null);
+  assert.equal(reopenRefusalMessage(undefined),null);
 });
 
 const finished=(id:string)=>({id,status:'completed',stops:[
