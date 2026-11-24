@@ -126,6 +126,7 @@ export function getEventTypeLabel(eventType: ActivityEventType): string {
     // Sistema
     route_auto_completed: 'Rota Auto-Completada',
     route_resent: 'Rota Reenviada',
+    route_reopened: 'Rota Reaberta',
     // Financeiro
     payment_approved: 'Pagamento Aprovado',
     payment_marked_as_paid: 'Pagamento Pago',

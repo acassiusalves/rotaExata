@@ -47,6 +47,7 @@ const TODOS_EVENTOS: ActivityEventType[] = [
   'driver_unassigned',
   'route_auto_completed',
   'route_resent',
+  'route_reopened',
   'payment_approved',
   'payment_marked_as_paid',
   'payment_cancelled',

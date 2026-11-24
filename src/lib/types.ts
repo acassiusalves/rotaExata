@@ -154,6 +154,11 @@ export type RouteInfo = {
   // Vínculo com Serviço Luna (apenas para rotas com source: 'lunna')
   serviceId?: string; // ID do LunnaService pai
   serviceCode?: string; // Código do serviço (LN-XXXX) para referência rápida
+  // Reabertura de rota finalizada (callable reopenRoute)
+  reopenedAt?: Timestamp | Date;
+  reopenedBy?: string;
+  reopenReason?: string;
+  reopenCount?: number;
 };
 
 export type OrderStatus =
@@ -584,6 +589,7 @@ export type ActivityEventType =
   | 'driver_unassigned'
   | 'route_auto_completed'
   | 'route_resent'
+  | 'route_reopened'
   // === NOVOS - FINANCEIRO (5) ===
   | 'payment_approved'
   | 'payment_marked_as_paid'
