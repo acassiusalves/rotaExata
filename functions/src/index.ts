@@ -20,7 +20,11 @@ import {resolveAutoCompletion} from "./auto-completion";
 import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
 import {
   type ReopenableRoute,
+  MIN_REOPEN_REASON_LENGTH,
+  REOPEN_REFUSAL_MESSAGES,
+  buildReopenHistoryEntry,
   isEligibleForAutoCompletion,
+  resolveReopen,
 } from "./route-reopen";
 
 initializeApp();
@@ -1646,6 +1650,211 @@ export const resendRouteToDriver = onCall(
     } catch (error: any) {
       if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao reenviar rota.";
+      throw new HttpsError("internal", `Erro: ${msg}`);
+    }
+  }
+);
+
+/* ========== reopenRoute (callable) ========== */
+// Reabre uma rota finalizada (completed pelo motorista OU completed_auto pelo
+// robo) e a devolve ao motorista. As regras vivem em ./route-reopen.
+export const reopenRoute = onCall(
+  {region: "southamerica-east1"},
+  async (req) => {
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const reason = String(d.reason || "").trim();
+
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    }
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    if (reason.length < MIN_REOPEN_REASON_LENGTH) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Informe o motivo da reabertura (mínimo ${MIN_REOPEN_REASON_LENGTH} caracteres)`
+      );
+    }
+
+    const db = getFirestore();
+    const userDoc = await db.collection("users").doc(auth.uid).get();
+    const userData = userDoc.data();
+    const userRole = userData?.role || "";
+    if (userRole !== "admin" && userRole !== "socio") {
+      throw new HttpsError(
+        "permission-denied",
+        "Apenas administradores e sócios podem reabrir rotas"
+      );
+    }
+
+    const adminName = userData?.displayName || userData?.email || auth.uid;
+    const routeRef = db.collection("routes").doc(routeId);
+
+    try {
+      // Transacao: o motorista (ou o robo) pode mexer na rota no mesmo instante.
+      const outcome = await db.runTransaction(async (tx) => {
+        const routeSnap = await tx.get(routeRef);
+        if (!routeSnap.exists) {
+          throw new HttpsError("not-found", "Rota não encontrada");
+        }
+        const route = routeSnap.data() as Record<string, any>;
+
+        const paymentsSnap = await tx.get(
+          db.collection("driverPayments").where("routeId", "==", routeId)
+        );
+        const payments = paymentsSnap.docs.map((p) => ({
+          id: p.id,
+          status: p.data().status,
+        }));
+
+        const decision = resolveReopen(route, payments);
+        if (!decision.ok) {
+          throw new HttpsError(
+            "failed-precondition",
+            REOPEN_REFUSAL_MESSAGES[decision.reason]
+          );
+        }
+
+        // Pagamento pendente fica valido, mas o financeiro precisa saber que a
+        // rota vai ser finalizada de novo e o calculo pode mudar.
+        const quando = new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        });
+        for (const payment of paymentsSnap.docs) {
+          if (!decision.pendingPaymentIds.includes(payment.id)) continue;
+          const notaAnterior = payment.data().notes;
+          tx.update(payment.ref, {
+            notes:
+              `${notaAnterior ? `${notaAnterior}\n` : ""}` +
+              `Rota reaberta em ${quando}: recalcular este pagamento ` +
+              "após a nova finalização.",
+            routeReopenedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        tx.update(routeRef, {
+          status: decision.targetStatus,
+          reopenedAt: FieldValue.serverTimestamp(),
+          reopenedBy: auth.uid,
+          reopenReason: reason,
+          reopenCount: FieldValue.increment(1),
+          reopenHistory: FieldValue.arrayUnion(
+            buildReopenHistoryEntry(route, {
+              at: Timestamp.now(),
+              by: auth.uid,
+              reason,
+            })
+          ),
+          completedAt: FieldValue.delete(),
+          autoCompletedAt: FieldValue.delete(),
+          completedBy: FieldValue.delete(),
+        });
+
+        return {
+          route,
+          fromStatus: String(route.status),
+          targetStatus: decision.targetStatus,
+          hasPendingPayment: decision.pendingPaymentIds.length > 0,
+        };
+      });
+
+      const {route, fromStatus, targetStatus, hasPendingPayment} = outcome;
+      const driverId = route.driverId as string;
+      const driverName = route.driverInfo?.name || driverId;
+      const routeCode = route.code || routeId;
+
+      // Daqui em diante e "melhor esforco": a rota ja foi reaberta.
+      if (route.serviceId) {
+        try {
+          await reconcileServiceProgress(route.serviceId);
+        } catch (serviceError) {
+          console.error(
+            `❌ Erro ao reconciliar serviço ${route.serviceId}:`,
+            serviceError
+          );
+        }
+      }
+
+      try {
+        await db.collection("activity_log").add({
+          timestamp: FieldValue.serverTimestamp(),
+          eventType: "route_reopened",
+          userId: auth.uid,
+          userName: adminName,
+          entityType: "route",
+          entityId: routeId,
+          entityCode: routeCode,
+          serviceId: route.serviceId || null,
+          serviceCode: route.serviceCode || null,
+          routeId: routeId,
+          routeCode: routeCode,
+          action:
+            `Rota ${routeCode} reaberta por ${adminName} ` +
+            `(motorista ${driverName}). Motivo: ${reason}`,
+          changes: [
+            {
+              field: "status",
+              oldValue: fromStatus,
+              newValue: targetStatus,
+              fieldLabel: "Status",
+            },
+          ],
+          metadata: {driverId, driverName, reason},
+        });
+      } catch (logError) {
+        console.error("❌ Erro ao gravar log de reabertura:", logError);
+      }
+
+      try {
+        const driverDoc = await db.collection("users").doc(driverId).get();
+        const fcmToken = driverDoc.data()?.fcmToken;
+
+        if (fcmToken) {
+          const notificationTitle = "Rota reaberta";
+          const notificationBody =
+            "Uma rota foi reaberta para você. Acesse o app para concluí-la.";
+
+          await getMessaging().send({
+            data: {
+              routeId,
+              type: "route_reopened",
+              title: notificationTitle,
+              body: notificationBody,
+              notificationTitle,
+              notificationBody,
+            },
+            token: fcmToken,
+            android: {priority: "high" as const},
+            webpush: {
+              notification: {
+                title: notificationTitle,
+                body: notificationBody,
+                icon: "/icons/pwa-192.png",
+                badge: "/icons/pwa-192.png",
+                requireInteraction: true,
+                tag: `reopened_${routeId}`,
+              },
+              fcmOptions: {link: `/my-routes/${routeId}`},
+            },
+          });
+        }
+      } catch (notifError) {
+        console.error("❌ Erro ao notificar motorista na reabertura:", notifError);
+      }
+
+      return {
+        ok: true,
+        targetStatus,
+        hasPendingPayment,
+        message: "Rota reaberta com sucesso.",
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      const msg = error.message || "Falha ao reabrir a rota.";
       throw new HttpsError("internal", `Erro: ${msg}`);
     }
   }
