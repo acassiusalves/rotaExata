@@ -53,6 +53,7 @@ const operations = {
   'route:delete':['/routes'],
   'route:complete':['/routes',administrators],
   'route:resend':['/history/rotas',administrators],
+  'route:reopen':['/history/rotas',administrators],
   'routes:monitor':['/routes/monitoring'],
   'service:read':['/routes'],
   'service:plan':['/routes/organize'],
