@@ -18,6 +18,10 @@ import {legacyRotaStaffAllowed} from "./legacy-staff-cutover";
 import {buildSyncPatch} from "./sync-user";
 import {resolveAutoCompletion} from "./auto-completion";
 import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
+import {
+  type ReopenableRoute,
+  isEligibleForAutoCompletion,
+} from "./route-reopen";
 
 initializeApp();
 
@@ -1324,7 +1328,8 @@ export const generateDriverImpersonationToken = onCall(
 
 /* ========== autoCompleteRoutes (scheduled) ========== */
 // Função scheduled que roda a cada 30 minutos para finalizar automaticamente
-// rotas que passaram de 48h desde a plannedDate sem serem concluídas pelo motorista
+// rotas paradas ha mais de 48h (desde a plannedDate ou, se foi reaberta, desde
+// a reabertura) sem serem concluídas pelo motorista
 export const autoCompleteRoutes = functionsV1
   .region("southamerica-east1")
   .pubsub.schedule("every 30 minutes")
@@ -1341,11 +1346,16 @@ export const autoCompleteRoutes = functionsV1
         .where("plannedDate", "<", cutoff)
         .get();
 
+      // O relogio das 48h parte do mais recente entre plannedDate e a ultima
+      // reabertura: sem isso o robo refecharia, na proxima rodada, uma rota
+      // antiga que o admin acabou de reabrir.
       const staleRoutes = {
-        docs: candidateRoutes.docs.filter((routeDoc) => {
-          const status = routeDoc.data()?.status;
-          return status === "dispatched" || status === "in_progress";
-        }),
+        docs: candidateRoutes.docs.filter((routeDoc) =>
+          isEligibleForAutoCompletion(
+            routeDoc.data() as ReopenableRoute,
+            cutoff.getTime()
+          )
+        ),
       };
 
       if (staleRoutes.docs.length === 0) {
