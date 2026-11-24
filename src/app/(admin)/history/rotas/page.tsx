@@ -13,16 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { History, Loader2, MapPin, Milestone, FileText, LayoutGrid, List, Search, Sunrise, Sunset, Calendar, RefreshCw } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { useToast } from '@/hooks/use-toast';
+import { History, Loader2, MapPin, Milestone, FileText, LayoutGrid, List, Search, Sunrise, Sunset, Calendar, RotateCcw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -47,13 +38,15 @@ import type { Timestamp } from 'firebase/firestore';
 import { useOptionalStaff } from '@/components/staff/staff-session';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { staffRouteDates } from '@/lib/staff/route-dates';
-import { reportDayBounds, reportErrorMessage, useReportPagination, useReportPageReset, useStaffReportCommandIds, useStaffReportData } from '@/components/reports/use-staff-report-data';
+import { reportDayBounds, reportErrorMessage, useReportPagination, useReportPageReset, useStaffReportData } from '@/components/reports/use-staff-report-data';
 import { Pagination } from '@/components/ui/pagination';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { RouteDetailsDialog } from '@/components/routes/route-details-dialog';
 import { DatePickerWithPresets } from '@/components/ui/date-picker-with-presets';
+import { ReopenRouteDialog } from '@/components/routes/reopen-route-dialog';
+import { canReopenRoute, canReopenStatus } from '@/lib/route-reopen';
 
 type RouteDocument = RouteInfo & {
   id: string;
@@ -141,17 +134,14 @@ const byCompletion=(a:RouteDocument,b:RouteDocument)=>
   (routeDate(a.completedAt ?? a.autoCompletedAt)?.getTime() ?? 0) || a.id.localeCompare(b.id);
 
 export default function HistoryRoutesPage() {
-  const { toast } = useToast();
   const [legacyRoutes,setCompletedRoutes]=React.useState<RouteDocument[]>([]);
   const [isLegacyLoading, setIsLoading] = React.useState(true);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
 
-  // Estados para reenvio de rota
-  const [routeToResend, setRouteToResend] = React.useState<RouteDocument | null>(null);
-  const [isResendDialogOpen, setIsResendDialogOpen] = React.useState(false);
-  const [isResending, setIsResending] = React.useState(false);
+  // Reabertura de rota finalizada (pelo motorista ou pelo sistema)
+  const [routeToReopen, setRouteToReopen] = React.useState<RouteDocument | null>(null);
 
   // Estados dos filtros
   const [searchTerm, setSearchTerm] = React.useState('');
@@ -163,8 +153,8 @@ export default function HistoryRoutesPage() {
   const [selectedCompletionType, setSelectedCompletionType] = React.useState<'all' | 'completed' | 'completed_auto'>('all');
 
   const staff=useOptionalStaff();
-  const commandId=useStaffReportCommandIds();
-  const canResend=!nativeStaffEnabled || staff?.role==='admin' || staff?.role==='socio';
+  // No modo nativo o papel vem da sessao de staff; no legado o servidor decide.
+  const canReopen=(status?:string)=>nativeStaffEnabled ? canReopenRoute(status,staff?.role):canReopenStatus(status);
   const nativeHistory=useStaffReportData<RouteDocument,'routes'>('/api/staff/history?view=routes','routes');
 
   const completedRoutes=React.useMemo(()=>nativeStaffEnabled ?
@@ -254,40 +244,6 @@ export default function HistoryRoutesPage() {
   const handleOpenDetails = (route: RouteDocument) => {
     setSelectedRoute(route);
     setIsDetailsOpen(true);
-  };
-
-  const handleOpenResendDialog = (route: RouteDocument) => {
-    setRouteToResend(route);
-    setIsResendDialogOpen(true);
-  };
-
-  const handleConfirmResend = async () => {
-    if (!routeToResend) return;
-    setIsResending(true);
-    try {
-      if (nativeStaffEnabled) {
-        if (!staff || !canResend || !routeToResend.revision) throw new Error('Reenvio indisponível.');
-        const command={routeId:routeToResend.id,revision:routeToResend.revision};
-        const result=await staff.request<{push:'accepted'|'skipped_no_token'|'failed'|'uncertain'}>('/api/staff/history/resend',{
-          method:'POST',body:JSON.stringify({...command,commandId:commandId(command)}),
-        });
-        toast({title:'Rota reenviada',description:result.push==='uncertain' ? 'A rota foi reenviada. O envio do aviso não pôde ser confirmado.' : result.push==='accepted' ?
-          'A rota voltou ao app e o envio da notificação foi aceito.' :
-          'A rota voltou ao app. O envio da notificação não foi confirmado.'});
-      } else {
-        const [{functions},{httpsCallable}]=await Promise.all([import('@/lib/firebase/client'),import('firebase/functions')]);
-        await httpsCallable(functions,'resendRouteToDriver')({routeId:routeToResend.id});
-        toast({title:'Rota reenviada!',description:'O motorista foi notificado e a rota voltará ao app dele.'});
-      }
-      setIsResendDialogOpen(false);
-      setRouteToResend(null);
-    } catch (error) {
-      console.error('Erro ao reenviar rota:', error);
-      toast({ variant: 'destructive', title: 'Erro ao reenviar rota', description: nativeStaffEnabled ? reportErrorMessage(error):'Tente novamente.' });
-    } finally {
-      if (nativeStaffEnabled) nativeHistory.refresh();
-      setIsResending(false);
-    }
   };
 
   const pagination=useReportPagination(filteredRoutes,24);
@@ -508,10 +464,10 @@ export default function HistoryRoutesPage() {
                     <FileText className="mr-2 h-4 w-4" />
                     Ver Detalhes
                   </Button>
-                  {canResend && route.status === 'completed_auto' && (
-                    <Button className="w-full" variant="outline" onClick={() => handleOpenResendDialog(route)}>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Reenviar ao Motorista
+                  {canReopen(route.status) && (
+                    <Button className="w-full" variant="outline" onClick={() => setRouteToReopen(route)}>
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reabrir Rota
                     </Button>
                   )}
                 </CardFooter>
@@ -581,14 +537,14 @@ export default function HistoryRoutesPage() {
                     <TableCell className="text-center">{formatDistance(route.distanceMeters)} km</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {canResend && route.status === 'completed_auto' && (
+                        {canReopen(route.status) && (
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleOpenResendDialog(route)}
+                            onClick={() => setRouteToReopen(route)}
                           >
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Reenviar
+                            <RotateCcw className="mr-2 h-4 w-4" />
+                            Reabrir
                           </Button>
                         )}
                         <Button
@@ -620,40 +576,11 @@ export default function HistoryRoutesPage() {
         />
       )}
 
-      <Dialog open={isResendDialogOpen} onOpenChange={(open) => { if (!isResending) setIsResendDialogOpen(open); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reenviar rota ao motorista?</DialogTitle>
-            <DialogDescription>
-              A rota <strong>{routeToResend?.name}</strong> será reenviada para{' '}
-              <strong>{routeToResend?.driverInfo?.name || 'o motorista'}</strong>. Ela voltará a aparecer
-              no app do motorista com status &quot;Aguardando início&quot;. As entregas já realizadas serão mantidas.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsResendDialogOpen(false)}
-              disabled={isResending}
-            >
-              Cancelar
-            </Button>
-            <Button onClick={handleConfirmResend} disabled={isResending}>
-              {isResending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Reenviando...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Confirmar reenvio
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ReopenRouteDialog
+        route={routeToReopen}
+        onClose={() => setRouteToReopen(null)}
+        onReopened={() => { if (nativeStaffEnabled) nativeHistory.refresh(); }}
+      />
     </>
   );
 }

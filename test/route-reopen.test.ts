@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   canReopenRoute,
+  canReopenStatus,
   isReopenReasonValid,
   MIN_REOPEN_REASON_LENGTH,
 } from "../src/lib/route-reopen.ts";
@@ -20,6 +21,14 @@ test("rota auto-finalizada continua podendo ser reaberta", () => {
 test("rota que nao esta finalizada nao tem o que reabrir", () => {
   for (const status of ["draft", "dispatched", "in_progress", "", null, undefined]) {
     assert.equal(canReopenRoute(status, "admin"), false);
+  }
+});
+
+test("so o status decide quando o papel nao esta disponivel no cliente (modo legado)", () => {
+  assert.equal(canReopenStatus("completed"), true);
+  assert.equal(canReopenStatus("completed_auto"), true);
+  for (const status of ["draft", "dispatched", "in_progress", "", null, undefined]) {
+    assert.equal(canReopenStatus(status), false);
   }
 });
 
