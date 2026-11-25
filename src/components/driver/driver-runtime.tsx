@@ -6,6 +6,7 @@ import { usePathname,useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EarningsRequestError,EarningsShell,useEarnings } from '@/components/earnings/earnings-shell';
+import { profileFailure } from '@/lib/driver/profile-failure';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { ASSIST_HEADER } from '@/lib/driver/assist-policy';
@@ -50,6 +51,7 @@ function RuntimeProfile({request,userId,email,signOut,native,assistGrant,childre
   const [passwordRequired,setPasswordRequired]=useState(false);
   const [revision,setRevision]=useState(0);
   const [stale,setStale]=useState(false);
+  const [canRetry,setCanRetry]=useState(true);
   const valid=useRef(false);
   const guardRequest=useCallback(<T,>(path:string,init?:RequestInit)=>{
     if (init?.method && init.method.toUpperCase()!=='GET' && !valid.current) {
@@ -71,20 +73,20 @@ function RuntimeProfile({request,userId,email,signOut,native,assistGrant,childre
         }
         initial=current.forceLogoutAt ?? null;
         valid.current=true;setStale(false);
-        setState(current);setError('');setPasswordRequired(false);
+        setState(current);setError('');setPasswordRequired(false);setCanRetry(true);
         if (native && !current.readOnly && !assistGrant) void writePresence(true).catch(()=>{});
       } catch (failure) {
         if (alive) {
           valid.current=false;
-          if (!(failure instanceof EarningsRequestError) || (failure.status!==401 && failure.status!==403)) {
+          const outcome=profileFailure(failure,{native,assist:!!assistGrant});
+          if (outcome.kind==='stale') {
             setStale(true);
             return;
           }
-          setPasswordRequired(native && failure instanceof EarningsRequestError && failure.code==='platform_password_change_required');
-          const code=failure instanceof EarningsRequestError ? failure.code:'';
-          setError(code==='assist_expired' || code==='assist_not_found' ? 'Acesso encerrado. Abra de novo pelo painel.' :
-            failure instanceof EarningsRequestError && failure.status===403 ? 'Esta conta não tem acesso às rotas.' : 'Não foi possível carregar sua conta.');
-          if (failure instanceof EarningsRequestError && failure.status===401) void signOut();
+          setPasswordRequired(outcome.passwordRequired);
+          setError(outcome.message);
+          setCanRetry(outcome.retry);
+          if (outcome.signOut) void signOut();
           setState(undefined);
         }
       }
@@ -128,7 +130,7 @@ function RuntimeProfile({request,userId,email,signOut,native,assistGrant,childre
 
   if (passwordRequired) return <main className="px-4 py-6"><DriverPasswordForm onUpdated={()=>setPasswordRequired(false)} /></main>;
   if (error) return <div className="mx-auto max-w-sm space-y-3 p-6" role="alert"><p>{error}</p>
-    <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button>
+    {canRetry && <Button variant="outline" onClick={()=>setRevision(value=>value+1)}>Tentar novamente</Button>}
     {native && !assistGrant && <Button asChild variant="link"><Link href="/driver/conta?primeiro=1">Retomar primeiro acesso</Link></Button>}
     <Button variant="ghost" onClick={()=>void out()}>Sair</Button></div>;
   if (!value && stale) return <div className="space-y-3 p-6" role="status"><p>O acesso está sendo verificado.</p>
