@@ -5,6 +5,7 @@ import {locationRequestDelivery} from '@/lib/driver/location-request';
 import { useEffect, useRef, useState } from 'react';
 import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import { locationPublisher } from '@/lib/driver/location-publish';
 
 interface GeolocationTrackingOptions {
   routeId: string;
@@ -27,75 +28,48 @@ export function useGeolocationTracking({
   const [isTracking, setIsTracking] = useState(false);
   const [trackingHealth, setTrackingHealth] = useState<'healthy' | 'warning' | 'error'>('healthy');
   const watchIdRef = useRef<number | null>(null);
-  const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
-  const lastUpdateRef = useRef<number>(0);
+  const publisherRef = useRef(locationPublisher({ interval: updateInterval, distance: distanceFilter }));
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const retryCountRef = useRef<number>(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const lastSuccessfulUpdateRef = useRef<number>(Date.now());
-
-  const calculateDistance = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number => {
-    const R = 6371e3; // Raio da Terra em metros
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  };
 
   const publishLocation = async (position: GeolocationPosition, requestRevision?: string) => {
     if (!enabled) return false;
     const now = Date.now();
     const { latitude, longitude, accuracy, heading, speed } = position.coords;
+    const publisher = publisherRef.current;
+    const point = { lat: latitude, lng: longitude };
 
-    // Verifica filtro de distância
-    if (!requestRevision && lastLocationRef.current) {
-      const distance = calculateDistance(
-        lastLocationRef.current.lat,
-        lastLocationRef.current.lng,
-        latitude,
-        longitude
-      );
-
-      // Se moveu menos que o filtro E ainda não passou o intervalo de tempo, não atualiza
-      if (distance < distanceFilter && now - lastUpdateRef.current < updateInterval) {
-        return;
-      }
-    }
+    // Filtro de distância/tempo, espera após falha e parada definitiva em 404.
+    if (!publisher.due(now, point, Boolean(requestRevision))) return false;
+    publisher.attempted(now);
 
     try {
       const ack=await driverCommand<{acknowledgedRevision?:string}>(request,endpoint,{kind:'location',routeId,requestRevision,location:{
         lat:latitude,lng:longitude,accuracy,heading:heading ?? null,speed:speed ?? null,
       }});
 
-      lastLocationRef.current = { lat: latitude, lng: longitude };
-      lastUpdateRef.current = now;
+      publisher.succeeded(now, point);
       lastSuccessfulUpdateRef.current = now;
-      retryCountRef.current = 0;
       setTrackingHealth('healthy');
       return !requestRevision || ack.acknowledgedRevision===requestRevision;
     } catch (err) {
+      const next = publisher.failed(err);
+      if (next === 'halt') {
+        // A rota não aceita mais localização (finalizada ou retirada do motorista).
+        stopTracking();
+        return false;
+      }
       console.error('❌ Erro ao atualizar localização:', err);
       setTrackingHealth('warning');
 
-      // Retry após falha de conexão
-      if (!requestRevision && retryCountRef.current < 3) {
-        retryCountRef.current++;
+      // Uma única nova tentativa pendente por vez, respeitando o intervalo.
+      if (!requestRevision && next === 'retry') {
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = setTimeout(() => {
-          publishLocation(position,requestRevision);
-        }, 5000);
+          publishLocation(position);
+        }, updateInterval);
       }
       return false;
     }
@@ -155,7 +129,7 @@ export function useGeolocationTracking({
   };
 
   const startTracking = () => {
-    if (!enabled) return;
+    if (!enabled || publisherRef.current.halted) return;
     if (!navigator.geolocation) {
       setError({
         code: 0,
@@ -259,6 +233,14 @@ export function useGeolocationTracking({
     const timer=setInterval(refresh,8000);
     return()=>{current=false;clearInterval(timer);};
   },[isTracking,enabled,endpoint,request,routeId]);
+
+  // Rota deixou de ser rastreável (ou mudou): o próximo início começa do zero.
+  useEffect(() => {
+    if (!enabled) publisherRef.current.resume();
+  }, [enabled]);
+  useEffect(() => {
+    publisherRef.current = locationPublisher({ interval: updateInterval, distance: distanceFilter });
+  }, [routeId, updateInterval, distanceFilter]);
 
   // Reativar Wake Lock quando a página voltar a ser visível
   useEffect(() => {
