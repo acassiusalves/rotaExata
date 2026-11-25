@@ -14,6 +14,7 @@ const store=await import('../src/lib/server/staff/driver-assist.ts');
 const { performDriverRouteAction }=await import('../src/lib/server/earnings/firestore-route-actions.ts');
 const { getStopIdentityKey }=await import('../src/lib/route-stop-utils.ts');
 const { factsHash }=await import('../functions/src/earnings-source-adapter.ts');
+const { serveDriverRuntimeAs }=await import('../src/lib/server/driver/runtime.ts');
 assert.ok(db,'Firestore emulator is required');
 after(()=>db.terminate());
 
@@ -211,4 +212,65 @@ test('recusa de comando do operador não leva dados do cliente para o log do ser
   const line=warn.mock.calls[0].arguments.join(' ');
   assert.ok(line.includes(assist.grantId));
   assert.ok(!line.includes(CUSTOMER));
+});
+
+const runtimeActor=(driverUid,assist)=>({sourceUid:driverUid,userId:assist.staffUserId,native:true,
+  assist:{...assist,driverName:'Motorista Teste',expiresAt:new Date(Date.now()+HOUR).toISOString()}});
+const runtimeGet=(actor,query)=>serveDriverRuntimeAs(new Request('http://localhost/api/staff/driver-assist?'+query),actor);
+const runtimePost=(actor,body)=>serveDriverRuntimeAs(new Request('http://localhost/api/staff/driver-assist',{
+  method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),actor);
+
+test('o perfil no modo operador diz quem opera, até quando, e não propaga o logout forçado do motorista',async t=>{
+  const driver=await driverProfile(t,{role:'driver',displayName:'Motorista Teste',forceLogoutAt:Timestamp.now()});
+  const assist=assistOf();
+  const response=await runtimeGet(runtimeActor(driver.id,assist),'resource=profile');
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  assert.equal(body.profile.displayName,'Motorista Teste');
+  assert.equal(body.readOnly,false);
+  assert.equal(body.forceLogoutAt,null);
+  assert.deepEqual(Object.keys(body.assist).sort(),['driverName','expiresAt','staffName']);
+  assert.equal(body.assist.staffName,'Operadora Teste');
+});
+
+test('o operador vê as rotas ativas do motorista e não recebe pedido de localização',async t=>{
+  const f=await routeFixture(t,{status:'dispatched',stops:stops(0,2)});
+  const actor=runtimeActor(f.driver.id,assistOf());
+  const list=await (await runtimeGet(actor,'resource=routes&view=active')).json();
+  assert.deepEqual(list.routes.map(route=>route.id),[f.ref.id]);
+  const pending=db.collection('locationUpdateRequests').doc(f.driver.id);
+  await pending.set({requestedAt:Timestamp.now()});
+  t.after(()=>pending.delete());
+  assert.deepEqual(await (await runtimeGet(actor,'resource=location-request')).json(),{revision:null});
+});
+
+test('o operador não envia localização, presença, preferências, leitura de aviso nem token de push',async t=>{
+  const f=await routeFixture(t,{status:'in_progress',startedAt:Timestamp.now(),stops:stops(0,1)});
+  const actor=runtimeActor(f.driver.id,assistOf());
+  const blocked=[
+    {kind:'location',routeId:f.ref.id,location:{lat:-16.6,lng:-49.2,accuracy:5,heading:null,speed:null}},
+    {kind:'presence',online:true},
+    {kind:'settings',darkMode:true,autoNavigation:false,keepScreenOn:true},
+    {kind:'inbox-open',id:'aviso-1'},
+    {kind:'push-disable'},
+  ];
+  for (const body of blocked) {
+    const response=await runtimePost(actor,body);
+    assert.equal(response.status,403,body.kind);
+    assert.equal((await response.json()).code,'assist_not_allowed',body.kind);
+  }
+  const route=await f.ref.get();
+  assert.equal(route.get('currentLocation'),undefined);
+  assert.equal((await f.driver.get()).get('status'),undefined);
+});
+
+test('o comando de rota enviado pelo runtime do operador chega marcado',async t=>{
+  const f=await routeFixture(t,{status:'dispatched',stops:stops(0,1)});
+  const assist=assistOf();
+  const response=await runtimePost(runtimeActor(f.driver.id,assist),{kind:'route',command:{action:'start',routeId:f.ref.id}});
+  assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
+  const route=await f.ref.get();
+  assert.equal(route.get('status'),'in_progress');
+  assert.equal(route.get('staffAssist.grantId'),assist.grantId);
+  assert.equal(route.get('staffAssist.by'),assist.staffSourceUid);
 });

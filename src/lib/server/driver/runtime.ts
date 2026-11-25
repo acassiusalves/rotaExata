@@ -13,6 +13,7 @@ import type { PlaceValue,RouteChangeNotification } from '@/lib/types';
 import { privateJson } from '@/lib/server/earnings/store';
 import { EarningsError,earningsErrorResponse,readJsonBody } from '@/lib/server/earnings/transport';
 import { performDriverRouteAction } from '@/lib/server/earnings/firestore-route-actions';
+import { assistCommandAllowed } from '@/lib/driver/assist-policy';
 import { driverAuthority,type DriverAuthority } from './authority';
 
 const docId=z.string().min(1).max(150).regex(/^[^/]+$/);
@@ -109,7 +110,11 @@ async function getRuntime(request:Request,actor:DriverAuthority) {
   if (args.data.resource==='profile') {
     const profile=(await db.collection('users').doc(uid).get()).data();
     if (!profile) throw new EarningsError(403,'route_access_denied');
-    return privateJson({profile:createProfile(actor.userId,profile),forceLogoutAt:driverTimestamp(profile.forceLogoutAt),readOnly:!!actor.readOnly});
+    const assist=actor.assist;
+    // O logout forçado é do aparelho do motorista; não pode derrubar a sessão do operador.
+    return privateJson({profile:createProfile(actor.userId,profile),
+      forceLogoutAt:assist ? null:driverTimestamp(profile.forceLogoutAt),readOnly:!!actor.readOnly,
+      ...(assist ? {assist:{driverName:assist.driverName,staffName:assist.staffName,expiresAt:assist.expiresAt}}:{})});
   }
   if (args.data.resource==='preferences') {
     const raw=(await preferences(db,uid).get()).data() ?? {};
@@ -117,6 +122,7 @@ async function getRuntime(request:Request,actor:DriverAuthority) {
       keepScreenOn:raw.keepScreenOn!==false,pushRevision:Number.isSafeInteger(raw.pushRevision) ? raw.pushRevision:0});
   }
   if (args.data.resource==='location-request') {
+    if (actor.assist) return privateJson({revision:null});
     const doc=await db.collection('locationUpdateRequests').doc(uid).get();
     return privateJson({revision:doc.updateTime ? String(doc.updateTime.seconds)+'.'+String(doc.updateTime.nanoseconds):null});
   }
@@ -161,10 +167,15 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
   const input=command.safeParse(await readJsonBody(request,3900000));
   if (!input.success) throw new EarningsError(422,'route_invalid_request');
   const data=input.data;
+  if (actor.assist && !assistCommandAllowed(data.kind)) throw new EarningsError(403,'assist_not_allowed');
   const user=db.collection('users').doc(uid);
   const prefs=preferences(db,uid);
-  if (data.kind==='route') return performDriverRouteAction(
-    new Request(request.url,{method:'POST',body:JSON.stringify(data.command)}),uid,{canonical:actor.native,bindMedia:true});
+  if (data.kind==='route') {
+    const assist=actor.assist && {grantId:actor.assist.grantId,staffUserId:actor.assist.staffUserId,
+      staffSourceUid:actor.assist.staffSourceUid,staffName:actor.assist.staffName};
+    return performDriverRouteAction(new Request(request.url,{method:'POST',body:JSON.stringify(data.command)}),uid,
+      {canonical:actor.native,bindMedia:true,...(assist ? {assist}:{})});
+  }
   if (data.kind==='upload') return upload(db,uid,data);
   if (data.kind==='settings') {
     await prefs.set({darkMode:data.darkMode,autoNavigation:data.autoNavigation,keepScreenOn:data.keepScreenOn},{merge:true});
@@ -246,10 +257,15 @@ async function postRuntime(request:Request,actor:DriverAuthority) {
   return privateJson({ok:true,grant:grant ?? null});
 }
 
+/** Atende o runtime para uma autoridade já resolvida (motorista ou operador em nome dele). */
+export async function serveDriverRuntimeAs(request:Request,actor:DriverAuthority) {
+  try {
+    return request.method==='POST' ? await postRuntime(request,actor):await getRuntime(request,actor);
+  } catch (error) { return earningsErrorResponse(error); }
+}
+
 export async function serveDriverRuntime(request:Request,phase:'native'|'legacy') {
   try {
-    const write=request.method==='POST';
-    const actor=await driverAuthority(request,phase,write);
-    return write ? await postRuntime(request,actor):await getRuntime(request,actor);
+    return await serveDriverRuntimeAs(request,await driverAuthority(request,phase,request.method==='POST'));
   } catch (error) { return earningsErrorResponse(error); }
 }
