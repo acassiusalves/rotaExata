@@ -48,3 +48,43 @@ test('no modo operador as preferências do motorista não são gravadas', async 
   assert.equal(await actions.saveSettings({ notifications: false, darkMode: true, autoNavigation: false, keepScreenOn: true }), false);
   assert.equal(writes, 0);
 });
+
+function assistContext(overrides: Record<string, unknown>) {
+  const tab = { location: { href: '' }, closed: false, close() { this.closed = true; } };
+  const notices: { title: string; description?: string }[] = [];
+  const calls: { path: string; init: { method: string; body: string } }[] = [];
+  return { tab, notices, calls, context: {
+    driver: { id: 'driver-1', name: 'João Entregador' }, reason: '  Motorista sem sinal  ',
+    isReopenReasonValid: (value: string) => value.trim().length >= 5,
+    setIsSubmitting() {}, onClose() {}, window: { open: () => tab },
+    staff: { request: async (path: string, init: { method: string; body: string }) => { calls.push({ path, init }); return { grantId: '3f2c1a9e-8b7d-4c6f-9a1b-2d3e4f5a6b7c' }; } },
+    assistEntryPath: (grantId: string) => '/impersonate-driver?grant=' + grantId,
+    assistOpenMessage: () => 'Motorista não encontrado.',
+    toast: (notice: { title: string; description?: string }) => notices.push(notice), ...overrides,
+  } };
+}
+
+test('confirmar o motivo abre o acesso e leva a nova aba para o app do motorista', async () => {
+  const f = assistContext({});
+  await load('src/components/drivers/driver-assist-dialog.tsx', ['handleConfirm'], f.context).handleConfirm();
+  assert.equal(f.calls[0].path, '/api/staff/drivers/driver-1/assist');
+  assert.equal(f.calls[0].init.method, 'POST');
+  assert.deepEqual(JSON.parse(f.calls[0].init.body), { reason: 'Motorista sem sinal' });
+  assert.equal(f.tab.location.href, '/impersonate-driver?grant=3f2c1a9e-8b7d-4c6f-9a1b-2d3e4f5a6b7c');
+});
+
+test('se o servidor recusa, a aba aberta é fechada e o operador vê o motivo', async () => {
+  const f = assistContext({ staff: { request: async () => { throw Object.assign(new Error('x'), { status: 404, code: 'staff_driver_not_found' }); } } });
+  await load('src/components/drivers/driver-assist-dialog.tsx', ['handleConfirm'], f.context).handleConfirm();
+  assert.equal(f.tab.closed, true);
+  assert.equal(f.notices.at(-1)!.description, 'Motorista não encontrado.');
+});
+
+test('motivo curto não abre aba nem chama o servidor', async () => {
+  const f = assistContext({ reason: 'oi' });
+  let opened = 0;
+  f.context.window = { open: () => { opened++; return f.tab; } };
+  await load('src/components/drivers/driver-assist-dialog.tsx', ['handleConfirm'], f.context).handleConfirm();
+  assert.equal(opened, 0);
+  assert.equal(f.calls.length, 0);
+});

@@ -8,6 +8,7 @@ import { Card,CardContent } from '@/components/ui/card';
 import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
 import { DriverTable } from '@/components/drivers/driver-table';
 import { DriverSupportStatementDialog } from '@/components/drivers/driver-support-statement-dialog';
+import { DriverAssistDialog } from '@/components/drivers/driver-assist-dialog';
 import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
 import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
 import { staffDriverAssignments,type StaffDriverAssignment } from '@/lib/staff/driver-assignments';
@@ -24,6 +25,9 @@ type StaffDriver=Driver & {revision:string};
 export default function DriversPage() {
   const {request,paths,role,userId,scopeId,revision,policyRevision,rotaPolicyRevision}=useStaff();
   const canViewEarnings=role==='admin' && paths.includes('/drivers') && paths.includes('/financeiro/pagamentos');
+  // Mesma regra do servidor para `driver:operate`: página Motoristas + admin ou sócio.
+  const canOperate=(role==='admin' || role==='socio') && paths.includes('/drivers');
+  const [assistTarget,setAssistTarget]=useState<{id:string;name:string}|null>(null);
   const [supportTarget,setSupportTarget]=useState<Driver|null>(null);
   const supportSession=JSON.stringify([userId,scopeId,revision,policyRevision,rotaPolicyRevision]);
   useEffect(()=>{setSupportTarget(null);},[supportSession,canViewEarnings]);
@@ -76,10 +80,12 @@ export default function DriversPage() {
       </div> : loading ? <DriverTableSkeleton /> :
         <DriverTable drivers={rows} onViewDetailsClick={driver=>setDetailsId(driver.id)}
           onEditClick={driver=>setEdited(rows.find(row=>row.id===driver.id) ?? null)}
-          onViewEarnings={canViewEarnings ? setSupportTarget : undefined} />}
+          onViewEarnings={canViewEarnings ? setSupportTarget : undefined}
+          onOpenApp={canOperate ? driver=>setAssistTarget({id:driver.id,name:driver.name}) : undefined} />}
     </CardContent></Card>
     {canViewEarnings && supportTarget && <DriverSupportStatementDialog key={supportSession+supportTarget.id}
       target={supportTarget} onClose={()=>setSupportTarget(null)} />}
+    {canOperate && <DriverAssistDialog driver={assistTarget} onClose={()=>setAssistTarget(null)} />}
     <DriverDetailsDialog isOpen={!!details} onClose={()=>setDetailsId(null)} driver={details} />
     <EditDriverDialog isOpen={!!edited} onClose={()=>setEdited(null)} onSaved={refresh} driver={edited} revision={edited?.revision} />
   </div>;

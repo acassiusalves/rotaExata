@@ -164,6 +164,7 @@ const getDriverColumns = (
   onViewDetailsClick: (driver: Driver) => void,
   onEditClick: (driver: Driver) => void,
   onViewEarnings?: (driver: Driver) => void,
+  onOpenApp?: (driver: Driver) => void,
 ): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
@@ -425,6 +426,9 @@ const getDriverColumns = (
                     {onViewEarnings && <DropdownMenuItem onSelect={() => onViewEarnings(driver)}>
                       Ver ganhos (suporte)
                     </DropdownMenuItem>}
+                    {onOpenApp && <DropdownMenuItem onSelect={() => onOpenApp(driver)}>
+                      Abrir app do motorista
+                    </DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => onEditClick(driver)}>
                        Editar
                     </DropdownMenuItem>
@@ -436,18 +440,19 @@ const getDriverColumns = (
   },
 ];
 
-export function DriverTable({drivers,onViewDetailsClick,onEditClick,onViewEarnings}:{
+export function DriverTable({drivers,onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp}:{
   drivers:Driver[];
   onViewDetailsClick:(driver:Driver)=>void;
   onEditClick:(driver:Driver)=>void;
   onViewEarnings?:(driver:Driver)=>void;
+  onOpenApp?:(driver:Driver)=>void;
 }) {
   // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick,onViewEarnings),[onViewDetailsClick,onEditClick,onViewEarnings]);
+  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp),[onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp]);
 
   const table = useReactTable({
     data: drivers,
