@@ -21,9 +21,11 @@ export function readAssistGrant(storage: Store | null = tabStorage()) {
   } catch { return null; }
 }
 
+/** Ao contrário da leitura, gravar precisa avisar: sem armazenamento a aba não entra no modo operador. */
 export function writeAssistGrant(grantId: string, storage: Store | null = tabStorage()) {
   if (!isAssistGrantId(grantId)) throw new Error('Acesso inválido.');
-  storage?.setItem(ASSIST_STORAGE_KEY, grantId);
+  if (!storage) throw new Error('Armazenamento da aba indisponível.');
+  storage.setItem(ASSIST_STORAGE_KEY, grantId);
 }
 
 export function clearAssistGrant(storage: Store | null = tabStorage()) {

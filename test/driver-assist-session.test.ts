@@ -59,3 +59,8 @@ test('identificador inválido não é gravado', () => {
   assert.throws(() => writeAssistGrant('nao-e-uuid', storage));
   assert.equal(storage.values.has(ASSIST_STORAGE_KEY), false);
 });
+
+test('gravar sem armazenamento disponível avisa quem chamou, em vez de fingir que gravou', () => {
+  // É o que acontece quando o navegador bloqueia o sessionStorage e o próprio acesso a ele falha.
+  assert.throws(() => writeAssistGrant(GRANT, null), /indispon[ií]vel/i);
+});

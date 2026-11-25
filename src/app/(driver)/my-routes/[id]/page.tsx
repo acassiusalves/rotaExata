@@ -235,7 +235,8 @@ export default function RouteDetailsPage() {
 
       toast({
         title: 'Rota iniciada!',
-        description: 'Seu rastreamento está ativo.',
+        // No modo operador o rastreamento não liga: quem envia localização é o aparelho do motorista.
+        description: assist ? 'A rota está em andamento.' : 'Seu rastreamento está ativo.',
       });
     } catch (error) {
       console.error('Error starting route:', error);

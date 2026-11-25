@@ -88,3 +88,22 @@ test('motivo curto não abre aba nem chama o servidor', async () => {
   assert.equal(opened, 0);
   assert.equal(f.calls.length, 0);
 });
+
+for (const [mode, assist, expected] of [
+  ['operador', { driverName: 'João', staffName: 'Maria', expiresAt: '' }, /em andamento/i],
+  ['motorista', null, /rastreamento est[aá] ativo/i],
+] as const) {
+  test(`ao iniciar a rota, o aviso para o ${mode} só fala de rastreamento quando ele liga`, async () => {
+    const notices: { title: string; description: string }[] = [];
+    const actions = load('src/app/(driver)/my-routes/[id]/page.tsx', ['handleStartRoute'], {
+      route: { status: 'dispatched', stops: [] }, readOnly: false, assist, isStarting: false, setIsStarting() {},
+      routeAction: async () => ({ ok: true }), startTracking() {},
+      toast: (notice: { title: string; description: string }) => notices.push(notice),
+      console: { error() {} }, routeActionProblem: () => ({ title: 'x', description: 'x' }),
+    });
+    await actions.handleStartRoute();
+    assert.equal(notices.length, 1);
+    assert.match(notices[0].description, expected);
+    if (assist) assert.doesNotMatch(notices[0].description, /rastreamento/i);
+  });
+}
