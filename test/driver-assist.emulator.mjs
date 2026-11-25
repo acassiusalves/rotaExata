@@ -302,3 +302,14 @@ test('o comando de rota enviado pelo runtime do operador chega marcado',async t=
   assert.equal(route.get('staffAssist.grantId'),assist.grantId);
   assert.equal(route.get('staffAssist.by'),assist.staffSourceUid);
 });
+
+test('a tela do operador recebe a validação de distância desligada; a do motorista, a configuração real',async t=>{
+  const settings=db.doc('settings/general');
+  await settings.set({deliveryDistanceValidation:true,maxDeliveryDistance:0.5});
+  t.after(()=>settings.delete());
+  const f=await routeFixture(t,{status:'in_progress',startedAt:Timestamp.now(),stops:stops(0,1)});
+  const asOperator=await (await runtimeGet(runtimeActor(f.driver.id,assistOf()),'resource=routes&id='+f.ref.id)).json();
+  assert.deepEqual(asOperator.deliveryValidation,{enabled:false,maxDistance:0.5});
+  const asDriver=await (await runtimeGet({sourceUid:f.driver.id,userId:f.driver.id,native:true},'resource=routes&id='+f.ref.id)).json();
+  assert.deepEqual(asDriver.deliveryValidation,{enabled:true,maxDistance:0.5});
+});

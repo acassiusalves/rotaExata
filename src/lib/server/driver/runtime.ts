@@ -91,7 +91,9 @@ async function readRoutes(db:FirebaseFirestore.Firestore,actor:DriverAuthority,a
       },
       fingerprint:getRouteChangeNotificationFingerprint(data),
     }:null;
-    return privateJson({route:serializeDriverRoute(snap.id,body!,factsHash),notice:pending,deliveryValidation:validation});
+    // O operador não está no local da entrega: o servidor já dispensa a checagem para ele, e a tela precisa saber.
+    return privateJson({route:serializeDriverRoute(snap.id,body!,factsHash),notice:pending,
+      deliveryValidation:actor.assist ? {...validation,enabled:false}:validation});
   }
   const statuses=args.view==='history'?['completed','completed_auto']:['dispatched','in_progress'];
   let query=routes.where('driverId','==',actor.sourceUid).where('status','in',statuses).orderBy(FieldPath.documentId()).limit(51);
