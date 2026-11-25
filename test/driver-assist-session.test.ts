@@ -38,3 +38,24 @@ test('fora do navegador não há acesso', () => {
 test('a entrada do modo operador leva só o identificador do acesso', () => {
   assert.equal(assistEntryPath(GRANT), '/impersonate-driver?grant=' + GRANT);
 });
+
+const blocked = {
+  getItem(): string | null { throw new DOMException('blocked', 'SecurityError'); },
+  setItem(): void { throw new DOMException('blocked', 'SecurityError'); },
+  removeItem(): void { throw new DOMException('blocked', 'SecurityError'); },
+};
+
+test('armazenamento bloqueado pelo navegador é tratado como "sem acesso"', () => {
+  assert.equal(readAssistGrant(blocked), null);
+  assert.doesNotThrow(() => clearAssistGrant(blocked));
+});
+
+test('gravar com o armazenamento bloqueado avisa quem chamou', () => {
+  assert.throws(() => writeAssistGrant(GRANT, blocked));
+});
+
+test('identificador inválido não é gravado', () => {
+  const storage = memory();
+  assert.throws(() => writeAssistGrant('nao-e-uuid', storage));
+  assert.equal(storage.values.has(ASSIST_STORAGE_KEY), false);
+});
