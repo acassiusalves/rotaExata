@@ -3,7 +3,7 @@ import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { ASSIST_TTL_MS, assistGrantProblem } from '../../driver/assist-policy';
 import { EarningsError } from '../earnings/transport';
 
-export type AssistOperator = { userId: string; sessionId: string; name: string; sourceUid?: string };
+export type AssistOperator = { userId: string; sessionId: string; name: string; sourceUid?: string; role?: string };
 export type DriverAssist = {
   grantId: string; driverUid: string; driverName: string;
   staffUserId: string; staffSourceUid: string; staffName: string; expiresAt: string;
@@ -30,7 +30,7 @@ export async function openDriverAssist(
   });
   batch.create(db.collection('activity_log').doc('staff-assist-' + grantId), {
     timestamp: createdAt, eventType: 'driver_assist_started', entityType: 'driver', entityId: driverUid,
-    canonicalUserId: actor.userId, userId: staffSourceUid, userName: actor.name,
+    category: 'LOGISTICS', canonicalUserId: actor.userId, userId: staffSourceUid, userName: actor.name, userRole: actor.role ?? null,
     action: 'App do motorista aberto pelo painel', metadata: { grantId, reason, driverName, expiresAt },
   });
   await batch.commit();
@@ -65,7 +65,7 @@ export async function endDriverAssist(db: Firestore, actor: AssistOperator, gran
   batch.update(grants(db).doc(grantId), { endedAt });
   batch.create(db.collection('activity_log').doc('staff-assist-end-' + grantId), {
     timestamp: endedAt, eventType: 'driver_assist_ended', entityType: 'driver', entityId: assist.driverUid,
-    canonicalUserId: actor.userId, userId: assist.staffSourceUid, userName: actor.name,
+    category: 'LOGISTICS', canonicalUserId: actor.userId, userId: assist.staffSourceUid, userName: actor.name, userRole: actor.role ?? null,
     action: 'App do motorista encerrado pelo painel', metadata: { grantId },
   });
   await batch.commit();

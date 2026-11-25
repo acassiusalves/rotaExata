@@ -590,6 +590,11 @@ export type ActivityEventType =
   | 'route_auto_completed'
   | 'route_resent'
   | 'route_reopened'
+  | 'driver_assist_started'
+  | 'driver_assist_ended'
+  | 'route_started'
+  | 'route_changes_acknowledged'
+  | 'route_completed'
   // === NOVOS - FINANCEIRO (5) ===
   | 'payment_approved'
   | 'payment_marked_as_paid'

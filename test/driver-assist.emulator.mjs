@@ -29,7 +29,7 @@ async function driverProfile(t,body={role:'driver',active:true,displayName:'Moto
 const refused=code=>error=>error.status===(code==='staff_driver_not_found' ? 404:403) && error.code===code;
 
 test('abrir o acesso grava o documento de 60 minutos e o evento com o motivo',async t=>{
-  const actor=operator();
+  const actor={...operator(),role:'admin'};
   const driver=await driverProfile(t);
   const now=Date.now();
   const assist=await store.openDriverAssist(db,actor,driver.id,'Motorista sem sinal',now);
@@ -46,6 +46,8 @@ test('abrir o acesso grava o documento de 60 minutos e o evento com o motivo',as
 
   const log=await db.collection('activity_log').doc('staff-assist-'+assist.grantId).get();
   assert.equal(log.get('eventType'),'driver_assist_started');
+  assert.equal(log.get('category'),'LOGISTICS');
+  assert.equal(log.get('userRole'),'admin');
   assert.equal(log.get('userName'),'Operadora Teste');
   assert.equal(log.get('entityId'),driver.id);
   assert.equal(log.get('metadata.reason'),'Motorista sem sinal');
@@ -70,12 +72,15 @@ test('só o operador e a sessão que abriram resolvem o acesso, e só até vence
 });
 
 test('encerrar o acesso o invalida, registra o evento e pode ser repetido',async t=>{
-  const actor=operator();
+  const actor={...operator(),role:'admin'};
   const driver=await driverProfile(t);
   const {grantId}=await store.openDriverAssist(db,actor,driver.id,'Encerramento manual');
   await store.endDriverAssist(db,actor,grantId);
   await assert.rejects(store.resolveDriverAssist(db,actor,grantId),refused('assist_expired'));
-  assert.equal((await db.collection('activity_log').doc('staff-assist-end-'+grantId).get()).get('eventType'),'driver_assist_ended');
+  const ended=await db.collection('activity_log').doc('staff-assist-end-'+grantId).get();
+  assert.equal(ended.get('eventType'),'driver_assist_ended');
+  assert.equal(ended.get('category'),'LOGISTICS');
+  assert.equal(ended.get('userRole'),'admin');
   await store.endDriverAssist(db,actor,grantId);
 });
 

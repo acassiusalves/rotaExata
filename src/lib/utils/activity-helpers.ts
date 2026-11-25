@@ -127,6 +127,11 @@ export function getEventTypeLabel(eventType: ActivityEventType): string {
     route_auto_completed: 'Rota Auto-Completada',
     route_resent: 'Rota Reenviada',
     route_reopened: 'Rota Reaberta',
+    driver_assist_started: 'App do motorista aberto pelo painel',
+    driver_assist_ended: 'App do motorista encerrado pelo painel',
+    route_started: 'Rota iniciada',
+    route_changes_acknowledged: 'Alterações da rota confirmadas',
+    route_completed: 'Rota finalizada',
     // Financeiro
     payment_approved: 'Pagamento Aprovado',
     payment_marked_as_paid: 'Pagamento Pago',
