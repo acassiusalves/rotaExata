@@ -28,3 +28,23 @@ test('a faixa diz em nome de quem o operador age e que a ação fica no nome del
   assert.match(html, /<button[^>]*>.*Encerrar.*<\/button>/s);
   assert.match(html, /role="status"/);
 });
+
+test('no modo operador abrir um aviso não o marca como lido para o motorista', async () => {
+  let writes = 0;
+  const actions = load('src/app/(driver)/driver/notifications/page.tsx', ['handleMarkAsOpened'], {
+    readOnly: false, assist: { driverName: 'João', staffName: 'Maria', expiresAt: '' }, request: () => {}, endpoint: '/api/staff/driver-assist',
+    driverCommand: async () => { writes++; }, refresh() {}, window: { dispatchEvent() {} }, Event,
+  });
+  await actions.handleMarkAsOpened('notice-a', false);
+  assert.equal(writes, 0);
+});
+
+test('no modo operador as preferências do motorista não são gravadas', async () => {
+  let writes = 0;
+  const actions = load('src/app/(driver)/driver/settings/page.tsx', ['saveSettings'], {
+    readOnly: false, assist: { driverName: 'João', staffName: 'Maria', expiresAt: '' }, request: () => {}, endpoint: '/api/staff/driver-assist',
+    driverCommand: async () => { writes++; }, setSettings() {}, toast() {}, console: { error() {} },
+  });
+  assert.equal(await actions.saveSettings({ notifications: false, darkMode: true, autoNavigation: false, keepScreenOn: true }), false);
+  assert.equal(writes, 0);
+});

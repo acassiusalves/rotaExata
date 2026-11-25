@@ -29,11 +29,11 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
 export default function DriverNotificationsPage() {
-  const {request,endpoint,readOnly}=useDriverRuntime();
+  const {request,endpoint,readOnly,assist}=useDriverRuntime();
   const {data,loading,error,refresh}=useDriverResource<{notifications:DriverInbox[]}>(driverQuery(endpoint,'inbox'));
   const notifications=data?.notifications ?? [];
   async function handleMarkAsOpened(id:string,alreadyOpened:boolean) {
-    if (alreadyOpened || readOnly) return;
+    if (alreadyOpened || readOnly || assist) return;
     try {
       await driverCommand(request,endpoint,{kind:'inbox-open',id});
       refresh();
