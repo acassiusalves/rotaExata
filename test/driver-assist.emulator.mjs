@@ -13,7 +13,7 @@ const { adminDb:db }=await import('../src/lib/firebase/admin.ts');
 const store=await import('../src/lib/server/staff/driver-assist.ts');
 const { performDriverRouteAction }=await import('../src/lib/server/earnings/firestore-route-actions.ts');
 const { getStopIdentityKey }=await import('../src/lib/route-stop-utils.ts');
-const { factsHash }=await import('../functions/src/earnings-source-adapter.ts');
+const { factsHash, protectCompletion }=await import('../functions/src/earnings-source-adapter.ts');
 const { serveDriverRuntimeAs }=await import('../src/lib/server/driver/runtime.ts');
 assert.ok(db,'Firestore emulator is required');
 after(()=>db.terminate());
@@ -127,8 +127,9 @@ test('operador inicia, confirma e finaliza: tudo fica no nome dele e a rota vai 
   assert.equal(route.get('staffAssist.grantId'),assist.grantId);
 
   const evidence=await f.evidence.get();
-  assert.equal(evidence.get('staffAssisted.name'),'Operadora Teste');
-  assert.equal(evidence.get('completion'),null,'rota operada pelo painel não gera evidência automática');
+  assert.equal(evidence.get('staffAssisted'),undefined);
+  assert.deepEqual(evidence.get('start.confirmations'),{},'confirmação do operador não conta como do motorista');
+  assert.equal(evidence.get('completion'),null,'paradas confirmadas pelo painel precisam de atestado na conferência');
 
   const logs=await routeLogs(f.ref.id);
   assert.deepEqual(logs.map(log=>log.eventType).sort(),['point_completed','point_completed','route_completed','route_started']);
@@ -147,19 +148,45 @@ test('uma única parada confirmada pelo operador leva a rota do motorista para c
   await ok(await act(f.driver.id,await confirmCommand(t,f,'open-1'),assistOf()));
   await ok(await act(f.driver.id,{action:'finish',routeId:f.ref.id}));
   const evidence=await f.evidence.get();
-  assert.ok(evidence.get('staffAssisted'));
+  assert.deepEqual(Object.keys(evidence.get('start.confirmations')),['id:open-0'],'só a parada do motorista fica confirmada');
   assert.equal(evidence.get('completion'),null);
+  // O robô de finalização automática e o "finalizar rota" do painel usam a mesma função: também não geram evidência.
+  const route=(await f.ref.get()).data();
+  for (const kind of ['auto-server-v1','admin-server-v1']) {
+    assert.equal(protectCompletion({...route,earningsSourceStart:evidence.get('start')},kind),undefined,kind);
+  }
 });
 
-test('a marca do painel sobrevive a uma reabertura para "despachada"',async t=>{
-  const f=await routeFixture(t,{status:'dispatched',stops:stops(2,0)});
-  const first=assistOf();
-  await f.evidence.set({start:null,completion:null,staffAssisted:{by:first.staffSourceUid,name:first.staffName,grantId:first.grantId,at:Timestamp.now()}});
-  await ok(await act(f.driver.id,{action:'start',routeId:f.ref.id}));
-  await ok(await act(f.driver.id,{action:'finish',routeId:f.ref.id}));
+test('operador que só inicia e finaliza não tira a evidência: vale a confirmação do motorista',async t=>{
+  const f=await routeFixture(t,{status:'dispatched',stops:stops(0,2)});
+  const assist=assistOf();
+  await ok(await act(f.driver.id,{action:'start',routeId:f.ref.id},assist));
+  for (const id of ['open-0','open-1']) await ok(await act(f.driver.id,await confirmCommand(t,f,id)));
+  await ok(await act(f.driver.id,{action:'finish',routeId:f.ref.id},assist));
   const evidence=await f.evidence.get();
-  assert.equal(evidence.get('staffAssisted.grantId'),first.grantId);
-  assert.equal(evidence.get('completion'),null);
+  assert.equal(evidence.get('completion.kind'),'admin-server-v1','finalização pelo painel com paradas confirmadas pelo motorista');
+  assert.equal((await f.ref.get()).get('staffAssist.grantId'),assist.grantId);
+  const logs=await routeLogs(f.ref.id);
+  assert.deepEqual(logs.filter(log=>log.userId===assist.staffSourceUid).map(log=>log.eventType).sort(),['route_completed','route_started']);
+  assert.deepEqual(logs.filter(log=>log.userId===f.driver.id).map(log=>log.eventType),['point_completed','point_completed']);
+});
+
+test('parada do motorista corrigida pelo operador volta a precisar de atestado',async t=>{
+  const f=await routeFixture(t,{status:'dispatched',stops:stops(0,2)});
+  await ok(await act(f.driver.id,{action:'start',routeId:f.ref.id}));
+  for (const id of ['open-0','open-1']) await ok(await act(f.driver.id,await confirmCommand(t,f,id)));
+  assert.deepEqual(Object.keys((await f.evidence.get()).get('start.confirmations')).sort(),['id:open-0','id:open-1']);
+  const edited=await ok(await act(f.driver.id,await confirmCommand(t,f,'open-1'),assistOf()));
+  assert.equal(edited.wasPreviouslyFinalized,true);
+  assert.deepEqual(Object.keys((await f.evidence.get()).get('start.confirmations')),['id:open-0']);
+  await ok(await act(f.driver.id,{action:'finish',routeId:f.ref.id}));
+  assert.equal((await f.evidence.get()).get('completion'),null);
+  const stop=(await f.ref.get()).get('stops').find(item=>item.id==='open-1');
+  assert.notEqual(stop.editedByDriver,true,'edição feita pelo operador não é marcada como do motorista');
+  const notices=(await db.collection('notifications').where('routeId','==',f.ref.id).get()).docs.map(doc=>doc.data());
+  assert.equal(notices.length,1);
+  assert.equal(notices[0].title,'Entrega editada pelo painel');
+  assert.match(notices[0].message,/^Operadora Teste editou/);
 });
 
 test('rota feita só pelo motorista continua gerando evidência automática e log no nome dele',async t=>{
@@ -187,6 +214,7 @@ test('confirmar alterações pelo painel fica no histórico e não marca a rota'
   await ok(await act(f.driver.id,{action:'acknowledge',routeId:f.ref.id,fingerprint},assist));
   assert.equal((await notice.get()).get('acknowledged'),true);
   assert.equal((await f.evidence.get()).exists,false);
+  assert.equal((await f.ref.get()).get('staffAssist'),undefined);
   const logs=await routeLogs(f.ref.id);
   assert.deepEqual(logs.map(log=>log.eventType),['route_changes_acknowledged']);
   assert.equal(logs[0].userName,'Operadora Teste');

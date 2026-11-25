@@ -71,9 +71,9 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const stops = (Array.isArray(data.stops) ? data.stops : []) as PlaceValue[];
       const now = Timestamp.now();
       const evidence = proof.data();
-      // Operador do painel agindo em nome do motorista: registra quem agiu e manda a rota para conferência.
+      // Operador do painel agindo em nome do motorista: registra quem agiu. A remuneração não depende de marca:
+      // parada confirmada pelo operador fica sem confirmação do motorista e é atestada na conferência.
       const assisted = assist ? { by: assist.staffSourceUid, name: assist.staffName, grantId: assist.grantId, at: now } : null;
-      const markEvidence = assisted && !evidence?.staffAssisted ? { staffAssisted: assisted } : {};
       const markRoute = assisted ? { staffAssist: assisted } : {};
       const actorName = assist?.staffName ?? (user.displayName || user.name || 'Motorista');
       const logAssist = (eventType: string, action: string) => {
@@ -91,10 +91,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
           return { status: 409, body: { code: 'route_invalid_state', routeStatus: typeof data.status === 'string' ? data.status : null } };
         }
         tx.update(routeRef, { status: 'in_progress', startedAt: now, currentStopIndex: 0, ...markRoute });
-        // `set` sem merge recria a evidência: a marca do painel de uma operação anterior precisa ser levada junto.
-        const sticky = evidence?.staffAssisted ?? assisted;
-        tx.set(evidenceRef, { start: { driverUid: uid, plan: plannedFingerprint(data), confirmations: {}, startedAt: now }, completion: null,
-          ...(sticky ? { staffAssisted: sticky } : {}) });
+        tx.set(evidenceRef, { start: { driverUid: uid, plan: plannedFingerprint(data), confirmations: {}, startedAt: now }, completion: null });
         logAssist('route_started', 'Rota iniciada pelo painel em nome do motorista');
         return { status: 200, body: { ok: true } };
       }
@@ -114,10 +111,11 @@ export async function performDriverRouteAction(request: Request, uid: string, au
         const { ready, ...progress } = finishReadiness(data.status, stops);
         if (!ready) return { status: 409, body: { code: 'route_not_ready', ...progress } };
         const closed = { status: 'completed', completedAt: now };
-        const completion = evidence?.staffAssisted || assisted ? undefined
-          : protectCompletion({ ...data, ...closed, earningsSourceStart: evidence?.start }, 'driver-server-v1');
+        // Finalização pelo painel usa o tipo de evidência do painel; só há evidência se o motorista confirmou cada parada.
+        const completion = protectCompletion({ ...data, ...closed, earningsSourceStart: evidence?.start },
+          assist ? 'admin-server-v1' : 'driver-server-v1');
         tx.update(routeRef, { ...closed, ...markRoute });
-        tx.set(evidenceRef, { completion: completion ?? null, ...markEvidence }, { merge: true });
+        tx.set(evidenceRef, { completion: completion ?? null }, { merge: true });
         logAssist('route_completed', 'Rota finalizada pelo painel em nome do motorista');
         return { status: 200, body: { ok: true } };
       }
@@ -177,7 +175,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const retainedTime=prior===input.patch.deliveryStatus && (mutation.previousStop.wentToLocation ?? null)===visited &&
         timestampIso(mutation.previousStop.completedAt) ? mutation.previousStop.completedAt:now;
       const updatedStop = wasPreviouslyFinalized
-        ? { ...mutation.updatedStop, completedAt:retainedTime, editedByDriver:true,editedAt:now }
+        ? { ...mutation.updatedStop, completedAt:retainedTime, ...(assist ? {}:{editedByDriver:true}),editedAt:now }
         : mutation.updatedStop;
       const updatedStops = [...mutation.stops];
       updatedStops[mutation.index] = updatedStop;
@@ -204,7 +202,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
           tx.update(linkedOrders[0].ref,{logisticsStatus,updatedAt:now});
         }
         if (wasPreviouslyFinalized) tx.create(db.collection('notifications').doc(),{
-          type:'delivery_edited',title:'Entrega editada pelo motorista',
+          type:'delivery_edited',title:assist ? 'Entrega editada pelo painel':'Entrega editada pelo motorista',
           message:`${actorName} editou uma parada na rota ${data.name || data.code || input.routeId}.`,
           priority:'normal',routeId:input.routeId,routeName:data.name ?? null,stopIndex:mutation.index,driverId:uid,
           driverName:user.displayName || user.name || 'Motorista',read:false,opened:false,openedAt:null,timestamp:now,forAdmin:true,
@@ -212,11 +210,16 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       }
 
       const key = sourceStopKey(updatedStop as unknown as Record<string, unknown>);
-      if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {
+      if (assist) {
+        // Confirmação do operador não vale como confirmação do motorista: a parada fica para atestado na conferência.
+        const recorded = evidence?.start?.confirmations;
+        if (key && recorded && Object.hasOwn(recorded, key)) {
+          tx.set(evidenceRef, { start: { confirmations: { [key]: FieldValue.delete() } } }, { merge: true });
+        }
+      } else if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {
         const confirmation = { status: input.patch.deliveryStatus, visited, workedAt:timestampIso(updatedStop.completedAt) };
         tx.set(evidenceRef, { start: { ...evidence.start, confirmations: { ...evidence.start.confirmations, [key]: confirmation } } }, { merge: true });
       }
-      if (assisted && !evidence?.staffAssisted) tx.set(evidenceRef, { staffAssisted: assisted }, { merge: true });
       const response={updatedStop,stopIndex:mutation.index,wasPreviouslyFinalized};
       if (commandRef) tx.create(commandRef,{digest,response,createdAt:now});
       return { status:200,body:response };
