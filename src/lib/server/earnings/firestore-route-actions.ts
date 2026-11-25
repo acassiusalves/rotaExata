@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase/admin';
 import { factsHash, plannedFingerprint, protectCompletion, sourceStopKey, timestampIso } from '../../../../functions/src/earnings-source-adapter';
 import { getRouteChangeNotificationFingerprint } from '@/lib/route-change-fingerprint';
 import { activeDriverStop } from '@/lib/driver/runtime-contract';
+import { finishReadiness, routeActionLogLine } from '@/lib/driver/route-lifecycle';
 import { confirmationReplay,deliveryDistanceProblem,deliveryValidation,stopConfirmationProblem } from '@/lib/driver/stop-policy';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { clearRouteChangeFlags, updateStopByIdentity } from '@/lib/route-stop-reconciliation';
@@ -43,7 +44,10 @@ export async function performDriverRouteAction(request: Request, uid: string, au
   let input: z.infer<typeof actions>;
   try {
     const parsed = actions.safeParse(await readJsonBody(request,70000));
-    if (!parsed.success) return Response.json({ code: 'route_invalid_request' }, { status: 400 });
+    if (!parsed.success) {
+      console.warn(routeActionLogLine({ action: 'invalid', routeId: 'unknown', uid, httpStatus: 400, code: 'route_invalid_request' }));
+      return Response.json({ code: 'route_invalid_request' }, { status: 400 });
+    }
     input = parsed.data;
   } catch (error) { return earningsErrorResponse(error); }
 
@@ -51,6 +55,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
   const routeRef = db.collection('routes').doc(input.routeId);
   const userRef = db.collection('users').doc(uid);
   const evidenceRef = db.collection('rotaEarningRouteEvidence').doc(input.routeId);
+  const context = { action: input.action, routeId: input.routeId, uid };
   try {
     const result = await db.runTransaction(async tx => {
       const [routeSnap, profile, proof] = await tx.getAll(routeRef,userRef,evidenceRef);
@@ -65,7 +70,9 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const evidence = proof.data();
       if (input.action === 'start') {
         if (data.status === 'in_progress') return { status: 200, body: { ok: true } };
-        if (data.status !== 'dispatched') return { status: 409, body: { code: 'route_invalid_state' } };
+        if (data.status !== 'dispatched') {
+          return { status: 409, body: { code: 'route_invalid_state', routeStatus: typeof data.status === 'string' ? data.status : null } };
+        }
         tx.update(routeRef, { status: 'in_progress', startedAt: now, currentStopIndex: 0 });
         tx.set(evidenceRef, { start: { driverUid: uid, plan: plannedFingerprint(data), confirmations: {}, startedAt: now }, completion: null });
         return { status: 200, body: { ok: true } };
@@ -82,11 +89,8 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       }
       if (input.action === 'finish') {
         if (data.status === 'completed') return { status: 200, body: { ok: true } };
-        const active=stops.filter(activeDriverStop);
-        const finalized = active.filter(stop => stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed');
-        if (data.status !== 'in_progress' || !active.length || finalized.length * 5 < active.length * 4) {
-          return { status: 409, body: { code: 'route_not_ready' } };
-        }
+        const { ready, ...progress } = finishReadiness(data.status, stops);
+        if (!ready) return { status: 409, body: { code: 'route_not_ready', ...progress } };
         const closed = { status: 'completed', completedAt: now };
         const completion = protectCompletion({ ...data, ...closed, earningsSourceStart: evidence?.start }, 'driver-server-v1');
         tx.update(routeRef, closed);
@@ -191,11 +195,18 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       if (commandRef) tx.create(commandRef,{digest,response,createdAt:now});
       return { status:200,body:response };
     });
+    if (result.status >= 400) {
+      const { code, ...detail } = result.body as { code?: string } & Record<string, unknown>;
+      console.warn(routeActionLogLine({ ...context, httpStatus: result.status, code: code ?? 'unknown', detail }));
+    }
     return Response.json(result.body, { status: result.status, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof Error && ['RouteStopNotFoundError','RouteStructureConflictError'].includes(error.name)) {
+      console.warn(routeActionLogLine({ ...context, httpStatus: 409, code: 'route_stop_changed' }));
       return Response.json({ code: 'route_stop_changed' }, { status: 409 });
     }
+    // Sem este log a exceção vira um 503 sem causa nos registros.
+    console.error(routeActionLogLine({ ...context, httpStatus: 503, code: 'route_unavailable', error }));
     return Response.json({ code: 'route_unavailable' }, { status: 503 });
   }
 }

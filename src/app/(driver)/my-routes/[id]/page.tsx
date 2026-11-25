@@ -33,6 +33,7 @@ import {
 import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { useDriverResource } from '@/hooks/use-driver-resource';
 import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import { routeActionProblem } from '@/lib/driver/route-action-feedback';
 import type { DriverRoute,DriverNotice,DriverDeliveryValidation } from '@/lib/driver/runtime-contract';
 import { EarningsRequestError } from '@/components/earnings/earnings-shell';
 import type { PlaceValue, Payment } from '@/lib/types';
@@ -44,6 +45,7 @@ import { useToast } from '@/hooks/use-toast';
 import { DeliveryConfirmationDialog } from '@/components/delivery/delivery-confirmation-dialog';
 import { RouteChangesNotification } from '@/components/driver/route-changes-notification';
 import { StopChangeBadge } from '@/components/driver/stop-change-badge';
+import { RouteStartCard } from '@/components/driver/route-start-card';
 
 const getInitials = (name: string) => {
     const names = name.split(' ');
@@ -83,6 +85,7 @@ export default function RouteDetailsPage() {
   const confirmationAttempt=React.useRef<{signature:string;requestId:string;media:Partial<Record<'delivery'|'attempt',{id:string;url:string}>>} | undefined>(undefined);
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = React.useState(false);
   const [isAcknowledging, setIsAcknowledging] = React.useState(false);
+  const [isStarting, setIsStarting] = React.useState(false);
   const { toast } = useToast();
 
   // GPS Tracking
@@ -222,8 +225,9 @@ export default function RouteDetailsPage() {
   };
 
   const handleStartRoute = async () => {
-    if (!route || readOnly) return;
+    if (!route || readOnly || isStarting) return;
 
+    setIsStarting(true);
     try {
       await routeAction('start');
 
@@ -235,11 +239,9 @@ export default function RouteDetailsPage() {
       });
     } catch (error) {
       console.error('Error starting route:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível iniciar a rota.',
-      });
+      toast({ variant: 'destructive', ...routeActionProblem('start', error) });
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -279,11 +281,7 @@ export default function RouteDetailsPage() {
       });
     } catch (error) {
       console.error('Error stopping route:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível finalizar a rota.',
-      });
+      toast({ variant: 'destructive', ...routeActionProblem('finish', error) });
     }
   };
 
@@ -415,7 +413,7 @@ export default function RouteDetailsPage() {
             </div>
             <div className="ml-auto flex items-center gap-2">
                 {route.status === 'dispatched' && (
-                    <Button size="sm" onClick={handleStartRoute}>
+                    <Button size="sm" onClick={handleStartRoute} disabled={isStarting || readOnly}>
                         <PlayCircle className="mr-2 h-4 w-4" />
                         Iniciar
                     </Button>
@@ -437,17 +435,7 @@ export default function RouteDetailsPage() {
 
       <main className="p-4 space-y-4">
         {route.status === 'dispatched' && (
-          <Card className="border-blue-300 bg-blue-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <PlayCircle className="h-5 w-5 text-blue-600" />
-                <div>
-                  <p className="font-semibold text-blue-900">Rota pronta para iniciar</p>
-                  <p className="text-sm text-blue-700">Clique em &quot;Iniciar&quot; no topo para começar as entregas</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <RouteStartCard starting={isStarting} disabled={readOnly} onStart={handleStartRoute} />
         )}
 
         {route.status === 'in_progress' && (
@@ -500,11 +488,14 @@ export default function RouteDetailsPage() {
         {route.status !== 'completed' && (
           <Button
             size="lg"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
+            variant={route.status === 'dispatched' ? 'outline' : 'default'}
+            className={route.status === 'dispatched'
+              ? 'w-full'
+              : 'w-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02]'}
             onClick={() => handleNavigateRoute('google')}
           >
             <Navigation className="mr-2 h-5 w-5" />
-            Iniciar Rota Completa em Ordem
+            Abrir rota completa no mapa
           </Button>
         )}
 
@@ -625,7 +616,7 @@ export default function RouteDetailsPage() {
                                         className="ml-auto bg-green-600 hover:bg-green-700"
                                         onClick={() => handleOpenConfirmDialog(stop)}
                                         disabled={route.status === 'dispatched'}
-                                        title={route.status === 'dispatched' ? 'Inicie a rota primeiro' : ''}
+                                        aria-describedby={route.status === 'dispatched' ? `start-route-first-${index}` : undefined}
                                     >
                                         <CheckCircle2 className="mr-2 h-4 w-4" />
                                         Confirmar
@@ -644,6 +635,9 @@ export default function RouteDetailsPage() {
                                     </Button>
                                 )}
                             </div>
+                            {route.status === 'dispatched' && !stop.deliveryStatus && (
+                                <p id={`start-route-first-${index}`} className="text-right text-xs text-muted-foreground">Inicie a rota para confirmar esta entrega.</p>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
