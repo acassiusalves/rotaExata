@@ -107,3 +107,11 @@ for (const [mode, assist, expected] of [
     if (assist) assert.doesNotMatch(notices[0].description, /rastreamento/i);
   });
 }
+
+test('pop-up bloqueado pelo navegador não cria acesso no servidor', async () => {
+  const f = assistContext({});
+  f.context.window = { open: () => null as unknown as typeof f.tab };
+  await load('src/components/drivers/driver-assist-dialog.tsx', ['handleConfirm'], f.context).handleConfirm();
+  assert.equal(f.calls.length, 0, 'sem aba para abrir, o acesso não deve ser criado nem registrado');
+  assert.match(f.notices.at(-1)!.description!, /pop-ups/i);
+});

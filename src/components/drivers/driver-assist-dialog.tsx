@@ -26,18 +26,22 @@ export function DriverAssistDialog({ driver, onClose }: Props) {
     if (!driver || !isReopenReasonValid(reason)) return;
     // A aba precisa nascer no próprio clique, antes do pedido ao servidor, ou o navegador a bloqueia.
     const tab = window.open('about:blank', '_blank');
+    if (!tab) {
+      // Sem aba não há onde abrir o app: não cria nem registra um acesso que ninguém vai usar.
+      toast({ variant: 'destructive', title: 'App do motorista não foi aberto',
+        description: 'O navegador bloqueou a nova aba. Libere pop-ups para este site e tente de novo.' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const { grantId } = await staff.request<{ grantId: string }>('/api/staff/drivers/' + encodeURIComponent(driver.id) + '/assist', {
         method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
       });
-      if (!tab) throw new Error('popup');
       tab.location.href = assistEntryPath(grantId);
       onClose();
     } catch (error) {
-      tab?.close();
-      toast({ variant: 'destructive', title: 'App do motorista não foi aberto',
-        description: !tab ? 'O navegador bloqueou a nova aba. Libere pop-ups para este site e tente de novo.' : assistOpenMessage(error) });
+      tab.close();
+      toast({ variant: 'destructive', title: 'App do motorista não foi aberto', description: assistOpenMessage(error) });
     } finally {
       setIsSubmitting(false);
     }
