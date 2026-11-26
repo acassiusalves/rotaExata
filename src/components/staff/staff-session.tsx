@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { type StaffPage,type StaffRole } from '@/lib/staff/access';
 import { clearStaffWorkspace,staffWorkspaceKey } from '@/lib/staff/workspace';
 import { DriverPasswordForm } from '@/components/driver/driver-password-form';
+import { deniedStaffDestination } from '@/lib/staff/driver-redirect';
 import { useAuth } from '@/hooks/auth-context';
 
 type Summary={userId:string;scopeId:string;name:string;role:StaffRole;paths:StaffPage[];revision:number;policyRevision:number;pathAllowed?:boolean;rotaPolicyRevision?:string|null};
@@ -44,6 +45,7 @@ export function useLayoutIdentity() {
 
 export function StaffGate({children}:{children:ReactNode}) {
   const pathname=usePathname();
+  const router=useRouter();
   const earnings=useEarnings();
   const {request,signOut}=earnings;
   const reauthenticate=useNativeSession()!.reauthenticate;
@@ -98,6 +100,13 @@ export function StaffGate({children}:{children:ReactNode}) {
           knownActor.current=undefined;
         }
         if (status===401) void (discard ? signOut():reauthenticate());
+        // Conta de motorista que caiu numa página do painel vai direto para o app do motorista.
+        const driverHome=await deniedStaffDestination(path=>request(path,{signal:operation.signal}),status,code);
+        if (operation.signal.aborted) return;
+        if (driverHome) {
+          router.replace(driverHome);
+          return;
+        }
         setResult({path:pathname,status,code});
         setOffline(false);
       } finally {
@@ -118,7 +127,7 @@ export function StaffGate({children}:{children:ReactNode}) {
       window.removeEventListener('offline',disconnected);
       window.removeEventListener('online',foreground);
     };
-  },[request,pathname,retry,signOut,reauthenticate]);
+  },[request,pathname,retry,signOut,reauthenticate,router]);
 
   if (offline) return <p className="p-6" role="status">Sem conexão. O painel será liberado depois de conferir o seu acesso.</p>;
   if (result?.path!==pathname) return <p className="p-6" role="status">Conferindo acesso ao painel…</p>;
