@@ -46,6 +46,16 @@ service cloud.firestore {
       return hasRole(['admin', 'gestor', 'socio']);
     }
 
+    // Equipe interna: perfil em /users (criado só pelo servidor), papel de tela e não desativado.
+    // Conta do Firebase Auth sem perfil e entregador não passam. O cadastro por e-mail e senha
+    // está aberto no projeto, então isAuthed() sozinho não prova que a pessoa é da equipe.
+    function isInternalUser() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && canonicalRole() in ['admin', 'gestor', 'socio', 'vendedor', 'estoquista', 'financeiro', 'marketing', 'usuario']
+        && getUserData().get('active', true) != false;
+    }
+
     function isAdmin() {
       return isAuthed() && getUserData().role == 'admin';
     }
@@ -129,10 +139,27 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentLocation','lastUpdated','actualPath']);
     }
 
+    // This public marker contains protocol/version only, never credentials or user data.
+    // Compat remains the published legacy policy while the preparatory Rules propagate.
+    function r1LegacyWritesAllowed() {
+      let marker = /databases/$(database)/documents/platformReleaseStatus/r1;
+      return exists(marker) && get(marker).data.get('protocolVersion', 0) == 1
+        && get(marker).data.get('mode', '') == 'compat';
+    }
+    match /platformReleaseStatus/{releaseId} {
+      allow get: if releaseId == 'r1';
+      allow list, write: if false;
+    }
+
     // ===== COUNTERS COLLECTION (para geração de códigos sequenciais) =====
     // Vendedores precisam acessar para gerar números de pedidos
     match /counters/{counterId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      // Commercial numbers are allocated with their native document and receipt.
+      allow write: if isAuthed() && (r1LegacyWritesAllowed() || !(counterId in [
+        'orders_pedido', 'orders_troca', 'orders_retorno_troca',
+        'orders_venda_balcao', 'pedidos_compra_counter', 'entradas_compra_counter', 'vendas'
+      ]));
     }
 
     // ===== SETTINGS COLLECTION =====
@@ -159,31 +186,31 @@ service cloud.firestore {
     }
 
     // ===== PRODUCTS COLLECTION =====
+    // O documento traz custo, atacado, varejo, promoção e fornecedor: só a equipe interna lê.
+    // As páginas públicas (/c/[slug] e /catalogo-whatsapp) leem pelo servidor (Admin SDK),
+    // que devolve só os campos do tipo de preço do catálogo.
     match /products/{productId} {
-      // Leitura pública para catálogos públicos
-      allow read, list: if true;
-      // Cadastro e edição seguem no client (a tela de produtos escreve direto).
-      allow create, update: if isAuthed();
-      // Exclusão NÃO. Ela precisa da guarda de vínculo, que roda no servidor:
-      // POST /api/produtos/excluir → exclusao-produto-engine (Admin SDK ignora regras).
-      // Antes disto, qualquer autenticado apagava qualquer produto — foi o que travou
-      // o P3435 em 28/08/2026.
+      allow read: if isInternalUser();
+      allow create, update: if isInternalUser() && r1LegacyWritesAllowed();
       allow delete: if false;
     }
 
     // ===== STOCK COLLECTION =====
     match /stock/{stockId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      allow write: if isAuthed() && r1LegacyWritesAllowed();
     }
 
     // ===== SALES COLLECTION =====
     match /sales/{saleId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      allow write: if isAuthed() && r1LegacyWritesAllowed();
     }
 
     // ===== PURCHASES COLLECTION =====
     match /purchases/{purchaseId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      allow write: if isAuthed() && r1LegacyWritesAllowed();
     }
 
     // ===== SUPPLIERS COLLECTION =====
@@ -231,23 +258,12 @@ service cloud.firestore {
       allow update, delete: if isAppAdmin();
     }
 
-    // ===== PRODUTOS COLLECTION (LEGADO — somente leitura) =====
-    // Auditada em 28/08/2026: 0 documentos em produção (`products` tinha 6.724).
-    // Ninguém escreve aqui — não existe create/update/delete para esta coleção em
-    // lugar nenhum do código, nem no client nem no servidor. O que restou são 6
-    // fallbacks de LEITURA, todos devolvendo vazio hoje:
-    //   catalogos/page.tsx:340,391 · catalogos/novo/page.tsx:375
-    //   catalogos/[id]/editar/page.tsx:483 · components/TagSelector.tsx:114
-    //   services/catalogo-service.ts:254 (Admin SDK, ignora estas regras)
+    // ===== PRODUTOS COLLECTION (LEGADO — somente servidor) =====
+    // Auditada em 28/08/2026: 0 documentos em produção. Nenhum código do navegador lê ou grava
+    // esta coleção. O único leitor é o plano B do catálogo público em
+    // src/lib/server/catalogos/public-access.ts (Admin SDK, ignora estas regras).
     match /produtos/{produtoId} {
-      // Leitura mantida como estava: é só o que os fallbacks acima precisam.
-      allow read, list: if true;
-      // Escrita NEGADA por inteiro, e não só o delete. Numa coleção vazia o risco
-      // real é o CREATE: TagSelector lê `produtos` PRIMEIRO e só cai para `products`
-      // quando ela vem vazia. Um único doc criado aqui trocaria o catálogo inteiro
-      // por esse doc — e, como a leitura é pública, ele ficaria exposto sem auth.
-      // Se algum dia a coleção voltar a ser escrita, que seja pelo servidor.
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // ===== FORNECEDORES COLLECTION =====
@@ -257,12 +273,14 @@ service cloud.firestore {
 
     // ===== VENDAS COLLECTION =====
     match /vendas/{vendaId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      allow write: if isAuthed() && r1LegacyWritesAllowed();
     }
 
     // ===== PEDIDOS COLLECTION =====
     match /pedidos/{pedidoId} {
-      allow read, write: if isAuthed();
+      allow read: if isAuthed();
+      allow write: if isAuthed() && r1LegacyWritesAllowed();
     }
 
     // ===== ORDERS COLLECTION (English alias for pedidos) =====
@@ -284,11 +302,27 @@ service cloud.firestore {
             'valorRecebido', 'descontoFaturamentoValor', 'descontoFaturamentoAplicado', 'acaoAplicada'
           ]);
       }
+      // Only the remaining delivery/route/cash SDK producers may update metadata.
+      function legacyMetadataOnly() {
+        let beforeShipping = resource.data.get('shipping', {});
+        let afterShipping = request.resource.data.get('shipping', {});
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'caixaRota', 'fechamentoCaixa', 'updatedAt', 'dataPedido', 'shipping',
+          'reentrega', 'tentativasEntrega', 'historicoAlteracoes', 'deliveryBackup',
+          'logisticsStatus', 'rotaExataRouteId', 'rotaExataRouteCode',
+          'rotaExataServiceId', 'rotaExataServiceCode'
+        ]) && (beforeShipping == afterShipping
+          || (beforeShipping is map && afterShipping is map
+            && afterShipping.diff(beforeShipping).affectedKeys()
+              .hasOnly(['deliveryDate', 'deliveryTimeStart', 'deliveryTimeEnd'])));
+      }
       allow read: if isAuthed();
-      allow create: if isAuthed() && !temFinanceiroV2(request.resource.data) && !request.resource.data.keys().hasAny(['retornoPosFaturamento']);
-      allow update: if isAuthed() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['retornoPosFaturamento'])
-        && ((!temFinanceiroV2(resource.data) && !temFinanceiroV2(request.resource.data)) || preservaFinanceiroV2());
-      allow delete: if isAuthed() && !temFinanceiroV2(resource.data);
+      allow create: if isAuthed() && r1LegacyWritesAllowed() && !temFinanceiroV2(request.resource.data)
+        && !request.resource.data.keys().hasAny(['retornoPosFaturamento']);
+      allow update: if isAuthed() && (legacyMetadataOnly()
+        || (r1LegacyWritesAllowed() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['retornoPosFaturamento'])
+          && ((!temFinanceiroV2(resource.data) && !temFinanceiroV2(request.resource.data)) || preservaFinanceiroV2())));
+      allow delete: if isAuthed() && r1LegacyWritesAllowed() && !temFinanceiroV2(resource.data);
     }
 
     // Immutable proofs and idempotent commands are written only through Admin transactions.
@@ -305,13 +339,12 @@ service cloud.firestore {
       allow read, write: if isAuthed();
     }
 
-    // ===== CATÁLOGOS COLLECTION =====
+    // ===== CATÁLOGOS COLLECTION (somente servidor) =====
+    // O documento guarda cliente, lista de produtos, tipo de preço e a senha do catálogo privado.
+    // Gestão: src/lib/server/catalogos/commands.ts e read.ts. Página pública:
+    // src/lib/server/catalogos/public-access.ts. Tudo com Admin SDK, que ignora estas regras.
     match /catalogos/{catalogoId} {
-      // Usuários autenticados podem criar, editar e deletar
-      allow create, update, delete: if isAuthed();
-
-      // Leitura pública (validação de público/privado é feita no código)
-      allow get, list: if true;
+      allow read, write: if false;
     }
 
     // ===== CATÁLOGO INTERAÇÕES (Analytics) =====
@@ -463,7 +496,7 @@ service cloud.firestore {
           get(/databases/$(database)/documents/orders/$(data.pedidoOrigemId)).data.get('retornoFinanceiro', {}).get('versao', 0) != 2;
       }
       allow read: if isAuthed();
-      allow create: if isAuthed() && origemSemFinanceiroV2(request.resource.data);
+      allow create: if isAuthed() && r1LegacyWritesAllowed() && origemSemFinanceiroV2(request.resource.data);
       function consumoValido() {
         let antes=resource.data;
         let depois=request.resource.data;
@@ -475,24 +508,20 @@ service cloud.firestore {
           && depois.status == (depois.valor == 0 ? 'utilizado' : 'ativo')
           && depois.pedidoUtilizacaoId is string && depois.pedidoUtilizacaoId != '';
       }
-      allow update: if isAuthed() && ((origemSemFinanceiroV2(resource.data) && origemSemFinanceiroV2(request.resource.data)) || consumoValido());
-      allow delete: if isAppAdmin() && origemSemFinanceiroV2(resource.data);
+      allow update: if isAuthed() && r1LegacyWritesAllowed() && ((origemSemFinanceiroV2(resource.data) && origemSemFinanceiroV2(request.resource.data)) || consumoValido());
+      allow delete: if isAppAdmin() && r1LegacyWritesAllowed() && origemSemFinanceiroV2(resource.data);
     }
 
-    // ===== PEDIDOS DE COMPRA =====
+    // Purchase documents and physical balances share one native commit.
     match /pedidos_compra/{pedidoId} {
-      // Qualquer usuário autenticado pode ler, listar e criar
-      allow read, list, create: if isAuthed();
-      // Apenas admins podem atualizar e deletar
-      allow update, delete: if isAppAdmin();
+      allow read, list: if isAuthed();
+      allow create: if isAuthed() && r1LegacyWritesAllowed();
+      allow update, delete: if isAppAdmin() && r1LegacyWritesAllowed();
     }
-
-    // ===== ENTRADAS DE COMPRA =====
     match /entradas_compra/{entradaId} {
-      // Qualquer usuário autenticado pode ler, listar e criar
-      allow read, list, create: if isAuthed();
-      // Apenas admins podem atualizar e deletar
-      allow update, delete: if isAppAdmin();
+      allow read, list: if isAuthed();
+      allow create: if isAuthed() && r1LegacyWritesAllowed();
+      allow update, delete: if isAppAdmin() && r1LegacyWritesAllowed();
     }
 
     // ===== LEMBRETES COLLECTION =====
@@ -716,15 +745,30 @@ service cloud.firestore {
         return isAuthed() && getUserData().role in ['admin', 'gestor', 'socio', 'estoquista'];
       }
 
-      // Usuários com acesso ao estoque podem ler, listar, criar e atualizar
-      allow read, list, create, update: if hasEstoqueAccess();
-      // Apenas admin e socio podem deletar
-      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'];
-
-      // Subcollection de itens do balanço
+      function noNativeApplication(data) {
+        return !data.keys().hasAny(['application']);
+      }
+      function legacyStatusUpdate() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        return before == after || (before == 'em_andamento' && after in ['finalizado','cancelado'])
+          || (before == 'finalizado' && after == 'cancelado');
+      }
+      allow read, list: if hasEstoqueAccess();
+      allow create: if hasEstoqueAccess() && noNativeApplication(request.resource.data)
+        && (r1LegacyWritesAllowed() || !request.resource.data.keys().hasAny(['aplicadoEm','aplicadoPor']));
+      allow update: if hasEstoqueAccess() && noNativeApplication(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['application'])
+        && (r1LegacyWritesAllowed() || (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['aplicadoEm','aplicadoPor']) && legacyStatusUpdate()));
+      allow delete: if hasRole(['admin','socio']) && noNativeApplication(resource.data);
       match /itens/{itemId} {
-        allow read, list, create, update: if hasEstoqueAccess();
-        allow delete: if hasEstoqueAccess();
+        function parentFree() {
+          return noNativeApplication(get(/databases/$(database)/documents/balancos/$(balancoId)).data);
+        }
+        allow read, list: if hasEstoqueAccess();
+        allow create, update: if hasEstoqueAccess() && parentFree()
+          && (r1LegacyWritesAllowed() || get(/databases/$(database)/documents/balancos/$(balancoId)).data.get('status', '') == 'em_andamento');
+        allow delete: if hasEstoqueAccess() && parentFree();
       }
     }
 
@@ -780,11 +824,11 @@ service cloud.firestore {
       // Usuários com acesso financeiro podem ler e listar faturamentos
       allow read, list: if hasFinancialAccess();
       // Sistema pode criar faturamentos (qualquer usuário autenticado ao faturar pedido)
-      allow create: if isAuthed() && pedidoSemFinanceiroV2(request.resource.data);
+      allow create: if isAuthed() && r1LegacyWritesAllowed() && pedidoSemFinanceiroV2(request.resource.data);
       // Apenas usuários com permissão financeira podem atualizar (para edições)
-      allow update: if hasFinancialAccess() && pedidoSemFinanceiroV2(resource.data) && pedidoSemFinanceiroV2(request.resource.data);
+      allow update: if hasFinancialAccess() && r1LegacyWritesAllowed() && pedidoSemFinanceiroV2(resource.data) && pedidoSemFinanceiroV2(request.resource.data);
       // Apenas admin e socio podem deletar
-      allow delete: if isAuthed() && getUserData().role in ['admin', 'socio'] && pedidoSemFinanceiroV2(resource.data);
+      allow delete: if isAuthed() && r1LegacyWritesAllowed() && getUserData().role in ['admin', 'socio'] && pedidoSemFinanceiroV2(resource.data);
     }
 
     // RotaExata contracts added to the shared published baseline (2026-10-16).
