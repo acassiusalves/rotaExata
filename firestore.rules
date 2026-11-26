@@ -18,7 +18,10 @@ service cloud.firestore {
       return exists(transition) && get(transition).data.get('mode', 'firebase') != 'firebase';
     }
 
-    function isAuthed() {
+    // Sessão válida do Firebase Auth (qualquer conta que não seja entregador aposentado).
+    // NÃO prova que a pessoa é da equipe: use só onde a regra confere o dono do próprio
+    // documento ou nos contratos do Rota Exata (rotas, avisos, histórico de atividades).
+    function isSignedIn() {
       return request.auth != null && !isRetiredFirebaseDriver();
     }
 
@@ -26,16 +29,28 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function profileRole() {
+      return getUserData().role == 'manager'
+        ? 'gestor'
+        : getUserData().role == 'partner'
+          ? 'socio'
+          : getUserData().role == 'user'
+            ? 'usuario'
+            : getUserData().role;
+    }
+
+    // Equipe interna: perfil em /users (criado só pelo servidor), papel de tela e não desativado.
+    // Conta sem perfil, perfil desativado e entregador não passam. O cadastro por e-mail e senha
+    // pode ser reaberto no console por engano, então a sessão sozinha nunca libera dado.
+    function isAuthed() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profileRole() in ['admin', 'gestor', 'socio', 'vendedor', 'estoquista', 'financeiro', 'marketing', 'usuario']
+        && getUserData().get('active', true) != false;
+    }
+
     function canonicalRole() {
-      return !isAuthed()
-        ? null
-        : getUserData().role == 'manager'
-          ? 'gestor'
-          : getUserData().role == 'partner'
-            ? 'socio'
-            : getUserData().role == 'user'
-              ? 'usuario'
-              : getUserData().role;
+      return !isAuthed() ? null : profileRole();
     }
 
     function hasRole(roles) {
@@ -46,14 +61,9 @@ service cloud.firestore {
       return hasRole(['admin', 'gestor', 'socio']);
     }
 
-    // Equipe interna: perfil em /users (criado só pelo servidor), papel de tela e não desativado.
-    // Conta do Firebase Auth sem perfil e entregador não passam. O cadastro por e-mail e senha
-    // está aberto no projeto, então isAuthed() sozinho não prova que a pessoa é da equipe.
+    // Mesmo critério de isAuthed(); o nome fica para as regras que já o usam.
     function isInternalUser() {
-      return isAuthed()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && canonicalRole() in ['admin', 'gestor', 'socio', 'vendedor', 'estoquista', 'financeiro', 'marketing', 'usuario']
-        && getUserData().get('active', true) != false;
+      return isAuthed();
     }
 
     function isAdmin() {
@@ -61,7 +71,7 @@ service cloud.firestore {
     }
 
     function isOwner(userId) {
-      return isAuthed() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isNativeDriverUuid(value) {
@@ -134,8 +144,8 @@ service cloud.firestore {
             || !(request.resource.data.get('status', '') in ['dispatched','in_progress'])))
           || nativeDispatchAllowed(request.resource.data.get('driverId', null)));
       // Clientes legados podem transmitir a posição. A PWA canônica usa a API.
-      allow read: if isAuthed() && resource.data.driverId == request.auth.uid;
-      allow update: if isAuthed() && resource.data.driverId == request.auth.uid
+      allow read: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.driverId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentLocation','lastUpdated','actualPath']);
     }
 
@@ -164,11 +174,14 @@ service cloud.firestore {
 
     // ===== SETTINGS COLLECTION =====
     match /settings/{settingId} {
-      allow read: if settingId != 'googleMaps' && isAppAdmin();
+      // Leitura só para a equipe. Duas exceções, por contrato do Rota Exata, que lê estes
+      // documentos pelo navegador sem sessão do Firebase: a origem padrão das rotas e a
+      // validação de distância da entrega. Nenhum dos dois guarda segredo.
+      // A chave do Google Maps (settings/googleMaps) é só do servidor, via Admin SDK.
+      allow read: if settingId in ['defaultOrigin', 'general']
+        || (settingId != 'googleMaps' && isAuthed());
       allow write: if settingId != 'googleMaps' && isAppAdmin()
         && (settingId != 'permissions' || !rotaStaffUsesNativeAuth());
-      // Catálogos ainda leem as configurações públicas. A chave server é via Admin SDK.
-      allow read: if settingId != 'googleMaps';
     }
 
     // ===== CONFIGURAÇÕES COLLECTION =====
@@ -182,7 +195,7 @@ service cloud.firestore {
     // ===== LOCATION UPDATE REQUESTS =====
     match /locationUpdateRequests/{driverId} {
       allow create, update: if isAppAdmin() && !rotaStaffUsesNativeAuth();
-      allow read, delete: if isAuthed() && driverId == request.auth.uid;
+      allow read, delete: if isSignedIn() && driverId == request.auth.uid;
     }
 
     // ===== PRODUCTS COLLECTION =====
@@ -226,17 +239,14 @@ service cloud.firestore {
       allow write: if isAppAdmin();
     }
 
-    // ===== INTEGRAÇÕES GLOBAIS =====
+    // ===== INTEGRAÇÕES GLOBAIS (somente servidor) =====
+    // Os documentos guardam segredos e tokens (Bling, Google Drive, Google Contatos, Gemini).
+    // Leitura e escrita só pelo servidor (Admin SDK), que ignora estas regras: a tela /conexoes,
+    // os callbacks de OAuth e as emissões no Bling passam por rotas de API.
     match /integrations/{integrationId} {
-      // Permitir leitura e escrita sem autenticação para OAuth callbacks (server-side)
-      allow read, write: if true;
-
-      // Subcollection de contas do Google Contacts
+      allow read, write: if false;
       match /accounts/{accountId} {
-        // Permitir criar, ler e atualizar contas sem autenticação (OAuth callback server-side)
-        allow create, read, update: if true;
-        // Apenas admins podem deletar
-        allow delete: if isAppAdmin();
+        allow read, write: if false;
       }
     }
 
@@ -347,56 +357,33 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ===== CATÁLOGO INTERAÇÕES (Analytics) =====
+    // ===== MÉTRICAS DO CATÁLOGO PÚBLICO (somente servidor) =====
+    // Interações, interesses, curtidas, visitas e presença são gravados pelo servidor (Admin SDK,
+    // que ignora estas regras): src/lib/server/catalogos/public-events.ts, pelas rotas
+    // /api/catalogo/[slug]/events e /api/catalogo/[slug]/identity. Nenhum código do navegador
+    // grava aqui. Com a gravação aberta, qualquer pessoa inflava as métricas, escondia visitantes
+    // reais e gerava custo de gravação.
+    // A leitura também é só do servidor (insights.ts, presence.ts e public-state.ts, pelas rotas
+    // /api/catalogos/insights, /analytics e /presence): os registros trazem dados de visitantes e
+    // de interessados, e o cadastro por e-mail e senha está aberto no projeto.
     match /catalogo_interacoes/{interacaoId} {
-      // Permite criar interações sem autenticação (tracking público)
-      allow create: if true;
-      // Apenas autenticados podem ler
-      allow read, list: if isAuthed();
-      // Apenas admins podem atualizar ou deletar
-      allow update, delete: if isAppAdmin();
+      allow read, write: if false;
     }
 
-    // ===== CATÁLOGO INTERESSES (Leads) =====
     match /catalogo_interesses/{interesseId} {
-      // Permite criar interesse sem autenticação (formulário público)
-      allow create: if true;
-      // Apenas autenticados podem ler
-      allow read, list: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
+      allow read, write: if false;
     }
 
-    // ===== CATÁLOGO LIKES (Curtidas) =====
     match /catalogo_likes/{likeId} {
-      // Permite criar likes sem autenticação (público)
-      allow create: if true;
-      // Apenas autenticados podem ler
-      allow read, list: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
+      allow read, write: if false;
     }
 
-    // ===== CATÁLOGO ANALYTICS (Analytics detalhado) =====
     match /catalogo_analytics/{analyticsId} {
-      // Permite criar analytics sem autenticação (tracking público)
-      allow create: if true;
-      // Permite atualizar sem autenticação (para atualizar comportamento ao sair da página)
-      allow update: if true;
-      // Apenas autenticados podem ler
-      allow read, list: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
+      allow read, write: if false;
     }
 
-    // ===== CATÁLOGO PRESENÇA (Usuários ativos em tempo real) =====
     match /catalogo_presenca/{presencaId} {
-      // Permite criar e atualizar sem autenticação (tracking público de presença)
-      allow create, update: if true;
-      // Apenas autenticados podem ler
-      allow read, list: if isAuthed();
-      // Apenas admins podem deletar
-      allow delete: if isAppAdmin();
+      allow read, write: if false;
     }
 
     // ===== AUDIT LOGS =====
@@ -835,14 +822,14 @@ service cloud.firestore {
     // Before deploying, re-read the shared release and review concurrent changes.
     match /notifications/{notificationId} {
       function ownsNotification() {
-        return isAuthed() && resource.data.driverId == request.auth.uid;
+        return isSignedIn() && resource.data.driverId == request.auth.uid;
       }
       function reservesStaffAuthors(keys) {
         return !keys.hasAny(['staffScopeId', 'staffAuthorId', 'staffAuthorName', 'staffNotificationCommandId', 'staffPushStatus']);
       }
       allow read: if isAppAdmin() || ownsNotification();
       allow create: if reservesStaffAuthors(request.resource.data.keys())
-        && ((isAppAdmin() && !rotaStaffUsesNativeAuth()) || (isAuthed() && request.resource.data.driverId == request.auth.uid));
+        && ((isAppAdmin() && !rotaStaffUsesNativeAuth()) || (isSignedIn() && request.resource.data.driverId == request.auth.uid));
       allow update: if reservesStaffAuthors(request.resource.data.diff(resource.data).affectedKeys())
         && ((isAppAdmin() && !rotaStaffUsesNativeAuth()) || (ownsNotification()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened', 'openedAt', 'read'])));
@@ -851,7 +838,7 @@ service cloud.firestore {
 
     match /routeChangeNotifications/{routeId} {
       function ownsRouteChange() {
-        return isAuthed() && resource.data.driverId == request.auth.uid
+        return isSignedIn() && resource.data.driverId == request.auth.uid
           && get(/databases/$(database)/documents/routes/$(routeId)).data.driverId == request.auth.uid;
       }
       allow read: if isAppAdmin() || ownsRouteChange();
@@ -874,8 +861,9 @@ service cloud.firestore {
     }
 
     match /activity_log/{logId} {
-      allow read: if isAuthed();
-      allow create: if isAuthed() && !logId.matches('^staff-.*')
+      // Contrato do Rota Exata: fica na sessão simples até o histórico de lá passar pelo servidor.
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !logId.matches('^staff-.*')
         && !request.resource.data.keys().hasAny(['canonicalUserId','staffAuditVersion','staffScopeId','staffAuditOperationId']);
       allow update, delete: if false;
     }
