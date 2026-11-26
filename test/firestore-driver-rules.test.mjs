@@ -210,7 +210,9 @@ test('corte de staff impede escritas Rota exclusivas e preserva a integração L
   await assertSucceeds(admin.doc('routes/route-a').update({name:'Lunna'}));
   await assertSucceeds(admin.doc('services/lunna-direct').set({status:'organizing'}));
   await assertSucceeds(admin.doc('counters/serviceCode').set({count:1}));
-  await assertSucceeds(admin.doc('orders/lunna-direct').set({number:'SYNTHETIC'}));
+  // Desde 21/11/2026 (liberação R1 do Lunna em modo nativo) pedido só é criado pelo servidor.
+  // O Rota Exata não cria pedido pelo SDK: src/lib/lunna-sync.ts só atualiza metadados de entrega.
+  await assertFails(admin.doc('orders/lunna-direct').set({number:'SYNTHETIC'}));
 });
 
 test('Luna activity can append legacy logs but cannot claim a canonical Rota actor',async()=>{
