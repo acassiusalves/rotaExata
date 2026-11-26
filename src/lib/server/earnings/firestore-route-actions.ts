@@ -5,6 +5,7 @@ import { factsHash, plannedFingerprint, protectCompletion, sourceStopKey, timest
 import { getRouteChangeNotificationFingerprint } from '@/lib/route-change-fingerprint';
 import { activeDriverStop } from '@/lib/driver/runtime-contract';
 import { finishReadiness, routeActionLogLine } from '@/lib/driver/route-lifecycle';
+import type { RouteAssist } from '@/lib/driver/assist-policy';
 import { confirmationReplay,deliveryDistanceProblem,deliveryValidation,stopConfirmationProblem } from '@/lib/driver/stop-policy';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { clearRouteChangeFlags, updateStopByIdentity } from '@/lib/route-stop-reconciliation';
@@ -39,13 +40,14 @@ const actions = z.discriminatedUnion('action', [
   z.object({ action: z.literal('acknowledge'), routeId, fingerprint: z.string().min(1).max(60000) }).strict(),
 ]);
 
-export async function performDriverRouteAction(request: Request, uid: string, authority: {canonical?:boolean;bindMedia?:boolean} = {}) {
+export async function performDriverRouteAction(request: Request, uid: string, authority: {canonical?:boolean;bindMedia?:boolean;assist?:RouteAssist} = {}) {
   if (!adminDb) return Response.json({ code: 'route_unavailable' }, { status: 503 });
   let input: z.infer<typeof actions>;
   try {
     const parsed = actions.safeParse(await readJsonBody(request,70000));
     if (!parsed.success) {
-      console.warn(routeActionLogLine({ action: 'invalid', routeId: 'unknown', uid, httpStatus: 400, code: 'route_invalid_request' }));
+      console.warn(routeActionLogLine({ action: 'invalid', routeId: 'unknown', uid, httpStatus: 400, code: 'route_invalid_request',
+        ...(authority.assist ? { assistGrantId: authority.assist.grantId } : {}) }));
       return Response.json({ code: 'route_invalid_request' }, { status: 400 });
     }
     input = parsed.data;
@@ -55,7 +57,8 @@ export async function performDriverRouteAction(request: Request, uid: string, au
   const routeRef = db.collection('routes').doc(input.routeId);
   const userRef = db.collection('users').doc(uid);
   const evidenceRef = db.collection('rotaEarningRouteEvidence').doc(input.routeId);
-  const context = { action: input.action, routeId: input.routeId, uid };
+  const assist = authority.assist;
+  const context = { action: input.action, routeId: input.routeId, uid, ...(assist ? { assistGrantId: assist.grantId } : {}) };
   try {
     const result = await db.runTransaction(async tx => {
       const [routeSnap, profile, proof] = await tx.getAll(routeRef,userRef,evidenceRef);
@@ -68,13 +71,28 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const stops = (Array.isArray(data.stops) ? data.stops : []) as PlaceValue[];
       const now = Timestamp.now();
       const evidence = proof.data();
+      // Operador do painel agindo em nome do motorista: registra quem agiu. A remuneração não depende de marca:
+      // parada confirmada pelo operador fica sem confirmação do motorista e é atestada na conferência.
+      const assisted = assist ? { by: assist.staffSourceUid, name: assist.staffName, grantId: assist.grantId, at: now } : null;
+      const markRoute = assisted ? { staffAssist: assisted } : {};
+      const actorName = assist?.staffName ?? (user.displayName || user.name || 'Motorista');
+      const logAssist = (eventType: string, action: string) => {
+        if (!assist) return;
+        tx.create(db.collection('activity_log').doc(), {
+          eventType, userId: assist.staffSourceUid, canonicalUserId: assist.staffUserId, userName: assist.staffName,
+          entityType: 'route', entityId: input.routeId, routeId: input.routeId, routeCode: data.code ?? null,
+          serviceId: data.serviceId ?? null, serviceCode: data.serviceCode ?? null, action,
+          metadata: { onBehalfOf: uid, assistGrantId: assist.grantId }, timestamp: now,
+        });
+      };
       if (input.action === 'start') {
         if (data.status === 'in_progress') return { status: 200, body: { ok: true } };
         if (data.status !== 'dispatched') {
           return { status: 409, body: { code: 'route_invalid_state', routeStatus: typeof data.status === 'string' ? data.status : null } };
         }
-        tx.update(routeRef, { status: 'in_progress', startedAt: now, currentStopIndex: 0 });
+        tx.update(routeRef, { status: 'in_progress', startedAt: now, currentStopIndex: 0, ...markRoute });
         tx.set(evidenceRef, { start: { driverUid: uid, plan: plannedFingerprint(data), confirmations: {}, startedAt: now }, completion: null });
+        logAssist('route_started', 'Rota iniciada pelo painel em nome do motorista');
         return { status: 200, body: { ok: true } };
       }
       if (input.action === 'acknowledge') {
@@ -85,6 +103,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
         }
         tx.update(routeRef, { stops: clearRouteChangeFlags(stops), pendingChanges: false, updatedAt: now });
         tx.update(noticeRef, { acknowledged: true, acknowledgedAt: now });
+        logAssist('route_changes_acknowledged', 'Alterações da rota confirmadas pelo painel em nome do motorista');
         return { status: 200, body: { ok: true } };
       }
       if (input.action === 'finish') {
@@ -92,9 +111,12 @@ export async function performDriverRouteAction(request: Request, uid: string, au
         const { ready, ...progress } = finishReadiness(data.status, stops);
         if (!ready) return { status: 409, body: { code: 'route_not_ready', ...progress } };
         const closed = { status: 'completed', completedAt: now };
-        const completion = protectCompletion({ ...data, ...closed, earningsSourceStart: evidence?.start }, 'driver-server-v1');
-        tx.update(routeRef, closed);
+        // Finalização pelo painel usa o tipo de evidência do painel; só há evidência se o motorista confirmou cada parada.
+        const completion = protectCompletion({ ...data, ...closed, earningsSourceStart: evidence?.start },
+          assist ? 'admin-server-v1' : 'driver-server-v1');
+        tx.update(routeRef, { ...closed, ...markRoute });
         tx.set(evidenceRef, { completion: completion ?? null }, { merge: true });
+        logAssist('route_completed', 'Rota finalizada pelo painel em nome do motorista');
         return { status: 200, body: { ok: true } };
       }
 
@@ -121,7 +143,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
         const current=factsHash(mutation.previousStop);
         if (confirmationReplay(undefined,digest,input.expectedRevision!,current)!=='new') return problem('route_stop_changed',409);
         const settings=deliveryValidation((await tx.get(db.doc('settings/general'))).data());
-        if (settings.enabled && input.patch.deliveryStatus==='completed') {
+        if (settings.enabled && input.patch.deliveryStatus==='completed' && !assist) {
           const location=data.currentLocation;
           const measured=location?.timestamp?.toMillis?.();
           const validTime=typeof measured==='number' && measured<=now.toMillis() && now.toMillis()-measured<=120000;
@@ -153,25 +175,26 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const retainedTime=prior===input.patch.deliveryStatus && (mutation.previousStop.wentToLocation ?? null)===visited &&
         timestampIso(mutation.previousStop.completedAt) ? mutation.previousStop.completedAt:now;
       const updatedStop = wasPreviouslyFinalized
-        ? { ...mutation.updatedStop, completedAt:retainedTime, editedByDriver:true,editedAt:now }
+        ? { ...mutation.updatedStop, completedAt:retainedTime, ...(assist ? {}:{editedByDriver:true}),editedAt:now }
         : mutation.updatedStop;
       const updatedStops = [...mutation.stops];
       updatedStops[mutation.index] = updatedStop;
-      tx.update(routeRef, { stops: updatedStops, currentStopIndex: mutation.index + 1, updatedAt: now });
+      tx.update(routeRef, { stops: updatedStops, currentStopIndex: mutation.index + 1, updatedAt: now, ...markRoute });
       if (prior !== 'completed' && input.patch.deliveryStatus === 'completed') tx.update(userRef, { totalDeliveries: FieldValue.increment(1) });
 
       if (authority.bindMedia) {
         const pointId=updatedStop.id || updatedStop.placeId || updatedStop.pointCode;
         tx.create(db.collection('activity_log').doc(),{
           eventType:input.patch.deliveryStatus==='completed'?'point_completed':'point_failed',
-          userId:uid,userName:user.displayName || user.name || 'Motorista',entityType:'point',entityId:pointId ?? null,
+          userId:assist?.staffSourceUid ?? uid,userName:actorName,...(assist ? {canonicalUserId:assist.staffUserId}:{}),entityType:'point',entityId:pointId ?? null,
           entityCode:updatedStop.pointCode ?? null,routeId:input.routeId,routeCode:data.code ?? null,
           serviceId:data.serviceId ?? null,serviceCode:data.serviceCode ?? null,pointId:pointId ?? null,pointCode:updatedStop.pointCode ?? null,
           action:input.patch.deliveryStatus==='completed'?'Entrega confirmada':'Falha de entrega registrada',
           changes:[{field:'deliveryStatus',oldValue:prior ?? null,newValue:input.patch.deliveryStatus,fieldLabel:'Status'}],
           metadata:{photoUrl:updatedStop.photoUrl ?? null,attemptPhotoUrl:updatedStop.attemptPhotoUrl ?? null,
             failureReason:updatedStop.failureReason ?? null,wentToLocation:visited,address:updatedStop.address ?? null,
-            customerName:updatedStop.customerName ?? null,notes:updatedStop.notes ?? null},
+            customerName:updatedStop.customerName ?? null,notes:updatedStop.notes ?? null,
+            ...(assist ? {onBehalfOf:uid,assistGrantId:assist.grantId}:{})},
           timestamp:now,
         });
         if (linkedOrders.length===1) {
@@ -179,15 +202,21 @@ export async function performDriverRouteAction(request: Request, uid: string, au
           tx.update(linkedOrders[0].ref,{logisticsStatus,updatedAt:now});
         }
         if (wasPreviouslyFinalized) tx.create(db.collection('notifications').doc(),{
-          type:'delivery_edited',title:'Entrega editada pelo motorista',
-          message:`${user.displayName || user.name || 'Motorista'} editou uma parada na rota ${data.name || data.code || input.routeId}.`,
+          type:'delivery_edited',title:assist ? 'Entrega editada pelo painel':'Entrega editada pelo motorista',
+          message:`${actorName} editou uma parada na rota ${data.name || data.code || input.routeId}.`,
           priority:'normal',routeId:input.routeId,routeName:data.name ?? null,stopIndex:mutation.index,driverId:uid,
           driverName:user.displayName || user.name || 'Motorista',read:false,opened:false,openedAt:null,timestamp:now,forAdmin:true,
         });
       }
 
       const key = sourceStopKey(updatedStop as unknown as Record<string, unknown>);
-      if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {
+      if (assist) {
+        // Confirmação do operador não vale como confirmação do motorista: a parada fica para atestado na conferência.
+        const recorded = evidence?.start?.confirmations;
+        if (key && recorded && Object.hasOwn(recorded, key)) {
+          tx.set(evidenceRef, { start: { confirmations: { [key]: FieldValue.delete() } } }, { merge: true });
+        }
+      } else if (key && evidence?.start?.driverUid === uid && data.status === 'in_progress') {
         const confirmation = { status: input.patch.deliveryStatus, visited, workedAt:timestampIso(updatedStop.completedAt) };
         tx.set(evidenceRef, { start: { ...evidence.start, confirmations: { ...evidence.start.confirmations, [key]: confirmation } } }, { merge: true });
       }

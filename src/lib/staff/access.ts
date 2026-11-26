@@ -62,6 +62,7 @@ const operations = {
   'drivers:list':['/drivers'],
   'driver:edit':['/drivers'],
   'driver:preview':['/drivers',administrators],
+  'driver:operate':['/drivers',administrators],
   'drivers:cleanup':['/drivers'],
   'drivers:accounts':['/driver/admin/accounts'],
   'history:activity':['/history/atividades'],

@@ -2,8 +2,13 @@ import { adminAuth,adminDb } from '@/lib/firebase/admin';
 import { nativeDriverEnabled } from '@/lib/driver/mode';
 import { requireEarningsActor } from '@/lib/server/earnings/actor';
 import { EarningsError } from '@/lib/server/earnings/transport';
+import type { RouteAssist } from '@/lib/driver/assist-policy';
 
-export type DriverAuthority = { sourceUid: string; userId: string; scopeId?: string; sessionId?:string; readOnly?: boolean; native:boolean };
+export type DriverAuthority = {
+  sourceUid: string; userId: string; scopeId?: string; sessionId?:string; readOnly?: boolean; native:boolean;
+  /** Presente quando um operador do painel age em nome do motorista. */
+  assist?: RouteAssist & { driverName: string; expiresAt: string };
+};
 
 export async function driverAuthority(request: Request, phase:'native'|'legacy', write=false):Promise<DriverAuthority> {
   if (phase==='native') {

@@ -27,13 +27,14 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
     (bridged ? src : '/api/staff/media/'+src.slice(protectedPhotoPrefix.length))+'?view='+staffView+
       (editor ? '&editor='+encodeURIComponent(JSON.stringify(editor)):''):null;
   const native=runtime?.native;
+  const assistMode=!!runtime?.assist;
   const [loaded,setLoaded]=useState<{src:string;actor?:string;url?:string}>();
   useEffect(()=>{
     if (!protectedSource || !actor) return;
     const controller=new AbortController();
     let objectUrl:string|undefined;
     async function load() {
-      const headers={'x-rota-media-mode':request ? native ? 'native':'legacy-driver':'operator'};
+      const headers={'x-rota-media-mode':request ? assistMode ? 'assist':native ? 'native':'legacy-driver':'operator'};
       let result:{src:string};
       if (inStaff) {
         if (!staffSource || !request) throw new Error('photo unavailable');
@@ -54,7 +55,7 @@ export function DeliveryPhoto({src,expand,alt,...props}:Omit<ImgHTMLAttributes<H
     }
     void load().catch(()=>{if(!controller.signal.aborted) setLoaded({src,actor});});
     return ()=>{controller.abort();if(objectUrl) URL.revokeObjectURL(objectUrl);};
-  },[actor,native,protectedSource,request,src,staffSource,inStaff,user]);
+  },[actor,native,assistMode,protectedSource,request,src,staffSource,inStaff,user]);
 
   const current=loaded?.src===src && loaded.actor===actor ? loaded:undefined;
   const url=protectedSource ? current?.url:nativeStaffEnabled && staffView ? undefined:src;

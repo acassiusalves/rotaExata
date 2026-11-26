@@ -9,6 +9,8 @@ const byCode: Record<string, string> = {
   route_not_ready: 'O sistema ainda não tem 80% das entregas registradas. Atualize a tela e confira as paradas.',
   route_access_denied: 'Esta rota não está mais atribuída a você. Fale com a central.',
   route_not_found: 'Esta rota não está mais disponível para você. Fale com a central.',
+  assist_expired: 'Acesso encerrado. Abra de novo pelo painel.',
+  assist_not_found: 'Acesso encerrado. Abra de novo pelo painel.',
 };
 
 /** Traduz a falha de "Iniciar"/"Finalizar" em uma mensagem que diz ao motorista o que fazer. */

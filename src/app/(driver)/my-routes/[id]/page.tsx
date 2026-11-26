@@ -68,7 +68,7 @@ const formatDuration = (durationString: string = '0s') => {
 export default function RouteDetailsPage() {
   const params = useParams();
   const routeId = params?.id as string;
-  const { profile:user,request,endpoint,readOnly }=useDriverRuntime();
+  const { profile:user,request,endpoint,readOnly,assist }=useDriverRuntime();
   const detail=useDriverResource<{route:DriverRoute;notice:DriverNotice|null;deliveryValidation:DriverDeliveryValidation}>(driverQuery(endpoint,'routes',{id:routeId}),6000);
   const route=detail.data?.route;
   const [dismissed, setDismissed] = React.useState<string>();
@@ -91,7 +91,7 @@ export default function RouteDetailsPage() {
   // GPS Tracking
   const { location, isTracking, trackingHealth, startTracking, stopTracking, error } = useGeolocationTracking({
     routeId,
-    enabled:!readOnly && (route?.status==='dispatched' || route?.status==='in_progress'),
+    enabled:!readOnly && !assist && (route?.status==='dispatched' || route?.status==='in_progress'),
     enableHighAccuracy: true,
     updateInterval: 5000, // 5 segundos
     distanceFilter: 10, // 10 metros
@@ -102,7 +102,7 @@ export default function RouteDetailsPage() {
     if (!route) return;
 
     // Se a rota está em progresso mas o tracking não está ativo, reinicia automaticamente
-    if (route.status === 'in_progress' && !isTracking && !readOnly) {
+    if (route.status === 'in_progress' && !isTracking && !readOnly && !assist) {
       console.log('🔄 [Auto-restart] Rota em progresso detectada, reiniciando tracking...');
       startTracking();
     }
@@ -235,7 +235,8 @@ export default function RouteDetailsPage() {
 
       toast({
         title: 'Rota iniciada!',
-        description: 'Seu rastreamento está ativo.',
+        // No modo operador o rastreamento não liga: quem envia localização é o aparelho do motorista.
+        description: assist ? 'A rota está em andamento.' : 'Seu rastreamento está ativo.',
       });
     } catch (error) {
       console.error('Error starting route:', error);

@@ -60,3 +60,9 @@ test('valor lançado que não é Error também fica registrado', () => {
     error: 'boom' }).slice('[driver-route] '.length));
   assert.deepEqual(logged.error, { name: 'string', message: 'boom' });
 });
+
+test('linha de log identifica o acesso quando o comando veio do painel', () => {
+  const logged = JSON.parse(routeActionLogLine({ action: 'finish', routeId: 'r', uid: 'u', httpStatus: 409, code: 'route_not_ready',
+    assistGrantId: 'grant-1' }).slice('[driver-route] '.length));
+  assert.equal(logged.assistGrantId, 'grant-1');
+});

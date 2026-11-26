@@ -19,8 +19,8 @@ interface DriverSettings {
 }
 
 export default function DriverSettingsPage() {
-  const {userId,readOnly,request,endpoint}=useDriverRuntime();
-  const { registrationState, requestPermission, isRegistering, disable: disablePush } = useFCMToken(readOnly ? null : userId, false);
+  const {userId,readOnly,assist,request,endpoint}=useDriverRuntime();
+  const { registrationState, requestPermission, isRegistering, disable: disablePush } = useFCMToken(readOnly || assist ? null : userId, false);
   const { toast } = useToast();
   const [settings, setSettings] = React.useState<DriverSettings>({
     notifications: false,
@@ -67,7 +67,7 @@ export default function DriverSettingsPage() {
 
   // Salvar configurações no Firestore
   const saveSettings = async (newSettings: DriverSettings) => {
-    if (readOnly) return false;
+    if (readOnly || assist) return false;
 
     try {
       await driverCommand(request,endpoint,{kind:'settings',

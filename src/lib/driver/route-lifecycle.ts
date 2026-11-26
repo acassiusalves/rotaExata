@@ -19,7 +19,7 @@ export function finishReadiness(status: unknown, stops: unknown): FinishReadines
 
 type RouteActionLog = {
   action: string; routeId: string; uid: string; httpStatus: number; code: string;
-  detail?: Record<string, unknown>; error?: unknown;
+  assistGrantId?: string; detail?: Record<string, unknown>; error?: unknown;
 };
 
 /** Linha de log de um comando de rota recusado ou que falhou. Só ids, códigos e contagens. */

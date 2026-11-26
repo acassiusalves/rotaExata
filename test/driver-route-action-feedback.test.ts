@@ -25,6 +25,12 @@ test('rota de outro motorista orienta a falar com a central', () => {
   assert.match(routeActionProblem('finish', failure(403, 'route_access_denied')).description, /central/i);
 });
 
+test('acesso de operador vencido ou encerrado manda abrir de novo pelo painel', () => {
+  for (const code of ['assist_expired', 'assist_not_found']) {
+    assert.equal(routeActionProblem('finish', failure(403, code)).description, 'Acesso encerrado. Abra de novo pelo painel.', code);
+  }
+});
+
 test('sessão expirada pede novo login', () => {
   assert.match(routeActionProblem('start', failure(401, 'earnings_unauthorized')).description, /entre novamente/i);
 });
