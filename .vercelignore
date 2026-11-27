@@ -13,6 +13,7 @@ functions/src/*
 !functions/src/legacy-driver-accounts.ts
 !functions/src/push-outcome.ts
 !functions/src/route-reopen.ts
+/scripts/
 docs/investigations
 docs/superpowers
 firebase-debug.log

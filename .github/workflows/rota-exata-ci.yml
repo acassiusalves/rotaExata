@@ -77,6 +77,17 @@ jobs:
         with:
           node-version: '22.19.0'
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: node scripts/verify-route-build.mjs "$GITHUB_SHA"
+      - name: Montar o pacote com as exclusões da Vercel
+        shell: bash
+        run: |
+          package_dir="$RUNNER_TEMP/rota-vercel-source"
+          mkdir -p "$package_dir"
+          git archive HEAD | tar -xf - -C "$package_dir"
+          git ls-files --cached --ignored --exclude-from=.vercelignore -z |
+            (cd "$package_dir" && xargs -0 rm -f --)
+      - name: Compilar o pacote e conferir o commit
+        working-directory: ${{ runner.temp }}/rota-vercel-source
+        run: |
+          npm ci
+          npm run build
+          node "$GITHUB_WORKSPACE/scripts/verify-route-build.mjs" "$GITHUB_SHA"
