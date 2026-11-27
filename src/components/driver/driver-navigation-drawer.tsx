@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import { useAuth } from '@/hooks/use-auth';
+import { nativeEarningsEnabled } from '@/lib/earnings/client';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 import {
@@ -18,6 +19,7 @@ import {
   HelpCircle,
   MessageSquare,
   LogOut,
+  Wallet,
   Menu,
 } from 'lucide-react';
 
@@ -30,6 +32,7 @@ interface NavigationItem {
 const navigationItems: NavigationItem[] = [
   { href: '/my-routes', icon: Route, label: 'Minhas Rotas Ativas' },
   { href: '/my-routes/history', icon: History, label: 'Histórico de Entregas' },
+  ...(nativeEarningsEnabled ? [{ href: '/driver/earnings', icon: Wallet, label: 'Meus ganhos' }] : []),
   { href: '/driver/profile', icon: User, label: 'Perfil do Motorista' },
   { href: '/driver/settings', icon: Settings, label: 'Configurações' },
   { href: '/driver/chamados', icon: MessageSquare, label: 'Meus chamados' },
@@ -39,7 +42,7 @@ const navigationItems: NavigationItem[] = [
 export function DriverNavigationDrawer() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { profile:user,signOut }=useDriverRuntime();
   const [isOpen, setIsOpen] = React.useState(false);
 
   const getInitials = (name: string | null | undefined) => {

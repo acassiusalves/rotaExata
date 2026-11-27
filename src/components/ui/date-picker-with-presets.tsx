@@ -3,9 +3,13 @@
 import * as React from 'react';
 import { format, subDays, startOfMonth, endOfMonth, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import type { DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { staffWorkspaceKey } from '@/lib/staff/workspace';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -65,6 +69,8 @@ export function DatePickerWithPresets({
   placeholder = 'Selecione o período',
   className,
 }: DatePickerWithPresetsProps) {
+  const actor=useOptionalStaff();
+  const storageKey=actor ? staffWorkspaceKey(actor.userId,actor.scopeId,'recent-report-ranges') : nativeStaffEnabled ? null : 'recent-report-ranges';
   const [recentRanges, setRecentRanges] = React.useState<Array<{ start: Date; end: Date; label: string }>>([]);
   const [selectedRange, setSelectedRange] = React.useState<{ from: Date | undefined; to: Date | undefined }>({
     from: startDate,
@@ -73,7 +79,8 @@ export function DatePickerWithPresets({
 
   // Carregar ranges recentes do localStorage
   React.useEffect(() => {
-    const stored = localStorage.getItem('recent-report-ranges');
+    setRecentRanges([]);
+    const stored = storageKey && localStorage.getItem(storageKey);
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -86,7 +93,7 @@ export function DatePickerWithPresets({
         console.error('Error parsing recent ranges:', e);
       }
     }
-  }, []);
+  }, [storageKey]);
 
   // Atualizar o selectedRange quando startDate ou endDate mudarem
   React.useEffect(() => {
@@ -107,15 +114,15 @@ export function DatePickerWithPresets({
     ].slice(0, 5); // Manter apenas os 5 mais recentes
 
     setRecentRanges(updated);
-    localStorage.setItem(
-      'recent-report-ranges',
+    if (storageKey) localStorage.setItem(
+      storageKey,
       JSON.stringify(updated.map(r => ({ start: r.start.toISOString(), end: r.end.toISOString(), label: r.label })))
     );
 
     onDateRangeChange?.(range.start, range.end);
   };
 
-  const handleDateSelect = (range: { from: Date | undefined; to: Date | undefined } | undefined) => {
+  const handleDateSelect = (range: DateRange | undefined) => {
     // Quando range é undefined, significa que o usuário clicou no mesmo dia já selecionado
     // Neste caso, queremos selecionar apenas esse dia (ao invés de desselecionar)
     if (!range && selectedRange.from) {
@@ -131,7 +138,7 @@ export function DatePickerWithPresets({
       // Se clicou no mesmo dia duas vezes (from e to são o mesmo dia), considerar como seleção de um único dia
       const isSameDay = range.to && startOfDay(range.from).getTime() === startOfDay(range.to).getTime();
 
-      setSelectedRange(range);
+      setSelectedRange({ from: range.from, to: range.to });
 
       // Se apenas uma data foi selecionada (from sem to), ou se é o mesmo dia
       if (!range.to || isSameDay) {

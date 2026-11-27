@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { Timestamp } from 'firebase/firestore';
+export type { Timestamp } from 'firebase/firestore';
 
 export type NavItem = {
   title: string;
@@ -20,6 +21,7 @@ export type Payment = {
 
 
 export type PlaceValue = {
+  driverRevision?: string;
   id: string;
   address: string;
   placeId: string;
@@ -57,6 +59,7 @@ export type PlaceValue = {
   // Campos de rastreamento
   deliveryStatus?: DeliveryStatus;
   arrivedAt?: Timestamp | Date;
+  unlinkedAt?: Timestamp | Date | string;
   completedAt?: Timestamp | Date;
   photoUrl?: string;
   signatureUrl?: string;
@@ -75,6 +78,9 @@ export type PlaceValue = {
   modifiedAt?: Timestamp | Date;
   modificationType?: 'address' | 'sequence' | 'data' | 'removed' | 'added';
   originalSequence?: number;
+  isManuallyAdded?: boolean;
+  isNewlyAdded?: boolean;
+  _movedFromRoute?: string;
   // Sistema de numeração sequencial (INTERNO - não visível na UI)
   pointCode?: string; // Formato: {ROUTE_CODE}-{SEQUENCE} (ex: "RT-0001-001", "LN-0011-A-002")
   // Campos específicos para pedidos Lunna
@@ -152,6 +158,11 @@ export type RouteInfo = {
   // Vínculo com Serviço Luna (apenas para rotas com source: 'lunna')
   serviceId?: string; // ID do LunnaService pai
   serviceCode?: string; // Código do serviço (LN-XXXX) para referência rápida
+  // Reabertura de rota finalizada (callable reopenRoute)
+  reopenedAt?: Timestamp | Date;
+  reopenedBy?: string;
+  reopenReason?: string;
+  reopenCount?: number;
 };
 
 export type OrderStatus =
@@ -582,6 +593,12 @@ export type ActivityEventType =
   | 'driver_unassigned'
   | 'route_auto_completed'
   | 'route_resent'
+  | 'route_reopened'
+  | 'driver_assist_started'
+  | 'driver_assist_ended'
+  | 'route_started'
+  | 'route_changes_acknowledged'
+  | 'route_completed'
   // === NOVOS - FINANCEIRO (5) ===
   | 'payment_approved'
   | 'payment_marked_as_paid'
@@ -616,6 +633,7 @@ export type ActivityLogEntry = {
   eventType: ActivityEventType;
   category?: ActivityCategory;
   userId: string;
+  actorProvenance?: 'rota-native'|'source-reported';
   userName?: string;
   userRole?: string;
   origin?: EventOrigin;

@@ -1,8 +1,10 @@
 'use client';
 
 import React from 'react';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 
 const APP_SERVICE_WORKER_URL = '/sw.js';
+const ONLINE_SERVICE_WORKER_URL = '/service-worker.js';
 const FIREBASE_MESSAGING_SERVICE_WORKER = 'firebase-messaging';
 
 // Componente para registrar o Service Worker com atualização automática
@@ -59,15 +61,16 @@ export function ServiceWorkerRegistration() {
 
     const registerServiceWorker = async () => {
       try {
-        const swExists = await hasAppServiceWorker();
-
-        if (!swExists) {
+        const script = nativeDriverEnabled
+          ? process.env.NODE_ENV==='production' ? ONLINE_SERVICE_WORKER_URL:null
+          : await hasAppServiceWorker() ? APP_SERVICE_WORKER_URL:null;
+        if (!script) {
           console.log('[SW] Service Worker não encontrado, limpando registros antigos');
           await cleanupOldServiceWorkers('sw.js ausente');
           return;
         }
 
-        const registration = await navigator.serviceWorker.register(APP_SERVICE_WORKER_URL);
+        const registration = await navigator.serviceWorker.register(script,{updateViaCache:'none'});
         console.log('[SW] Service Worker registrado com sucesso');
 
         // Verificar atualizações periodicamente (a cada 1 hora)

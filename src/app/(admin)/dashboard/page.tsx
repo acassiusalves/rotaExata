@@ -1,5 +1,7 @@
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Card,
@@ -47,8 +49,12 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { collection, onSnapshot, query, where, Timestamp, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import { useStaff } from '@/components/staff/staff-session';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
+import { staffRouteDates } from '@/lib/staff/route-dates';
+import { Button } from '@/components/ui/button';
 import { RouteInfo, DriverLocationWithInfo, PlaceValue } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -58,7 +64,7 @@ type RouteDocument = RouteInfo & {
   id: string;
   name: string;
   status: 'draft' | 'dispatched' | 'in_progress' | 'completed' | 'completed_auto';
-  plannedDate: Timestamp;
+  plannedDate: Date;
   driverId?: string;
   driverInfo?: {
     name: string;
@@ -188,46 +194,21 @@ const PaymentMethodIcon: React.FC<{ method: string }> = ({ method }) => {
 };
 
 export default function DashboardPage() {
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
+  const {request}=useStaff();
+  const load=React.useCallback((signal:AbortSignal)=>loadStaffPageList<RouteDocument,'routes'>(request,'/api/staff/dashboard','routes',signal).then(routes=>({routes})),[request]);
+  const {data,error,loading:isLoading,refresh}=useStaffQuery(load);
   const [selectedStop, setSelectedStop] = React.useState<{ stop: PlaceValue; index: number } | null>(null);
   const [isStopInfoOpen, setIsStopInfoOpen] = React.useState(false);
   const { toast } = useToast();
 
-  React.useEffect(() => {
-    // Pegar início e fim do dia atual
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    // Firestore listener para rotas do dia (sem filtro de data para evitar índice composto)
-    // A filtragem por data será feita no cliente
-    // Incluir rotas concluídas para mostrar métricas de faturamento e entregas realizadas
-    const routesQuery = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['draft', 'dispatched', 'in_progress', 'completed', 'completed_auto'])
-    );
-
-    const unsubscribeRoutes = onSnapshot(routesQuery, (snapshot) => {
-      const routesData: RouteDocument[] = [];
+  const {routes,driverLocations}=React.useMemo(()=>{
+      const routesData=staffRouteDates<RouteDocument[]>(data?.routes ?? []);
       const locationsMap = new Map<string, DriverLocationWithInfo>();
       const now = new Date();
 
-      snapshot.forEach((docSnap) => {
-        const route = { id: docSnap.id, ...docSnap.data() } as RouteDocument;
-
-        // Filtrar apenas rotas do dia atual (no cliente)
-        const routeDate = route.plannedDate?.toDate();
-        if (!routeDate || routeDate < today || routeDate >= tomorrow) {
-          return; // Pular rotas que não são do dia atual
-        }
-
-        routesData.push(route);
-
+      routesData.forEach(route=>{
         // Coletar localizações dos motoristas
-        if (route.currentLocation && route.status === 'in_progress' && route.driverInfo && route.driverId) {
+        if (route.currentLocation?.timestamp && route.status === 'in_progress' && route.driverInfo && route.driverId) {
           const timestamp = route.currentLocation.timestamp instanceof Date
             ? route.currentLocation.timestamp
             : route.currentLocation.timestamp.toDate();
@@ -276,23 +257,13 @@ export default function DashboardPage() {
           return statusA - statusB;
         }
         // Depois ordenar por data planejada
-        const dateA = a.plannedDate?.toMillis() || 0;
-        const dateB = b.plannedDate?.toMillis() || 0;
+        const dateA = a.plannedDate?.valueOf() || 0;
+        const dateB = b.plannedDate?.valueOf() || 0;
         return dateA - dateB;
       });
 
-      setRoutes(routesData);
-      setDriverLocations(Array.from(locationsMap.values()));
-      setIsLoading(false);
-    }, (error) => {
-      console.error('Error fetching routes:', error);
-      setIsLoading(false);
-    });
-
-    return () => {
-      unsubscribeRoutes();
-    };
-  }, []);
+      return {routes:routesData,driverLocations:[...locationsMap.values()]};
+  },[data]);
 
   // Cálculos de métricas
   const metrics = React.useMemo(() => {
@@ -313,7 +284,7 @@ export default function DashboardPage() {
 
       // Rotas em rascunho não são consideradas em nenhum período
       const isDraft = route.status === 'draft';
-      const period = isDraft ? null : getRoutePeriod(route.plannedDate.toDate()).label;
+      const period = isDraft ? null : getRoutePeriod(route.plannedDate).label;
 
       route.stops.forEach(stop => {
         totalDeliveries++;
@@ -384,11 +355,10 @@ export default function DashboardPage() {
 
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
-      const requestRef = doc(db, 'locationUpdateRequests', driverId);
-      await setDoc(requestRef, {
-        driverId,
-        requestedAt: serverTimestamp(),
-        status: 'pending',
+      const route=routes.find(item=>item.status==='in_progress' && item.driverId===driverId);
+      if (!route) throw new Error('Rota em andamento não encontrada.');
+      await request('/api/staff/routes/'+encodeURIComponent(route.id)+'/location',{
+        method:'POST',body:JSON.stringify({driverId,view:'dashboard'}),
       });
 
       toast({
@@ -433,6 +403,11 @@ export default function DashboardPage() {
     }).format(value);
   };
 
+  if (!data && error) return <div className="space-y-3 p-6">
+    <p role="alert">Não foi possível carregar o painel.</p>
+    <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
+  </div>;
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -443,6 +418,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 space-y-4">
+      {!!error && <StaffRefreshNotice retry={refresh} />}
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
         <p className="text-sm text-muted-foreground">
@@ -599,7 +575,7 @@ export default function DashboardPage() {
               <div className="divide-y max-h-[500px] overflow-y-auto">
                 {routes.map((route) => {
                   const stats = getRouteStats(route.stops || []);
-                  const period = getRoutePeriod(route.plannedDate.toDate());
+                  const period = getRoutePeriod(route.plannedDate);
                   const PeriodIcon = period.icon;
 
                   return (
@@ -734,9 +710,9 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     {selectedStop.stop.arrivedAt && (() => {
                       try {
-                        const date = selectedStop.stop.arrivedAt instanceof Timestamp
-                          ? selectedStop.stop.arrivedAt.toDate()
-                          : new Date(selectedStop.stop.arrivedAt as any);
+                        const date = selectedStop.stop.arrivedAt instanceof Date
+                          ? selectedStop.stop.arrivedAt
+                          : selectedStop.stop.arrivedAt.toDate();
 
                         if (isNaN(date.getTime())) return null;
 
@@ -758,9 +734,9 @@ export default function DashboardPage() {
 
                     {selectedStop.stop.completedAt && (() => {
                       try {
-                        const date = selectedStop.stop.completedAt instanceof Timestamp
-                          ? selectedStop.stop.completedAt.toDate()
-                          : new Date(selectedStop.stop.completedAt as any);
+                        const date = selectedStop.stop.completedAt instanceof Date
+                          ? selectedStop.stop.completedAt
+                          : selectedStop.stop.completedAt.toDate();
 
                         if (isNaN(date.getTime())) return null;
 
@@ -825,7 +801,7 @@ export default function DashboardPage() {
                       Foto da Entrega
                     </h3>
                     <div className="rounded-lg overflow-hidden border">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.photoUrl}
                         alt="Foto da entrega"
                         className="w-full h-auto"
@@ -842,7 +818,7 @@ export default function DashboardPage() {
                       Assinatura
                     </h3>
                     <div className="rounded-lg overflow-hidden border bg-white">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.signatureUrl}
                         alt="Assinatura"
                         className="w-full h-auto"

@@ -330,6 +330,10 @@ export async function recalculatePayment(
 
     const routeForCalculation: RouteForCalculation = {
       ...routeData,
+      stops: routeData.stops,
+      encodedPolyline: routeData.encodedPolyline,
+      distanceMeters: routeData.distanceMeters,
+      duration: routeData.duration,
       driverId: resolveRouteDriverId(routeData) ?? '',
       driverName: routeData.driverInfo.name,
       completedAt: completedDate,

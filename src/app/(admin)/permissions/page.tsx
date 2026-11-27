@@ -10,6 +10,9 @@ import {
   AlertCircle,
   KeyRound,
 } from 'lucide-react';
+import { Dialog,DialogContent,DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -38,86 +41,68 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/hooks/use-auth';
-import { functions } from '@/lib/firebase/client';
-import { httpsCallable } from 'firebase/functions';
-import { ResetPasswordDialog } from '@/components/drivers/reset-password-dialog';
 import {
   availableRoles,
   permissionGroups,
   defaultPagePermissions,
   alwaysAdminPages,
 } from '@/lib/permissions';
-import {
-  loadPermissions,
-  savePermissions,
-  loadUsersWithRoles,
-  updateUserRole,
-  type AppUser,
-} from '@/lib/permissions-service';
+import { StaffProvisioning } from '@/components/staff/staff-provisioning';
+import { useStaff } from '@/components/staff/staff-session';
+import { useConfirm } from '@/hooks/use-confirm';
+import type { PendingStaffMetadata,StaffAccount,StaffDirectoryCommand } from '@/lib/staff/directory-contract';
+import type { StaffRole } from '@/lib/staff/access';
+import { EarningsRequestError } from '@/lib/earnings/session-request';
+
+type SecurityAction=Exclude<StaffDirectoryCommand['action'],'set_role'|'edit_profile'|'cancel_metadata'>;
+type AppUser=StaffAccount & {chosenRole:StaffRole};
+type PolicyState={permissions:Record<string,string[]>;inactivePages:string[];revision:string|null};
 
 export default function PermissionsPage() {
   const [users, setUsers] = React.useState<AppUser[]>([]);
+  const [pendingCommands,setPendingCommands]=React.useState<PendingStaffMetadata[]>([]);
   const [permissions, setPermissions] = React.useState<Record<string, string[]>>(defaultPagePermissions);
   const [inactivePages, setInactivePages] = React.useState<Set<string>>(new Set());
   const [isSavingPermissions, setIsSavingPermissions] = React.useState(false);
   const [isSavingUsers, setIsSavingUsers] = React.useState(false);
-  const [isResettingPassword, setIsResettingPassword] = React.useState(false);
-  const [userToResetPassword, setUserToResetPassword] = React.useState<AppUser | null>(null);
+  const [policyRevision,setPolicyRevision]=React.useState<string|null>();
+  const [profileEditor,setProfileEditor]=React.useState<{account:AppUser;name:string;phone:string}>();
+  const [accountBusy,setAccountBusy]=React.useState(false);
+  const [dataError,setDataError]=React.useState(false);
+  const [reload,setReload]=React.useState(0);
   const [isLoading, setIsLoading] = React.useState(true);
   const { toast } = useToast();
-  const { user: currentUser, userRole } = useAuth();
+  const {userId,role:userRole,request}=useStaff();
+  const {confirm}=useConfirm();
+  const refresh=React.useCallback(()=>setReload(value=>value+1),[]);
+  const commands=React.useRef(new Map<string,StaffDirectoryCommand>());
 
   // Verificar permissão de acesso
   const hasPermission = userRole === 'admin' || userRole === 'socio';
 
-  // Carregar dados iniciais
-  React.useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [permissionsData, usersData] = await Promise.all([
-          loadPermissions(),
-          loadUsersWithRoles(),
-        ]);
-
-        if (permissionsData) {
-          // Mesclar permissões salvas com as padrão
-          const mergedPermissions: Record<string, string[]> = { ...defaultPagePermissions };
-          for (const page in permissionsData.permissions) {
-            mergedPermissions[page] = permissionsData.permissions[page];
-          }
-          setPermissions(mergedPermissions);
-
-          if (permissionsData.inactivePages) {
-            setInactivePages(new Set(permissionsData.inactivePages));
-          }
-        }
-
-        setUsers(usersData);
-      } catch (error) {
-        console.error('Erro ao carregar dados:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro',
-          description: 'Não foi possível carregar as configurações.',
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    if (hasPermission) {
-      loadData();
-    } else {
-      setIsLoading(false);
-    }
-  }, [hasPermission, toast]);
+  React.useEffect(()=>{
+    if (!hasPermission) {setIsLoading(false);return;}
+    const controller=new AbortController();
+    const input={signal:controller.signal};
+    setIsLoading(true);
+    setDataError(false);
+    Promise.all([request<PolicyState>('/api/staff/permissions',input),
+      request<{accounts:StaffAccount[];pendingCommands:PendingStaffMetadata[]}>('/api/staff/directory',input)]).then(([policy,directory])=>{
+      if (controller.signal.aborted) return;
+      setPermissions(policy.permissions);
+      setInactivePages(new Set(policy.inactivePages));
+      setPolicyRevision(policy.revision);
+      setPendingCommands(directory.pendingCommands);
+      setUsers(directory.accounts.map(user=>({...user,chosenRole:user.role})));
+    }).catch(()=>{if (!controller.signal.aborted) setDataError(true);})
+      .finally(()=>{if (!controller.signal.aborted) setIsLoading(false);});
+    return ()=>controller.abort();
+  },[hasPermission,request,reload]);
 
   // Alterar role de um usuário
-  const handleRoleChange = (userId: string, newRole: string) => {
+  const handleRoleChange = (targetId: string, newRole: StaffRole) => {
     // Não permite que admin remova sua própria role de admin
-    if (currentUser?.uid === userId && userRole === 'admin' && newRole !== 'admin') {
+    if (userId === targetId && userRole === 'admin' && newRole !== 'admin') {
       toast({
         variant: 'destructive',
         title: 'Ação não permitida',
@@ -127,7 +112,7 @@ export default function PermissionsPage() {
     }
 
     setUsers((currentUsers) =>
-      currentUsers.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+      currentUsers.map((u) => (u.userId === targetId ? { ...u, chosenRole: newRole } : u))
     );
   };
 
@@ -176,20 +161,12 @@ export default function PermissionsPage() {
   const handleSavePermissions = async () => {
     setIsSavingPermissions(true);
     try {
-      const success = await savePermissions(
-        permissions,
-        Array.from(inactivePages),
-        currentUser?.uid
-      );
-
-      if (success) {
-        toast({
-          title: 'Permissões Salvas!',
-          description: 'As regras de acesso foram atualizadas com sucesso.',
-        });
-      } else {
-        throw new Error('Falha ao salvar');
-      }
+      if (policyRevision===undefined) return;
+      const policy=await request<PolicyState>('/api/staff/permissions',{
+        method:'PATCH',body:JSON.stringify({expectedRevision:policyRevision,pagePermissions:permissions,inactivePages:[...inactivePages]}),
+      });
+      setPolicyRevision(policy.revision);
+      toast({title:'Permissões salvas',description:'As regras de acesso do RotaExata foram atualizadas.'});
     } catch (error) {
       toast({
         variant: 'destructive',
@@ -201,70 +178,109 @@ export default function PermissionsPage() {
     }
   };
 
-  // Salvar roles dos usuários
-  const handleSaveUsers = async () => {
-    setIsSavingUsers(true);
+  async function applyCommand(user:AppUser,action:SecurityAction|'set_role',targetRole?:StaffRole) {
+    const fingerprint=JSON.stringify({id:user.userId,action,revision:user.revision,targetRole});
+    const remembered=commands.current.get(fingerprint);
+    const pending=action==='set_role' && user.pendingRole?.role===targetRole ? user.pendingRole:undefined;
+    const base={targetId:user.userId,revision:pending?.revision ?? user.revision,commandId:pending?.commandId ?? crypto.randomUUID()};
+    const command:StaffDirectoryCommand=remembered ?? (action==='set_role' ?
+      {...base,action,role:targetRole ?? user.role}:{...base,action});
+    commands.current.set(fingerprint,command);
     try {
-      const validUsers = users.filter((user) => user.role && user.role.trim() !== '');
+      await request('/api/staff/directory',{method:'POST',body:JSON.stringify(command)});
+      commands.current.delete(fingerprint);
+    } catch(error) {
+      if (error instanceof EarningsRequestError && error.status<500 && error.status!==409) commands.current.delete(fingerprint);
+      throw error;
+    }
+  }
 
-      if (validUsers.length === 0) {
-        toast({
-          variant: 'destructive',
-          title: 'Erro',
-          description: 'Nenhum usuário com função definida para salvar.',
-        });
-        return;
+  async function handleSaveUsers() {
+    const updated=users.filter(user=>user.role!==user.chosenRole);
+    if (!updated.length) return;
+    setIsSavingUsers(true);
+    let saved=0;
+    try {
+      for (const user of updated) {
+        await applyCommand(user,'set_role',user.chosenRole);
+        saved++;
       }
-
-      const updatePromises = validUsers.map((user) => updateUserRole(user.id, user.role));
-      await Promise.all(updatePromises);
-
-      toast({
-        title: 'Funções Salvas!',
-        description: `${validUsers.length} usuário(s) atualizado(s) com sucesso.`,
-      });
-    } catch (error) {
-      console.error('Erro ao salvar funções:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível salvar as funções dos usuários.',
-      });
+      toast({title:'Funções salvas',description:saved+' conta(s) atualizada(s).'});
+    } catch {
+      toast({variant:'destructive',title:'Uma mudança ficou pendente',
+        description:saved ? saved+' mudança(s) concluída(s). Confira as funções e retome a que ficou pendente.':'Confira as funções e tente novamente.'});
     } finally {
       setIsSavingUsers(false);
+      refresh();
     }
-  };
+  }
 
-  const handleResetPassword = async () => {
-    if (!userToResetPassword) return;
-    setIsResettingPassword(true);
-
+  async function resumeRole(user:AppUser) {
+    if (!user.pendingRole) return;
+    setAccountBusy(true);
     try {
-      const resetUserPasswordFn = httpsCallable<
-        { uid: string },
-        { ok: boolean; temporaryPassword: string; message: string }
-      >(functions, 'resetUserPassword');
+      await applyCommand(user,'set_role',user.pendingRole.role);
+      toast({title:'Função atualizada'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível retomar a alteração de função'});
+    } finally {setAccountBusy(false);refresh();}
+  }
 
-      const result = await resetUserPasswordFn({ uid: userToResetPassword.id });
-      const temporaryPassword = result.data.temporaryPassword || '123456';
+  async function saveProfile(event:React.FormEvent) {
+    event.preventDefault();
+    if (!profileEditor) return;
+    const {account,name,phone}=profileEditor;
+    const profile={name:name.trim(),phone:phone.trim()};
+    const pending=account.pendingProfile;
+    const revisions={revision:pending?.revision ?? account.revision,phoneRevision:pending?.phoneRevision ?? account.phoneRevision,
+      sourceRevision:pending ? pending.sourceRevision:account.sourceRevision};
+    const fingerprint=JSON.stringify({id:account.userId,profile,...revisions});
+    const remembered=commands.current.get(fingerprint);
+    const command:StaffDirectoryCommand=remembered ?? {
+      action:'edit_profile',targetId:account.userId,profile,...revisions,
+      commandId:pending?.commandId ?? crypto.randomUUID(),
+    };
+    commands.current.set(fingerprint,command);
+    setAccountBusy(true);
+    try {
+      await request('/api/staff/directory',{method:'POST',body:JSON.stringify(command)});
+      commands.current.delete(fingerprint);
+      setProfileEditor(undefined);
+      toast({title:'Perfil atualizado'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível salvar o perfil',description:'Confira o cadastro e retome uma alteração pendente.'});
+    } finally {setAccountBusy(false);refresh();}
+  }
 
-      toast({
-        title: 'Senha resetada!',
-        description: `Senha temporária: ${temporaryPassword}. O usuário deverá criar uma nova senha no próximo acesso.`,
-      });
+  async function cancelMetadata(commandId:string) {
+    setAccountBusy(true);
+    try {
+      const command:StaffDirectoryCommand={action:'cancel_metadata',commandId};
+      await request('/api/staff/directory',{method:'POST',body:JSON.stringify(command)});
+      toast({title:'Pendência encerrada'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível encerrar a pendência'});
+    } finally {setAccountBusy(false);refresh();}
+  }
 
-      setUserToResetPassword(null);
-    } catch (error: any) {
-      console.error('Erro ao resetar senha:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Resetar Senha',
-        description: error.message || 'Não foi possível resetar a senha do usuário.',
-      });
-    } finally {
-      setIsResettingPassword(false);
-    }
-  };
+  async function accountAction(user:AppUser,action:SecurityAction) {
+    const label={
+      require_password_change:'Exigir troca de senha',revoke_sessions:'Encerrar sessões',
+      set_active:'Reativar acesso',set_inactive:'Bloquear acesso',
+    }[action];
+    if (!await confirm({title:label+' · '+user.name,
+      description:'A alteração vale para a conta Supabase. Apps que ainda usam Firebase mantêm suas próprias sessões.',
+      confirmText:label,cancelText:'Cancelar',variant:action==='set_active'?'default':'destructive'})) return;
+    setAccountBusy(true);
+    try {
+      await applyCommand(user,action);
+      toast({title:'Alteração registrada',description:action==='require_password_change' ?
+        'A pessoa deverá entrar e definir sua nova senha.':'As sessões anteriores da conta foram encerradas.'});
+      refresh();
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível atualizar a conta',description:'Confira se os dados da conta mudaram.'});
+    } finally {setAccountBusy(false);}
+  }
 
   // Verificar se o usuário não tem permissão
   if (!hasPermission && !isLoading) {
@@ -293,6 +309,11 @@ export default function PermissionsPage() {
   }
 
   // Filtrar roles para não mostrar driver nas permissões de páginas admin
+  if (dataError) return <div className="space-y-3 p-6">
+    <p role="alert">Não foi possível carregar o diretório de acesso.</p>
+    <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
+  </div>;
+
   const adminRoles = availableRoles.filter((r) => r.key !== 'driver');
 
   return (
@@ -414,16 +435,6 @@ export default function PermissionsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {users.filter((u) => !u.role).length > 0 && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                <strong>Atenção:</strong> {users.filter((u) => !u.role).length} usuário(s) sem
-                função definida. Usuários sem função não conseguirão acessar o sistema corretamente.
-              </AlertDescription>
-            </Alert>
-          )}
-
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -431,30 +442,29 @@ export default function PermissionsPage() {
                   <TableHead>Usuário</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead className="w-[200px]">Função</TableHead>
-                  <TableHead className="w-[140px] text-right">Senha</TableHead>
+                  <TableHead className="w-[140px] text-right">Acesso</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {users.length > 0 ? (
                   users.map((user) => (
-                    <TableRow key={user.id} className={!user.role ? 'bg-destructive/10' : ''}>
+                    <TableRow key={user.userId}>
                       <TableCell className="font-medium">
-                        {user.displayName || 'Sem nome'}
-                        {!user.role && (
-                          <span className="text-xs text-destructive ml-2">(Sem função)</span>
-                        )}
+                        {user.name}
+                        <div className="text-xs text-muted-foreground">{user.active?'Acesso ativo':'Acesso bloqueado'} · {user.emailVerified?'E-mail confirmado':'E-mail pendente'}{user.mustChangePassword?' · Troca de senha solicitada':''}</div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{user.email}</TableCell>
                       <TableCell>
                         <Select
-                          value={user.role || ''}
-                          onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
+                          value={user.chosenRole}
+                          disabled={!!user.pendingRole || user.userId===userId || (user.role==='admin' && userRole!=='admin')}
+                          onValueChange={(newRole) => handleRoleChange(user.userId, newRole as StaffRole)}
                         >
                           <SelectTrigger className={!user.role ? 'border-destructive' : ''}>
                             <SelectValue placeholder="Selecione..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {availableRoles.map((role) => (
+                            {adminRoles.filter(role=>role.key!=='admin' || userRole==='admin' || user.role==='admin').map((role) => (
                               <SelectItem key={role.key} value={role.key}>
                                 {role.name}
                               </SelectItem>
@@ -463,15 +473,26 @@ export default function PermissionsPage() {
                         </Select>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setUserToResetPassword(user)}
-                          disabled={user.id === currentUser?.uid}
-                        >
-                          <KeyRound className="mr-2 h-4 w-4" />
-                          Resetar
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {user.pendingRole && <Button variant="outline" size="sm" disabled={accountBusy} onClick={()=>void resumeRole(user)}>
+                            Retomar mudança de função
+                          </Button>}
+                          <Button variant="outline" size="sm" disabled={accountBusy || (user.role==='admin' && userRole!=='admin')}
+                            onClick={()=>setProfileEditor({account:user,name:user.pendingProfile?.profile.name ?? user.name,
+                              phone:user.pendingProfile?.profile.phone ?? user.phone ?? ''})}>
+                            {user.pendingProfile ? 'Retomar edição do perfil':'Editar perfil'}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={()=>void accountAction(user,'require_password_change')}
+                            disabled={accountBusy || user.userId===userId || (user.role==='admin' && userRole!=='admin')}>
+                            <KeyRound className="mr-1 size-4" />Exigir troca de senha
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={()=>void accountAction(user,'revoke_sessions')}
+                            disabled={accountBusy || user.userId===userId || (user.role==='admin' && userRole!=='admin')}>Encerrar sessões</Button>
+                          <Button variant="ghost" size="sm" onClick={()=>void accountAction(user,user.active?'set_inactive':'set_active')}
+                            disabled={accountBusy || user.userId===userId || (user.role==='admin' && userRole!=='admin')}>
+                            {user.active?'Bloquear':'Reativar'}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -497,15 +518,34 @@ export default function PermissionsPage() {
           </Button>
         </CardFooter>
       </Card>
-      <ResetPasswordDialog
-        isOpen={!!userToResetPassword}
-        onClose={() => setUserToResetPassword(null)}
-        onConfirm={handleResetPassword}
-        entityLabel="usuário"
-        userName={userToResetPassword?.displayName || userToResetPassword?.email}
-        userEmail={userToResetPassword?.email}
-        isLoading={isResettingPassword}
-      />
+      {pendingCommands.length>0 && <Card>
+        <CardHeader><CardTitle>Alterações pendentes</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {pendingCommands.map(command=><div key={command.commandId} className="flex items-center justify-between gap-3">
+            <span>{command.name}</span>
+            <Button variant="outline" disabled={accountBusy} onClick={()=>void cancelMetadata(command.commandId)}>
+              Encerrar pendência
+            </Button>
+          </div>)}
+        </CardContent>
+      </Card>}
+      <StaffProvisioning onReady={refresh} />
+      <Dialog open={!!profileEditor} onOpenChange={open=>{if(!open&&!accountBusy) setProfileEditor(undefined);}}>
+        <DialogContent>
+          <DialogTitle>{profileEditor?.account.pendingProfile?'Retomar edição do perfil':'Editar perfil'}</DialogTitle>
+          {profileEditor && <form className="space-y-3" onSubmit={saveProfile}>
+            <div className="space-y-1"><Label htmlFor="staff-profile-name">Nome</Label>
+              <Input id="staff-profile-name" value={profileEditor.name} minLength={2} maxLength={150} required
+                disabled={accountBusy || !!profileEditor.account.pendingProfile}
+                onChange={event=>setProfileEditor({...profileEditor,name:event.target.value})} /></div>
+            <div className="space-y-1"><Label htmlFor="staff-profile-phone">Telefone</Label>
+              <Input id="staff-profile-phone" type="tel" value={profileEditor.phone} maxLength={40}
+                disabled={accountBusy || !!profileEditor.account.pendingProfile}
+                onChange={event=>setProfileEditor({...profileEditor,phone:event.target.value})} /></div>
+            <Button disabled={accountBusy}>{profileEditor.account.pendingProfile?'Retomar alteração':'Salvar perfil'}</Button>
+          </form>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

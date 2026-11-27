@@ -1,5 +1,5 @@
 import type { PlaceValue } from '@/lib/types';
-import { getStopIdentityKey } from '@/lib/route-stop-utils';
+import { getStopIdentityKey } from './route-stop-utils.ts';
 
 export type PlannedRouteStop = PlaceValue & {
   /** Identidade da parada antes de uma edição. Nunca deve ser persistida. */
@@ -109,6 +109,10 @@ function mergeWithLatestExecution(latest: PlaceValue, planned: PlaceValue): Plac
     ...latest,
     ...stripTransientFields(planned),
   } as Record<string, unknown>;
+
+  for (const field of ['city', 'state', 'cidade', 'uf']) {
+    if (hasOwn(planned, field) && merged[field] === '') delete merged[field];
+  }
 
   for (const field of EXECUTION_FIELDS) {
     if (hasOwn(latest, field)) merged[field] = (latest as Record<string, unknown>)[field];

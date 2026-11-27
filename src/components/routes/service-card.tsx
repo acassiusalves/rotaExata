@@ -29,7 +29,6 @@ import { LunnaBadge } from './lunna-badge';
 import type { LunnaService, LunnaServiceStatus, RouteInfo, Driver } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Timestamp } from 'firebase/firestore';
 import { summarizeServiceDispatch } from '@/lib/service-dispatch-summary';
 import {
   DropdownMenu,
@@ -117,11 +116,7 @@ export function ServiceCard({
   const canForceComplete = React.useMemo(() => {
     if (!service.createdAt) return false;
 
-    const createdDate = service.createdAt instanceof Timestamp
-      ? service.createdAt.toDate()
-      : service.createdAt instanceof Date
-        ? service.createdAt
-        : new Date(service.createdAt);
+    const createdDate = service.createdAt instanceof Date ? service.createdAt : service.createdAt.toDate();
 
     const now = new Date();
     const hoursSinceCreation = (now.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
@@ -140,11 +135,7 @@ export function ServiceCard({
   }, [routes, service.stats?.totalDeliveries, service.allStops?.length]);
 
   // Formatar data
-  const plannedDate = service.plannedDate instanceof Timestamp
-    ? service.plannedDate.toDate()
-    : service.plannedDate instanceof Date
-      ? service.plannedDate
-      : new Date();
+  const plannedDate = service.plannedDate instanceof Date ? service.plannedDate : service.plannedDate?.toDate() ?? new Date();
 
   return (
     <Card className="overflow-hidden">

@@ -1,6 +1,8 @@
 
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Home,
@@ -25,15 +27,11 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { db } from '@/lib/firebase/client';
-import {
-  collection,
-  onSnapshot,
-  query,
-  orderBy,
-  where,
-  Timestamp,
-} from 'firebase/firestore';
+import { useStaff } from '@/components/staff/staff-session';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
+import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -61,7 +59,7 @@ type RouteDocument = RouteInfo & {
     name: string;
     vehicle: { type: string, plate: string };
   } | null;
-  plannedDate: Timestamp;
+  plannedDate: Date;
   origin: PlaceValue;
 };
 
@@ -150,51 +148,15 @@ const Rotograma: React.FC<{
 );
 
 export default function MonitoringPage() {
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const {request}=useStaff();
+  const load=React.useCallback((signal:AbortSignal)=>loadStaffPageList<RouteDocument,'routes'>(request,'/api/staff/routes/monitoring','routes',signal).then(routes=>({routes})),[request]);
+  const {data,error,loading:isLoading,refresh}=useStaffQuery(load,8000);
+  const routes=React.useMemo(()=>staffRouteDates<RouteDocument[]>(data?.routes ?? [])
+    .sort((a,b)=>(b.plannedDate?.valueOf() ?? 0)-(a.plannedDate?.valueOf() ?? 0)),[data]);
   const [selectedRoute, setSelectedRoute] = React.useState<RouteDocument | null>(null);
   const [isMapOpen, setIsMapOpen] = React.useState(false);
   const [selectedStop, setSelectedStop] = React.useState<{ stop: PlaceValue; index: number } | null>(null);
   const [isStopInfoOpen, setIsStopInfoOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    // Busca apenas rotas ativas (despachadas ou em andamento)
-    // Removido orderBy para evitar a necessidade de índice composto
-    // A ordenação será feita no cliente após receber os dados
-    const q = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['dispatched', 'in_progress'])
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const routesData: RouteDocument[] = [];
-        querySnapshot.forEach((doc) => {
-          routesData.push({
-            id: doc.id,
-            ...doc.data(),
-          } as RouteDocument);
-        });
-
-        // Ordena por plannedDate no cliente (mais recentes primeiro)
-        routesData.sort((a, b) => {
-          const dateA = a.plannedDate?.toMillis() || 0;
-          const dateB = b.plannedDate?.toMillis() || 0;
-          return dateB - dateA; // desc (mais recentes primeiro)
-        });
-
-        setRoutes(routesData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching routes: ', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
 
   const getInitials = (name: string) => {
     if (!name) return 'N/A';
@@ -224,6 +186,11 @@ export default function MonitoringPage() {
     return { completed, failed, total, occurrences };
   };
 
+  if (!data && error) return <div className="space-y-3 p-6">
+    <p role="alert">Não foi possível carregar o monitoramento.</p>
+    <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
+  </div>;
+
   if (isLoading) {
     return (
       <div className="flex h-[400px] items-center justify-center rounded-lg border border-dashed">
@@ -236,6 +203,7 @@ export default function MonitoringPage() {
     return (
       <Card className="min-h-[400px] flex items-center justify-center border-dashed">
         <CardContent className="text-center pt-6">
+          {!!error && <StaffRefreshNotice retry={refresh} />}
           <RouteIcon className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold">
             Nenhuma Rota para Monitorar
@@ -251,6 +219,7 @@ export default function MonitoringPage() {
   return (
     <>
       <div className="space-y-4">
+      {!!error && <StaffRefreshNotice retry={refresh} />}
         <div className="rounded-md border bg-card text-card-foreground shadow-sm">
           {/* Header */}
           <div className="grid grid-cols-12 gap-4 border-b px-4 py-2 font-medium text-muted-foreground">
@@ -274,7 +243,7 @@ export default function MonitoringPage() {
                   className="grid grid-cols-12 gap-4 items-center px-4 py-3"
                 >
                   <div className="col-span-1">
-                    <DateBadge date={route.plannedDate.toDate()} />
+                    <DateBadge date={route.plannedDate} />
                   </div>
                   <div className="col-span-2 flex items-center gap-2">
                     <Avatar className="h-9 w-9">
@@ -366,9 +335,9 @@ export default function MonitoringPage() {
                   <div className="space-y-2">
                     {selectedStop.stop.arrivedAt && (() => {
                       try {
-                        const date = selectedStop.stop.arrivedAt instanceof Timestamp
-                          ? selectedStop.stop.arrivedAt.toDate()
-                          : new Date(selectedStop.stop.arrivedAt);
+                        const date = selectedStop.stop.arrivedAt instanceof Date
+                          ? selectedStop.stop.arrivedAt
+                          : selectedStop.stop.arrivedAt.toDate();
 
                         if (isNaN(date.getTime())) return null;
 
@@ -391,9 +360,9 @@ export default function MonitoringPage() {
 
                     {selectedStop.stop.completedAt && (() => {
                       try {
-                        const date = selectedStop.stop.completedAt instanceof Timestamp
-                          ? selectedStop.stop.completedAt.toDate()
-                          : new Date(selectedStop.stop.completedAt);
+                        const date = selectedStop.stop.completedAt instanceof Date
+                          ? selectedStop.stop.completedAt
+                          : selectedStop.stop.completedAt.toDate();
 
                         if (isNaN(date.getTime())) return null;
 
@@ -455,7 +424,7 @@ export default function MonitoringPage() {
                       Foto da Entrega
                     </h3>
                     <div className="rounded-lg overflow-hidden border">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.photoUrl}
                         alt="Foto da entrega"
                         className="w-full h-auto"
@@ -472,7 +441,7 @@ export default function MonitoringPage() {
                       Assinatura
                     </h3>
                     <div className="rounded-lg overflow-hidden border bg-white">
-                      <img
+                      <DeliveryPhoto
                         src={selectedStop.stop.signatureUrl}
                         alt="Assinatura"
                         className="w-full h-auto"

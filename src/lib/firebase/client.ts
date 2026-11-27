@@ -1,5 +1,5 @@
 // Import the functions you need from the SDKs you need
-import { initializeApp, getApps, getApp, FirebaseApp, type FirebaseOptions } from "firebase/app";
+import { initializeApp, getApps, FirebaseApp, type FirebaseOptions } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { getFunctions, Functions } from "firebase/functions";
@@ -23,35 +23,28 @@ function getFirebaseOptions(): FirebaseOptions | undefined {
 }
 
 // Initialize Firebase - singleton pattern
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
-let functions: Functions;
-let storage: FirebaseStorage;
+let app!: FirebaseApp;
+let auth!: Auth;
+let db!: Firestore;
+let functions!: Functions;
+let storage!: FirebaseStorage;
 
-const impersonationMode = shouldUseImpersonationFirebaseApp();
-const appName = impersonationMode ? 'impersonation-app' : '[DEFAULT]';
-const existingApps = getApps();
-const targetApp = existingApps.find((candidate) => candidate.name === appName);
-
-if (targetApp) {
-  app = impersonationMode ? getApp(appName) : getApp();
-  if (typeof window !== 'undefined') {
-    console.log('[Firebase Client] Using existing app instance:', appName);
-  }
-} else {
-  const firebaseOptions = getFirebaseOptions();
-  app = impersonationMode
-    ? initializeApp(firebaseOptions, appName)
-    : initializeApp(firebaseOptions);
-  if (typeof window !== 'undefined') {
-    console.log('[Firebase Client] Created new app instance:', appName);
-  }
+// Legacy browser pages instantiate the SDK when they hydrate. Server renders
+// and builds have no dependency on Firebase web configuration or remote reads.
+if (typeof window !== 'undefined') {
+  const impersonationMode = shouldUseImpersonationFirebaseApp();
+  const appName = impersonationMode ? 'impersonation-app' : '[DEFAULT]';
+  const existing = getApps().find(candidate=>candidate.name===appName);
+  const options=getFirebaseOptions();
+  if (existing) app=existing;
+  else if (impersonationMode) {
+    const defaults=getApps().find(candidate=>candidate.name==='[DEFAULT]');
+    app=initializeApp(options ?? (defaults ?? initializeApp()).options,appName);
+  } else app=options?initializeApp(options):initializeApp();
+  auth=getAuth(app);
+  db=getFirestore(app);
+  functions=getFunctions(app,'southamerica-east1');
+  storage=getStorage(app);
 }
-
-auth = getAuth(app);
-db = getFirestore(app);
-functions = getFunctions(app, 'southamerica-east1');
-storage = getStorage(app);
 
 export { app, auth, db, functions, storage };

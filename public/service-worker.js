@@ -1,16 +1,5 @@
-// Service Worker com atualização automática
-// Skip waiting para que atualizações sejam aplicadas imediatamente
-
-self.addEventListener('install', (event) => {
-  // Força o novo Service Worker a assumir imediatamente
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-  // Assume controle de todas as páginas imediatamente
-  event.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', (event) => {
-  // Network-first strategy para garantir conteúdo atualizado
+importScripts('/rota-pwa-caches.js');
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', event => {
+  event.waitUntil(removeRotaCaches().then(()=>self.clients.claim()));
 });

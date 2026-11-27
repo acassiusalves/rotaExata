@@ -23,8 +23,9 @@ function foregroundReceiver(permission: NotificationPermission = 'granted') {
   const shown: { title: string; options: Record<string, any> }[] = [];
   const code = ts.transpileModule(`(${callback})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   const receive = runInNewContext(code, {
-    alive: true, currentUid: { current: 'driver-a' }, userId: 'driver-a',
+    native:false,alive: true, currentUid: { current: 'driver-a' }, userId: 'driver-a',
     toast() {}, permission: () => permission, console,
+    window: { dispatchEvent() {} }, Event,
     navigator: { serviceWorker: { getRegistration: async () => ({
       showNotification: async (title: string, options: Record<string, any>) => { shown.push({ title, options }); },
     }) } },
@@ -33,13 +34,13 @@ function foregroundReceiver(permission: NotificationPermission = 'granted') {
 }
 
 // Execute the shipped worker with no network imports and no open windows.
-function closedAppWorker() {
+function closedAppWorker(windows: any[] = [], overrides:Record<string,unknown>={}) {
   const handlers = new Map<string, (event: any) => void>();
   const opened: string[] = [];
   const shown: { title: string; options: Record<string, any> }[] = [];
   let background: (payload: any) => Promise<void>;
   const clients = {
-    matchAll: async () => [],
+    matchAll: async () => windows,
     openWindow: async (url: string) => { opened.push(url); },
     claim: async () => {},
   };
@@ -49,8 +50,11 @@ function closedAppWorker() {
       location: { origin: 'https://example.test' }, clients,
       registration: { showNotification: async (title: string, options: Record<string, any>) => { shown.push({ title, options }); } },
     },
-    clients, importScripts() {}, console: { log() {} },
+    clients, URL, importScripts() {}, console: { log() {} },
+    readRotaPushGrant:async()=>undefined,flushRotaPushRevocations:async()=>{},
+    fetch:async()=>({ok:true,json:async()=>({native:false})}),
     firebase: { initializeApp() {}, messaging: () => ({ onBackgroundMessage: (handler: typeof background) => { background = handler; } }) },
+    ...overrides,
   });
   return {
     opened, shown,
@@ -103,4 +107,50 @@ test('permissão negada não tenta criar notificação de sistema', async () => 
   const foreground = foregroundReceiver('denied');
   await foreground.receive({ data: { routeId: 'route-a', title: 'Rota alterada' } });
   assert.equal(foreground.shown.length, 0);
+});
+
+test('I8 navega a janela aberta para o destino seguro e depois traz foco',async()=>{
+  const operations:string[]=[];
+  const client={url:'https://example.test/elsewhere',navigate:async(path:string)=>{
+    operations.push(path);return client;
+  },focus:async()=>operations.push('focus')};
+  const worker=closedAppWorker([client]);
+  await worker.click({data:{routeId:'route-open'}});
+  assert.deepEqual(operations,['/my-routes/route-open','focus']);
+  await worker.click({data:{routeId:'//evil'}});
+  assert.deepEqual(operations.slice(2),['/driver/notifications','focus']);
+});
+
+test('I7 worker fechado ignora push vinculado sem prova local ou com sessão revogada',async()=>{
+  const worker=closedAppWorker([],{
+    fetch:async()=>({ok:false}),
+    readRotaPushGrant:async()=>({id:'binding-a',proof:'proof-a'}),
+  });
+  await worker.receiveBackground({data:{boundPush:'1',bindingId:'binding-a',deliveryId:'delivery-a',title:'private'}});
+  assert.equal(worker.shown.length,0);
+});
+
+test('I7 entrega atrasada de A não é aberta por B nem exibida após revogação',async()=>{
+  let grant={id:'binding-a',proof:'proof-a'};
+  let valid=true;
+  const worker=closedAppWorker([],{
+    readRotaPushGrant:async()=>grant,
+    fetch:async (_url:string,options:RequestInit)=>{
+      assert.equal(options.redirect,'error');
+      assert.equal(JSON.parse(String(options.body)).proof,'proof-a');
+      return {ok:valid,json:async()=>({routeId:'route-a'})};
+    },
+  });
+  const payload={data:{boundPush:'1',bindingId:'binding-a',deliveryId:'delivery-a',body:'private'}};
+  await worker.receiveBackground(payload);
+  assert.equal(worker.shown.length,1);
+  assert.doesNotMatch(worker.shown[0].options.body,/private/);
+  valid=false;
+  await worker.receiveBackground(payload);
+  assert.equal(worker.shown.length,1);
+  grant={id:'binding-b',proof:'proof-b'};
+  await worker.click(worker.shown[0].options);
+  await worker.receiveBackground(payload);
+  assert.deepEqual(worker.opened,[]);
+  assert.equal(worker.shown.length,1);
 });

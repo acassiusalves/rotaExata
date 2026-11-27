@@ -1,3 +1,4 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { NextResponse } from "next/server";
 import { getGoogleMapsApiKey } from '@/lib/firebase/admin';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
@@ -15,6 +16,7 @@ interface RouteResult {
 const CACHE_TTL = 300;
 
 export async function POST(req: Request) {
+  if (nativeStaffEnabled) return NextResponse.json({error:'rota_staff_native_required'},{status:410});
   try {
     // Rate limiting
     const clientIP = getClientIP(req);

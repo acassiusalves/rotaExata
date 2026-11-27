@@ -5,25 +5,30 @@ import * as React from 'react';
 import { X, Navigation, Share2, Copy, Check, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RouteMap } from '@/components/maps/RouteMap';
-import { doc, Timestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import dynamic from 'next/dynamic';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { usePathname } from 'next/navigation';
+import type { Timestamp } from 'firebase/firestore';
+import { useStaff } from '@/components/staff/staff-session';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { collectStaffPages,staffPageUrl } from '@/lib/staff/query-pages';
+import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo, DriverLocation, DriverLocationWithInfo } from '@/lib/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogHeader } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { format, startOfDay, endOfDay } from 'date-fns';
-import { setDoc, serverTimestamp } from 'firebase/firestore';
 
 export type RouteDocument = RouteInfo & {
   id: string;
   name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
   driverInfo: {
     name: string;
-    vehicle: { type: string, plate: string };
+    vehicle: string | { type: string, plate: string };
+    plate?:string;
   } | null;
-  plannedDate: Timestamp;
+  plannedDate: Timestamp | Date;
+  driverId?:string;
   origin: PlaceValue;
 };
 
@@ -41,102 +46,42 @@ interface RouteMapDialogProps {
     route: RouteDocument;
 }
 
-export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
-  const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
-  const [driverLocations, setDriverLocations] = React.useState<DriverLocationWithInfo[]>([]);
-  const [currentStopIndex, setCurrentStopIndex] = React.useState<number>(0);
+const LegacyRouteMapDialog=dynamic(()=>import('./legacy-route-map-dialog').then(module=>module.RouteMapDialog),{ssr:false});
+
+export function RouteMapDialog(props:RouteMapDialogProps) {
+  if (!nativeStaffEnabled) return <LegacyRouteMapDialog {...props} />;
+  return <StaffRouteMapDialog {...props} />;
+}
+
+function StaffRouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) {
   const [copied, setCopied] = React.useState(false);
-  const [allRoutes, setAllRoutes] = React.useState<RouteDocument[]>([]);
   const [routeVisibility, setRouteVisibility] = React.useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
-  // Load all routes from the same date
-  React.useEffect(() => {
-    if (!route?.plannedDate || !isOpen) return;
-
-    const loadRoutesFromSameDay = async () => {
-      try {
-        const routeDate = route.plannedDate.toDate();
-        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
-        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
-
-        const q = query(
-          collection(db, 'routes'),
-          where('plannedDate', '>=', dayStart),
-          where('plannedDate', '<=', dayEnd)
-        );
-
-        const querySnapshot = await getDocs(q);
-        const routes: RouteDocument[] = [];
-        const visibility: Record<string, boolean> = {};
-
-        querySnapshot.forEach((doc) => {
-          const routeData = {
-            id: doc.id,
-            ...doc.data(),
-          } as RouteDocument;
-
-          routes.push(routeData);
-          // Main route visible, others hidden by default
-          visibility[doc.id] = doc.id === route.id;
-        });
-
-        setAllRoutes(routes);
-        setRouteVisibility(visibility);
-      } catch (error) {
-        console.error('Error loading routes from same day:', error);
-      }
-    };
-
-    loadRoutesFromSameDay();
-  }, [route?.id, route?.plannedDate, isOpen]);
-
-  // Subscribe to real-time updates for the main route
-  React.useEffect(() => {
-    if (!route?.id || !isOpen) {
-      setDriverLocation(null);
-      setDriverLocations([]);
-      return;
-    }
-
-    const routeRef = doc(db, 'routes', route.id);
-    const unsubscribe = onSnapshot(routeRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        if (data.currentLocation && data.driverInfo && data.driverId) {
-          const location = data.currentLocation;
-          const timestamp = location.timestamp?.toDate?.() || new Date();
-
-          // Update singular driverLocation (for backward compatibility)
-          setDriverLocation(location as DriverLocation);
-
-          // Also add to driverLocations array so it has InfoWindow with refresh button
-          const driverLocationWithInfo: DriverLocationWithInfo = {
-            driverId: data.driverId,
-            driverName: data.driverInfo.name,
-            lat: location.lat,
-            lng: location.lng,
-            accuracy: location.accuracy || 0,
-            heading: location.heading,
-            speed: location.speed,
-            timestamp,
-          };
-
-          setDriverLocations([driverLocationWithInfo]);
-        } else {
-          setDriverLocations([]);
-        }
-
-        if (data.currentStopIndex !== undefined) {
-          setCurrentStopIndex(data.currentStopIndex);
-        }
-      }
+  const {request}=useStaff();
+  const path=usePathname();
+  const view=path==='/routes/monitoring' ? 'monitor':path==='/history/motorista' ? 'driver-history':'history';
+  const routeId=route.id;
+  const load=React.useCallback(async(signal:AbortSignal)=>{
+    if (!isOpen) return null;
+    let selected:RouteDocument|undefined;
+    const endpoint='/api/staff/routes/'+encodeURIComponent(routeId)+'/map?view='+view;
+    const routes=await collectStaffPages<RouteDocument>(async cursor=>{
+      const page=await request<{selected:RouteDocument;routes:RouteDocument[];cursor:string|null}>(staffPageUrl(endpoint,cursor),{signal});
+      selected ??= page.selected;
+      return {items:page.routes,cursor:page.cursor};
     });
+    return selected ? staffRouteDates<{selected:RouteDocument;routes:RouteDocument[]}>({selected,routes}):null;
+  },[request,isOpen,routeId,view]);
+  const {data,error}=useStaffQuery(load,8000);
+  const current=data?.selected.id===routeId ? data.selected:route;
+  const allRoutes=data?.selected.id===routeId ? data.routes:[route];
+  const driverLocation:DriverLocation|null=current.currentLocation ?? null;
+  const driverLocations:DriverLocationWithInfo[]=driverLocation && current.driverId && current.driverInfo ?
+    [{...driverLocation,driverId:current.driverId,driverName:current.driverInfo.name}]:[];
+  const currentStopIndex=current.currentStopIndex ?? 0;
 
-    return () => {
-      unsubscribe();
-    };
-  }, [route?.id, isOpen]);
+  React.useEffect(()=>setRouteVisibility({[routeId]:true}),[routeId]);
 
   const handleCopyTrackingLink = async () => {
     const trackingUrl = `${window.location.origin}/track/${route.id}`;
@@ -146,7 +91,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
       setCopied(true);
       toast({
         title: 'Link copiado!',
-        description: 'O link de rastreamento foi copiado para a área de transferência.',
+        description: 'Copiamos o link de acompanhamento interno. A conta precisa ter acesso à rota.',
       });
 
       setTimeout(() => setCopied(false), 2000);
@@ -166,8 +111,8 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `Rastreamento: ${route.name}`,
-          text: `Acompanhe sua entrega em tempo real`,
+          title: `Acompanhamento interno: ${route.name}`,
+          text: 'Entre com uma conta autorizada no RotaExata.',
           url: trackingUrl,
         });
       } catch (err) {
@@ -188,11 +133,8 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
 
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
-      const requestRef = doc(db, 'locationUpdateRequests', driverId);
-      await setDoc(requestRef, {
-        driverId,
-        requestedAt: serverTimestamp(),
-        status: 'pending',
+      await request('/api/staff/routes/'+encodeURIComponent(routeId)+'/location',{
+        method:'POST',body:JSON.stringify({driverId,view:'monitor'}),
       });
       toast({
         title: 'Atualização solicitada',
@@ -242,7 +184,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                         </Avatar>
                         <div>
                             <h1 className="text-base font-bold leading-none">{route.driverInfo?.name}</h1>
-                            <p className="text-xs font-mono uppercase text-gray-300">{route.driverInfo?.vehicle.plate}</p>
+                            <p className="text-xs font-mono uppercase text-gray-300">{typeof route.driverInfo?.vehicle==='object' ? route.driverInfo.vehicle.plate : route.driverInfo?.plate}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -253,7 +195,7 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                             onClick={handleShareTrackingLink}
                         >
                             <Share2 className="h-4 w-4 mr-2" />
-                            Compartilhar
+                            Compartilhar link interno
                         </Button>
                         <Button
                             variant="ghost"
@@ -284,6 +226,8 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                         </Badge>
                     )}
                 </div>
+
+                {!!error && <p role="status" className="absolute bottom-4 left-4 z-10 rounded bg-background p-2">Não foi possível atualizar o mapa.</p>}
 
                 {/* Routes list with visibility toggles */}
                 {allRoutes.length > 1 && (
@@ -323,9 +267,9 @@ export function RouteMapDialog({ isOpen, onClose, route }: RouteMapDialogProps) 
                     height={-1}
                     origin={route.origin}
                     routes={mapRoutes}
-                    driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : undefined}
+                    driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading ?? undefined } : undefined}
                     driverLocations={driverLocations}
-                    onRefreshDriverLocation={handleRefreshDriverLocation}
+                    onRefreshDriverLocation={view==='monitor' ? handleRefreshDriverLocation:undefined}
                 />
             </div>
         </DialogContent>

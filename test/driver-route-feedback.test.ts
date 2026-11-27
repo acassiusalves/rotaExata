@@ -11,8 +11,8 @@ for (const page of pages) for (const outcome of ['skipped_no_token', 'failed', '
     const context = {
       routeData: {}, getRoute: () => route, getRouteDisplayName: () => 'Rota', getExistingRouteId: () => 'route-a',
       setIsSaving() {}, assignedDrivers: {}, availableDrivers: [], user: null, getPersistedStops: () => route.stops,
-      saveExistingRoutePlansAtomically: async () => [{ routeId: 'route-a', stops: route.stops, changes: [{}], status: 'dispatched', driverId: 'a' }],
-      applySavedRouteResult() {}, functions: {}, httpsCallable: () => async () => ({ data: { push: { outcome } } }),
+      saveExistingRoutePlansAtomically: async () => [{ routeId: 'route-a', stops: route.stops, changes: [{}], status: 'dispatched', driverId: 'a', noticeId: 'notice-a' }],
+      applySavedRouteResult() {}, native:true, sendNotice: async (id:string) => { assert.equal(id,'notice-a'); return {push:{outcome}}; },
       toast: (notice: { description: string }) => notices.push(notice), console: { error() {} }, RouteStructureConflictError: class extends Error {},
     };
     const actions = load(page, ['notifySavedRouteChanges', 'handleUpdateExistingRoute'], context);
@@ -27,7 +27,8 @@ for (const page of pages) for (const outcome of ['skipped_no_token', 'failed', '
 test('impersonação não marca aviso como aberto no consumidor real', async () => {
   let writes = 0;
   const actions = load('src/app/(driver)/driver/notifications/page.tsx', ['handleMarkAsOpened'], {
-    isImpersonationSessionActive: () => true, updateDoc: async () => { writes++; }, doc: () => ({}), db: {}, serverTimestamp: () => 1, console,
+    readOnly: true, request: () => {}, endpoint: '/api/driver/legacy-runtime',
+    driverCommand: async () => { writes++; }, refresh() {}, window: { dispatchEvent() {} }, Event,
   });
   await actions.handleMarkAsOpened('notice-a', false);
   assert.equal(writes, 0);

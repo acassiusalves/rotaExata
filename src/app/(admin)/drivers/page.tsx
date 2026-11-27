@@ -1,491 +1,92 @@
 'use client';
 
-import * as React from 'react';
-import { PlusCircle, RefreshCw } from 'lucide-react';
+import { useCallback,useEffect,useState } from 'react';
+import Link from 'next/link';
+import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
 import { DriverTableSkeleton } from '@/components/skeletons/table-skeleton';
-import {
-  Card,
-  CardContent,
-} from '@/components/ui/card';
-import { db } from '@/lib/firebase/client';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Driver, DriverStatus } from '@/lib/types';
 import { DriverTable } from '@/components/drivers/driver-table';
-import { AddDriverDialog } from '@/components/drivers/add-driver-dialog';
-import { DeleteDriverDialog } from '@/components/drivers/delete-driver-dialog';
-import { ForceLogoutDialog } from '@/components/drivers/force-logout-dialog';
-import { ImpersonateDriverDialog } from '@/components/drivers/impersonate-driver-dialog';
+import { DriverSupportStatementDialog } from '@/components/drivers/driver-support-statement-dialog';
+import { DriverAssistDialog } from '@/components/drivers/driver-assist-dialog';
 import { DriverDetailsDialog } from '@/components/drivers/driver-details-dialog';
 import { EditDriverDialog } from '@/components/drivers/edit-driver-dialog';
-import { ResetPasswordDialog } from '@/components/drivers/reset-password-dialog';
+import { staffDriverAssignments,type StaffDriverAssignment } from '@/lib/staff/driver-assignments';
+import { loadStaffPageList } from '@/lib/staff/query-pages';
+import { useStaff } from '@/components/staff/staff-session';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { StaffRefreshNotice } from '@/components/staff/staff-refresh-notice';
 import { useToast } from '@/hooks/use-toast';
-import { functions } from '@/lib/firebase/client';
-import { httpsCallable } from 'firebase/functions';
+import type { Driver } from '@/lib/types';
 
-const ACTIVE_DRIVER_ROUTE_STATUSES = [
-  'draft',
-  'pending',
-  'organizing',
-  'dispatched',
-  'in_progress',
-  'partial',
-] as const;
-
-type DriverPendingSummary = {
-  pendingAssignmentsCount: number;
-  pendingServicesCount: number;
-  pendingStandaloneRoutesCount: number;
-  pendingRoutesCount: number;
-  pendingServiceCodes: string[];
-  pendingStandaloneRouteCodes: string[];
-};
-
-const EMPTY_PENDING_SUMMARY: DriverPendingSummary = {
-  pendingAssignmentsCount: 0,
-  pendingServicesCount: 0,
-  pendingStandaloneRoutesCount: 0,
-  pendingRoutesCount: 0,
-  pendingServiceCodes: [],
-  pendingStandaloneRouteCodes: [],
-};
-
-function getEffectiveDriverStatus(
-  rawStatus: DriverStatus,
-  lastSeenAt: Date,
-  pendingAssignmentsCount: number
-): DriverStatus {
-  const isMissingHeartbeat = !lastSeenAt || lastSeenAt.getTime() === 0;
-  const heartbeatAgeMs = Date.now() - lastSeenAt.getTime();
-  const isStale = heartbeatAgeMs > 2 * 60 * 1000;
-
-  if (rawStatus === 'offline' || isMissingHeartbeat || isStale) {
-    return 'offline';
-  }
-
-  if (pendingAssignmentsCount > 0) {
-    return 'busy';
-  }
-
-  return rawStatus === 'available' ? 'available' : 'online';
-}
+type WireDriver=Omit<Driver,'lastSeenAt'> & {lastSeenAt:string|null;revision:string};
+type StaffDriver=Driver & {revision:string};
 
 export default function DriversPage() {
-  const [rawDrivers, setRawDrivers] = React.useState<Driver[]>([]);
-  const [pendingByDriver, setPendingByDriver] = React.useState<Record<string, DriverPendingSummary>>({});
-  const [isDriversLoading, setIsDriversLoading] = React.useState(true);
-  const [isPendingLoading, setIsPendingLoading] = React.useState(true);
-  const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
-  const [isDeleting, setIsDeleting] = React.useState(false);
-  const [driverToDelete, setDriverToDelete] = React.useState<Driver | null>(null);
-  const [isLoggingOut, setIsLoggingOut] = React.useState(false);
-  const [driverToLogout, setDriverToLogout] = React.useState<Driver | null>(null);
-  const [isResettingPassword, setIsResettingPassword] = React.useState(false);
-  const [driverToResetPassword, setDriverToResetPassword] = React.useState<Driver | null>(null);
-  const [isImpersonating, setIsImpersonating] = React.useState(false);
-  const [driverToImpersonate, setDriverToImpersonate] = React.useState<Driver | null>(null);
-  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
-  const [driverDetailsId, setDriverDetailsId] = React.useState<string | null>(null);
-  const [driverToEditId, setDriverToEditId] = React.useState<string | null>(null);
-  const { toast } = useToast();
-  const isLoading = isDriversLoading || isPendingLoading;
+  const {request,paths,role,userId,scopeId,revision,policyRevision,rotaPolicyRevision}=useStaff();
+  const canViewEarnings=role==='admin' && paths.includes('/drivers') && paths.includes('/financeiro/pagamentos');
+  // Mesma regra do servidor para `driver:operate`: página Motoristas + admin ou sócio.
+  const canOperate=(role==='admin' || role==='socio') && paths.includes('/drivers');
+  const [assistTarget,setAssistTarget]=useState<{id:string;name:string}|null>(null);
+  const [supportTarget,setSupportTarget]=useState<Driver|null>(null);
+  const supportSession=JSON.stringify([userId,scopeId,revision,policyRevision,rotaPolicyRevision]);
+  useEffect(()=>{setSupportTarget(null);},[supportSession,canViewEarnings]);
+  const {toast}=useToast();
+  const [isRefreshing,setIsRefreshing]=useState(false);
+  const [detailsId,setDetailsId]=useState<string|null>(null);
+  const [edited,setEdited]=useState<StaffDriver|null>(null);
+  const load=useCallback(async(signal:AbortSignal)=>{
+    const [drivers,assignments]=await Promise.all([
+      loadStaffPageList<WireDriver,'drivers'>(request,'/api/staff/drivers','drivers',signal),
+      loadStaffPageList<StaffDriverAssignment,'assignments'>(request,'/api/staff/drivers?view=assignments','assignments',signal),
+    ]);
+    const counts=staffDriverAssignments(drivers,assignments);
+    return drivers.map(driver=>({...driver,...counts.get(driver.id),lastSeenAt:new Date(driver.lastSeenAt ?? 0)}));
+  },[request]);
+  const {data,error,loading,refresh}=useStaffQuery(load);
+  const rows=data ?? [];
+  const details=rows.find(row=>row.id===detailsId) ?? null;
 
-  const drivers = React.useMemo(() => {
-    return rawDrivers.map((driver) => {
-      const pendingSummary = pendingByDriver[driver.id] || EMPTY_PENDING_SUMMARY;
-      const rawStatus = driver.rawStatus || driver.status || 'offline';
-
-      return {
-        ...driver,
-        rawStatus,
-        status: getEffectiveDriverStatus(rawStatus, driver.lastSeenAt, pendingSummary.pendingAssignmentsCount),
-        ...pendingSummary,
-      };
-    });
-  }, [pendingByDriver, rawDrivers]);
-
-  const driverToView = React.useMemo(
-    () => drivers.find((driver) => driver.id === driverDetailsId) || null,
-    [driverDetailsId, drivers]
-  );
-
-  const driverToEdit = React.useMemo(
-    () => drivers.find((driver) => driver.id === driverToEditId) || null,
-    [driverToEditId, drivers]
-  );
-
-  React.useEffect(() => {
-    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const driversData: Driver[] = [];
-
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-
-          driversData.push({
-            id: doc.id,
-            name: data.displayName || data.name || 'Motorista sem nome',
-            phone: data.phone || 'N/A',
-            email: data.email,
-            status: data.status || 'offline',
-            rawStatus: data.status || 'offline',
-            vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
-            lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
-            totalDeliveries: data.totalDeliveries || 0,
-            rating: data.rating || 0,
-            avatarUrl: data.photoURL,
-            deviceInfo: data.deviceInfo || undefined,
-          });
-        });
-
-        setRawDrivers(driversData);
-        setIsDriversLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching drivers: ', error);
-        setIsDriversLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  React.useEffect(() => {
-    const q = query(
-      collection(db, 'routes'),
-      where('status', 'in', [...ACTIVE_DRIVER_ROUTE_STATUSES])
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const nextPendingByDriver: Record<string, {
-          serviceIds: Set<string>;
-          serviceCodes: Set<string>;
-          standaloneRouteIds: Set<string>;
-          standaloneRouteCodes: Set<string>;
-          pendingRoutesCount: number;
-        }> = {};
-
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          const driverId = data.driverId;
-
-          if (!driverId) {
-            return;
-          }
-
-          if (!nextPendingByDriver[driverId]) {
-            nextPendingByDriver[driverId] = {
-              serviceIds: new Set(),
-              serviceCodes: new Set(),
-              standaloneRouteIds: new Set(),
-              standaloneRouteCodes: new Set(),
-              pendingRoutesCount: 0,
-            };
-          }
-
-          const driverPending = nextPendingByDriver[driverId];
-          driverPending.pendingRoutesCount += 1;
-
-          if (data.serviceId) {
-            driverPending.serviceIds.add(data.serviceId);
-            if (data.serviceCode) {
-              driverPending.serviceCodes.add(data.serviceCode);
-            }
-          } else {
-            driverPending.standaloneRouteIds.add(doc.id);
-            if (data.code) {
-              driverPending.standaloneRouteCodes.add(data.code);
-            }
-          }
-        });
-
-        const normalizedPendingByDriver = Object.fromEntries(
-          Object.entries(nextPendingByDriver).map(([driverId, summary]) => {
-            const pendingServicesCount = summary.serviceIds.size;
-            const pendingStandaloneRoutesCount = summary.standaloneRouteIds.size;
-
-            return [
-              driverId,
-              {
-                pendingAssignmentsCount: pendingServicesCount + pendingStandaloneRoutesCount,
-                pendingServicesCount,
-                pendingStandaloneRoutesCount,
-                pendingRoutesCount: summary.pendingRoutesCount,
-                pendingServiceCodes: Array.from(summary.serviceCodes).sort(),
-                pendingStandaloneRouteCodes: Array.from(summary.standaloneRouteCodes).sort(),
-              } satisfies DriverPendingSummary,
-            ];
-          })
-        );
-
-        setPendingByDriver(normalizedPendingByDriver);
-        setIsPendingLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching pending routes for drivers:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao carregar pendências',
-          description: 'Não foi possível consolidar as pendências dos motoristas.',
-        });
-        setIsPendingLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [toast]);
-  
-  const handleDeleteDriver = async () => {
-    if (!driverToDelete) return;
-    setIsDeleting(true);
-
+  async function updatePresence() {
+    setIsRefreshing(true);
     try {
-      const deleteUserFn = httpsCallable(functions, 'deleteUser');
-      await deleteUserFn({ uid: driverToDelete.id });
+      const {updated}=await request<{updated:number}>('/api/staff/drivers/cleanup',{method:'POST'});
+      refresh();
+      toast({title:'Status atualizado',description:updated ?
+        updated+' motorista(s) marcado(s) como offline.':'Nenhum motorista precisava de atualização.'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível atualizar o status'});
+    } finally {setIsRefreshing(false);}
+  }
 
-      toast({
-        title: 'Motorista Removido!',
-        description: `O motorista ${driverToDelete.name} foi removido com sucesso.`,
-      });
-
-      setDriverToDelete(null); // Close dialog
-    } catch (error: any) {
-      console.error('Error deleting driver:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Remover',
-        description: error.message || 'Não foi possível remover o motorista.',
-      });
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleForceLogout = async () => {
-    if (!driverToLogout) return;
-    setIsLoggingOut(true);
-
-    try {
-      const forceLogoutFn = httpsCallable(functions, 'forceLogoutDriver');
-      await forceLogoutFn({ uid: driverToLogout.id });
-
-      toast({
-        title: 'Motorista Deslogado!',
-        description: `O motorista ${driverToLogout.name} foi deslogado com sucesso.`,
-      });
-
-      setDriverToLogout(null);
-    } catch (error: any) {
-      console.error('Error forcing logout:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Deslogar',
-        description: error.message || 'Não foi possível deslogar o motorista.',
-      });
-    } finally {
-      setIsLoggingOut(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    if (!driverToResetPassword) return;
-    setIsResettingPassword(true);
-
-    try {
-      const resetUserPasswordFn = httpsCallable<
-        { uid: string },
-        { ok: boolean; temporaryPassword: string; message: string }
-      >(functions, 'resetUserPassword');
-
-      const result = await resetUserPasswordFn({ uid: driverToResetPassword.id });
-      const temporaryPassword = result.data.temporaryPassword || '123456';
-
-      toast({
-        title: 'Senha resetada!',
-        description: `Senha temporária: ${temporaryPassword}. O motorista deverá criar uma nova senha no próximo acesso.`,
-      });
-
-      setDriverToResetPassword(null);
-    } catch (error: any) {
-      console.error('Error resetting driver password:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Resetar Senha',
-        description: error.message || 'Não foi possível resetar a senha do motorista.',
-      });
-    } finally {
-      setIsResettingPassword(false);
-    }
-  };
-
-  const handleRefreshStatus = async () => {
-    setIsRefreshingStatus(true);
-
-    try {
-      const forceCleanupFn = httpsCallable<void, { ok: boolean; updated: number; message: string }>(
-        functions,
-        'forceCleanupOfflineDrivers'
-      );
-      const result = await forceCleanupFn();
-
-      toast({
-        title: 'Status Atualizado!',
-        description: result.data.message,
-      });
-    } catch (error: any) {
-      console.error('Error refreshing status:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Atualizar',
-        description: error.message || 'Não foi possível atualizar o status dos motoristas.',
-      });
-    } finally {
-      setIsRefreshingStatus(false);
-    }
-  };
-
-  const handleImpersonate = async () => {
-    if (!driverToImpersonate) return;
-
-    const newWindow = window.open('', '_blank');
-
-    if (!newWindow) {
-      toast({
-        variant: 'destructive',
-        title: 'Popup Bloqueado',
-        description: 'Por favor, permita popups para este site e tente novamente.',
-      });
-      return;
-    }
-
-    newWindow.document.write(`
-      <title>Abrindo modo teste...</title>
-      <body style="font-family: sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; color:#111827;">
-        <div>Preparando o modo teste do motorista...</div>
-      </body>
-    `);
-    newWindow.document.close();
-
-    setIsImpersonating(true);
-
-    try {
-      const generateTokenFn = httpsCallable<
-        { driverId: string },
-        { ok: boolean; token: string; driverName: string; driverEmail: string; expiresAt: string }
-      >(functions, 'generateDriverImpersonationToken');
-
-      const result = await generateTokenFn({ driverId: driverToImpersonate.id });
-
-      // Abrir nova aba com a página de impersonação
-      const impersonateUrl = `/impersonate-driver?token=${encodeURIComponent(result.data.token)}&driverId=${encodeURIComponent(driverToImpersonate.id)}&driverName=${encodeURIComponent(result.data.driverName)}`;
-      newWindow.location.href = impersonateUrl;
-
-      toast({
-        title: 'Modo Teste Ativado!',
-        description: `Abrindo interface do motorista ${result.data.driverName} em nova aba.`,
-      });
-
-      setDriverToImpersonate(null);
-    } catch (error: any) {
-      console.error('Error generating impersonation token:', error);
-      newWindow.close();
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao Gerar Token',
-        description: error.message || 'Não foi possível gerar o token de impersonação.',
-      });
-    } finally {
-      setIsImpersonating(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">Motoristas</h2>
-            <p className="text-muted-foreground">
-              Gerencie sua equipe de motoristas.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleRefreshStatus}
-              disabled={isRefreshingStatus}
-            >
-              <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
-              {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
-            </Button>
-            <Button onClick={() => setIsAddDialogOpen(true)}>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Adicionar Motorista
-            </Button>
-          </div>
-        </div>
-        <Card>
-          <CardContent className="pt-6">
-            {isLoading ? (
-              <DriverTableSkeleton />
-            ) : (
-              <DriverTable
-                drivers={drivers}
-                onViewDetailsClick={(driver) => setDriverDetailsId(driver.id)}
-                onEditClick={(driver) => setDriverToEditId(driver.id)}
-                onDeleteClick={(driver) => setDriverToDelete(driver)}
-                onForceLogoutClick={(driver) => setDriverToLogout(driver)}
-                onResetPasswordClick={(driver) => setDriverToResetPassword(driver)}
-                onImpersonateClick={(driver) => setDriverToImpersonate(driver)}
-              />
-            )}
-          </CardContent>
-        </Card>
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="text-3xl font-bold tracking-tight">Motoristas</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={()=>void updatePresence()} disabled={isRefreshing}>
+          <RefreshCw className={isRefreshing?'mr-2 size-4 animate-spin':'mr-2 size-4'} />
+          {isRefreshing?'Atualizando…':'Atualizar status'}
+        </Button>
+        {paths.includes('/driver/admin/accounts') && <Button asChild>
+          <Link href="/driver/admin/accounts#novo-motorista">Cadastrar e gerenciar contas</Link>
+        </Button>}
       </div>
-      <AddDriverDialog isOpen={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} />
-      <DeleteDriverDialog
-        isOpen={!!driverToDelete}
-        onClose={() => setDriverToDelete(null)}
-        onConfirm={handleDeleteDriver}
-        driverName={driverToDelete?.name}
-        isDeleting={isDeleting}
-      />
-      <ForceLogoutDialog
-        isOpen={!!driverToLogout}
-        onClose={() => setDriverToLogout(null)}
-        onConfirm={handleForceLogout}
-        driverName={driverToLogout?.name}
-        isLoading={isLoggingOut}
-      />
-      <ResetPasswordDialog
-        isOpen={!!driverToResetPassword}
-        onClose={() => setDriverToResetPassword(null)}
-        onConfirm={handleResetPassword}
-        driverName={driverToResetPassword?.name}
-        driverEmail={driverToResetPassword?.email}
-        isLoading={isResettingPassword}
-      />
-      <ImpersonateDriverDialog
-        isOpen={!!driverToImpersonate}
-        onClose={() => setDriverToImpersonate(null)}
-        onConfirm={handleImpersonate}
-        driverName={driverToImpersonate?.name || ''}
-        isLoading={isImpersonating}
-      />
-      <DriverDetailsDialog
-        isOpen={!!driverToView}
-        onClose={() => setDriverDetailsId(null)}
-        driver={driverToView}
-      />
-      <EditDriverDialog
-        isOpen={!!driverToEdit}
-        onClose={() => setDriverToEditId(null)}
-        driver={driverToEdit}
-      />
-    </>
-  );
+    </div>
+    {data && !!error && <StaffRefreshNotice retry={refresh} />}
+    <Card><CardContent className="pt-6">
+      {error && !data ? <div className="space-y-3">
+        <p role="alert">Não foi possível carregar os motoristas.</p>
+        <Button variant="outline" onClick={refresh}>Tentar novamente</Button>
+      </div> : loading ? <DriverTableSkeleton /> :
+        <DriverTable drivers={rows} onViewDetailsClick={driver=>setDetailsId(driver.id)}
+          onEditClick={driver=>setEdited(rows.find(row=>row.id===driver.id) ?? null)}
+          onViewEarnings={canViewEarnings ? setSupportTarget : undefined}
+          onOpenApp={canOperate ? driver=>setAssistTarget({id:driver.id,name:driver.name}) : undefined} />}
+    </CardContent></Card>
+    {canViewEarnings && supportTarget && <DriverSupportStatementDialog key={supportSession+supportTarget.id}
+      target={supportTarget} onClose={()=>setSupportTarget(null)} />}
+    {canOperate && <DriverAssistDialog driver={assistTarget} onClose={()=>setAssistTarget(null)} />}
+    <DriverDetailsDialog isOpen={!!details} onClose={()=>setDetailsId(null)} driver={details} />
+    <EditDriverDialog isOpen={!!edited} onClose={()=>setEdited(null)} onSaved={refresh} driver={edited} revision={edited?.revision} />
+  </div>;
 }

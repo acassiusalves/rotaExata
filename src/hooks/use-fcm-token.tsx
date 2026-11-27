@@ -1,31 +1,46 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { auth } from '@/lib/firebase/client';
+import { useState,useEffect,useCallback,useRef,useMemo } from 'react';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import {clearDevicePushGrant,persistDevicePushGrant,verifiedDevicePush,type DriverDeviceGrant} from '@/lib/driver/push-device';
+import type { DriverSettings } from '@/lib/driver/runtime-contract';
 import { useToast } from '@/hooks/use-toast';
 import { createPushRegistrar, type PushRegistrationResult } from '@/lib/push-registration';
-import { isPushSupported, requestPushPermission, saveDriverToken, onForegroundNotification, getDriverPushPreference, disableDriverPush } from '@/lib/firebase/messaging';
-import { isImpersonationSessionActive } from '@/lib/impersonation-session';
+import { isPushSupported,requestPushPermission,onForegroundNotification,rememberDriverPushToken,takeDriverPushToken,releaseDriverPushTransport } from '@/lib/driver/push-transport';
 
 const permission = (): NotificationPermission => typeof Notification === 'undefined' ? 'default' : Notification.permission;
-const registrar = createPushRegistrar({
-  isSupported: isPushSupported,
-  getPermission: permission,
-  requestPermission: () => Notification.requestPermission(),
-  getCurrentUid: () => auth.currentUser?.uid ?? null,
-  isImpersonating: isImpersonationSessionActive,
-  getPreference: getDriverPushPreference,
-  getToken: () => requestPushPermission(process.env.NEXT_PUBLIC_VAPID_KEY || ''),
-  saveToken: saveDriverToken,
-  disableToken: disableDriverPush,
-});
 const EVENT = 'rotaexata:push-registration';
 
 export function useFCMToken(userId: string | null, receiveForeground = true) {
+  const {request,endpoint,readOnly,native}=useDriverRuntime();
+  const currentUid=useRef(userId);
+  currentUid.current=userId;
+  const registrar=useMemo(()=>createPushRegistrar({
+    isSupported:isPushSupported,
+    getPermission:permission,
+    requestPermission:()=>Notification.requestPermission(),
+    getCurrentUid:()=>currentUid.current,
+    isImpersonating:()=>readOnly,
+    getPreference:async ()=>{
+      const data=await request<DriverSettings>(driverQuery(endpoint,'preferences'));
+      return {enabled:data.notifications,revision:data.pushRevision};
+    },
+    getToken:()=>requestPushPermission(process.env.NEXT_PUBLIC_VAPID_KEY || ''),
+    saveToken:async (uid,token,meta)=>{
+      const result=await driverCommand<{grant:DriverDeviceGrant|null}>(request,endpoint,{kind:'push-bind',token,...meta});
+      if (native && (!result.grant || !await persistDevicePushGrant(result.grant))) throw new Error('push_session_changed');
+      rememberDriverPushToken(uid,token);
+    },
+    disableToken:async uid=>{
+      await driverCommand(request,endpoint,{kind:'push-disable'});
+      if (native) await clearDevicePushGrant(undefined,false);
+      takeDriverPushToken(uid);
+      await releaseDriverPushTransport().catch(()=>{});
+    },
+  }),[request,endpoint,readOnly,native]);
   const [result, setResult] = useState<PushRegistrationResult>({ state: 'needs_permission', permission: 'default' });
   const [isRegistering, setIsRegistering] = useState(false);
-  const currentUid = useRef(userId);
-  currentUid.current = userId;
   const { toast } = useToast();
 
   const run = useCallback(async (ask: boolean) => {
@@ -37,7 +52,7 @@ export function useFCMToken(userId: string | null, receiveForeground = true) {
     setIsRegistering(false);
     window.dispatchEvent(new CustomEvent(EVENT, { detail: { userId, result: outcome } }));
     return outcome.state === 'enabled';
-  }, [userId]);
+  },[userId,registrar]);
 
   useEffect(() => {
     if (!userId) return;
@@ -57,25 +72,28 @@ export function useFCMToken(userId: string | null, receiveForeground = true) {
   }, [userId, run]);
 
   useEffect(() => {
-    if (!userId || !receiveForeground || isImpersonationSessionActive()) return;
+    if (!userId || !receiveForeground || readOnly) return;
     let alive = true;
     let unsubscribe: (() => void) | undefined;
     void onForegroundNotification(async payload => {
       if (!alive || currentUid.current !== userId) return;
-      const title = payload.data?.title || payload.notification?.title || 'Nova Notificação';
-      const body = payload.data?.body || payload.notification?.body || 'Você tem uma nova mensagem';
+      if (native && (!payload.data || !await verifiedDevicePush(payload.data))) return;
+      if (!alive || currentUid.current!==userId) return;
+      const title = native ? 'RotaExata' : payload.data?.title || payload.notification?.title || 'Nova Notificação';
+      const body = native ? 'Você tem uma atualização. Abra o RotaExata para consultar.' : payload.data?.body || payload.notification?.body || 'Você tem uma nova mensagem';
       toast({ title, description: body, duration: 5000 });
+      window.dispatchEvent(new Event('rotaexata:driver-notification'));
       if (permission() === 'granted') {
         try {
           const registration = await navigator.serviceWorker.getRegistration('/firebase-cloud-messaging-push-scope');
           if (alive && currentUid.current === userId) {
-            await registration?.showNotification(title, { body, icon: '/icons/pwa-192.png', tag: payload.data?.routeId || 'notification', data: payload.data });
+            await registration?.showNotification(title, { body, icon: '/icons/pwa-192.png', tag:native ? 'rota-bound:'+payload.data?.deliveryId : payload.data?.routeId || 'notification', data: payload.data });
           }
         } catch { console.warn('Não foi possível mostrar o aviso de sistema. O aviso continua disponível no app.'); }
       }
     }).then(cleanup => { if (alive) unsubscribe = cleanup; else cleanup(); });
     return () => { alive = false; unsubscribe?.(); };
-  }, [userId, toast, receiveForeground]);
+  },[userId,toast,receiveForeground,readOnly,native]);
 
   return {
     notificationPermission: result.permission,

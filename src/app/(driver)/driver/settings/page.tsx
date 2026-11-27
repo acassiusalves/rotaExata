@@ -5,9 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Bell, Moon, Navigation, Smartphone } from 'lucide-react';
-import { useAuth } from '@/hooks/use-auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import type { DriverSettings as DriverPreferences } from '@/lib/driver/runtime-contract';
 import { useToast } from '@/hooks/use-toast';
 import { useFCMToken } from '@/hooks/use-fcm-token';
 
@@ -19,8 +19,8 @@ interface DriverSettings {
 }
 
 export default function DriverSettingsPage() {
-  const { user, userRole } = useAuth();
-  const { registrationState, requestPermission, isRegistering, disable: disablePush } = useFCMToken(userRole === 'driver' ? user?.uid ?? null : null, false);
+  const {userId,readOnly,assist,request,endpoint}=useDriverRuntime();
+  const { registrationState, requestPermission, isRegistering, disable: disablePush } = useFCMToken(readOnly || assist ? null : userId, false);
   const { toast } = useToast();
   const [settings, setSettings] = React.useState<DriverSettings>({
     notifications: false,
@@ -40,12 +40,9 @@ export default function DriverSettingsPage() {
   // Carregar configurações salvas
   React.useEffect(() => {
     async function loadSettings() {
-      if (!user) return;
-
       try {
-        const settingsDoc = await getDoc(doc(db, 'users', user.uid, 'settings', 'preferences'));
-        if (settingsDoc.exists()) {
-          const data = settingsDoc.data() as DriverSettings;
+        const data=await request<DriverPreferences>(driverQuery(endpoint,'preferences'));
+        {
           setSettings(data);
 
           // Aplicar modo escuro se estiver ativado
@@ -66,16 +63,16 @@ export default function DriverSettingsPage() {
     }
 
     loadSettings();
-  }, [user]);
+  },[request,endpoint]);
 
   // Salvar configurações no Firestore
   const saveSettings = async (newSettings: DriverSettings) => {
-    if (!user) return false;
+    if (readOnly || assist) return false;
 
     try {
-      await setDoc(doc(db, 'users', user.uid, 'settings', 'preferences'), {
-        darkMode: newSettings.darkMode, autoNavigation: newSettings.autoNavigation, keepScreenOn: newSettings.keepScreenOn,
-      }, { merge: true });
+      await driverCommand(request,endpoint,{kind:'settings',
+        darkMode:newSettings.darkMode,autoNavigation:newSettings.autoNavigation,keepScreenOn:newSettings.keepScreenOn,
+      });
       setSettings(newSettings);
       return true;
     } catch (error) {

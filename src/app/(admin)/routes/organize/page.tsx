@@ -1,7 +1,9 @@
 
 'use client';
 
+import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import * as React from 'react';
+import { useRouteEditor, activeRoutes as selectActiveRoutes, eligibleDrivers as selectEligibleDrivers, routeRef as editorRoute, editorTime as serverTimestamp, routesOnDay, editorDate, logLegacyEditorActivity } from '@/components/staff/use-route-editor';
 import {
   Card,
   CardContent,
@@ -13,15 +15,13 @@ import {
 import {
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@/components/ui/tabs';
+import { RoutePlanningTabs } from '@/components/routes/route-planning-tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   List,
   Wand2,
-  User,
   Check,
   Truck,
   Calendar,
@@ -97,22 +97,18 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { RouteTimeline } from '@/components/routes/route-timeline';
-import { optimizeDeliveryRoutes } from '@/ai/flows/optimize-delivery-routes';
 import { useToast } from '@/hooks/use-toast';
+import { commitRoutePoolMove } from '@/components/staff/route-pool-move';
+import { availableRouteStops, getStopIdentityKey, isClosedPlanningRoute, upsertStopInCollection } from '@/lib/route-stop-utils';
+import { editorPlannedStop } from '@/lib/staff/editor-payload';
+import { resolveRoutePlanMetrics } from '@/lib/route-stop-mutations';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { db, functions } from '@/lib/firebase/client';
-import { generateRouteCode } from '@/lib/firebase/route-code';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs, Timestamp, doc, updateDoc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
-import { httpsCallable } from 'firebase/functions';
-import { startOfDay, endOfDay } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { detectRouteChanges, markModifiedStops, createNotification } from '@/lib/route-change-tracker';
-import { logRouteCreated, logRouteDispatched, logPointsCreated, logPointReordered, logPointMovedToRoute, logPointRemovedFromRoute, logPointAddedToRoute, logRouteUpdated, logDriverChanged } from '@/lib/firebase/activity-log';
-import { useAuth } from '@/hooks/use-auth';
 
 
 interface RouteData {
@@ -122,6 +118,8 @@ interface RouteData {
   routeTime: string;
   isExistingRoute?: boolean;
   currentRouteId?: string; // ID da rota atual para filtrar
+  serviceId?: string;
+  serviceCode?: string;
   existingRouteData?: {
     distanceMeters: number;
     duration: string;
@@ -133,29 +131,26 @@ interface RouteData {
   draftRouteId?: string;
 }
 
-const computeRoute = async (
-  origin: PlaceValue,
-  stops: PlaceValue[]
-): Promise<RouteInfo | null> => {
-  if (stops.length === 0) return null;
-  try {
-    const res = await fetch('/api/compute-optimized-route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ origin, stops }),
-    });
-    if (!res.ok) {
-       const errorText = await res.text();
-       console.error('API Error:', errorText);
-       throw new Error(errorText);
-    }
-    const data = await res.json();
-    return { ...data, stops, visible: true }; // Ensure original stops are returned
-  } catch (error) {
-    console.error('Failed to compute route:', error);
-    return null;
-  }
+
+type DraftArrangement = {
+  key: string;
+  name: string;
+  stops: PlaceValue[];
+  info: Pick<RouteInfo, 'distanceMeters' | 'duration' | 'encodedPolyline' | 'color'>;
+  dispatched?: boolean;
 };
+
+function draftArrangementFingerprint(id: string, routes: DraftArrangement[], pool: PlaceValue[]) {
+  const stops = (list: PlaceValue[]) => list.map(stop => {
+    const parsed = editorPlannedStop.safeParse({ ...stop, id: String(stop.id) });
+    return parsed.success ? parsed.data : stop;
+  });
+  const active = routes.filter(route => !route.dispatched).map(({ key, name, stops: items, info }) => ({
+    key, name, stops: stops(items),
+    distanceMeters: info.distanceMeters, duration: info.duration, encodedPolyline: info.encodedPolyline,
+  })).sort((a, b) => a.key.localeCompare(b.key));
+  return JSON.stringify({ id, active, pool: stops(pool) });
+}
 
 const formatDistance = (meters: number) => {
   if (meters === 0) return '0.00';
@@ -434,10 +429,21 @@ const EditableRouteName: React.FC<{
 };
 
 export default function OrganizeRoutePage() {
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, addManualStop, requestLocation:requestDriverLocation, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, code:generateRouteCode, user, draftKey, movePoolStop, sendNotice, native } = useRouteEditor();
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth();
   const [routeData, setRouteData] = React.useState<RouteData | null>(null);
+  const [draftMoveState, setDraftMoveState] = React.useState<'pending' | 'error' | null>(null);
+  const draftMoveVersion = React.useRef(0);
+  const draftWrites = React.useRef<Promise<void>>(Promise.resolve());
+  const savedDraftPlan = React.useRef<string>();
+  const dispatchedDraftKeys = React.useRef(new Set<string>());
+  const draftSourceKeys = React.useRef(new Set<string | null>());
+  const markDraftMove = () => {
+    if (!routeData?.isDraft) return;
+    draftMoveVersion.current++;
+    setDraftMoveState('pending');
+  };
 
   // Check if Google Maps is loaded (RouteMap component loads it)
   const [isMapLoaded, setIsMapLoaded] = React.useState(false);
@@ -471,8 +477,8 @@ export default function OrganizeRoutePage() {
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
-  const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
-  const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+  const [routeNames, setRouteNames] = React.useState<Record<string,string>>({ A: 'Rota 1', B: 'Rota 2' });
+  const [assignedDrivers, setAssignedDrivers] = React.useState<Record<string,string | null>>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [highlightedStops, setHighlightedStops] = React.useState<string[]>([]);
   const [driverLocation, setDriverLocation] = React.useState<{lat: number; lng: number; heading?: number} | null>(null);
@@ -491,10 +497,7 @@ export default function OrganizeRoutePage() {
   }>>([]);
 
   // State for pending edits (reordering within same route)
-  const [pendingEdits, setPendingEdits] = React.useState<{
-    A: PlaceValue[] | null;
-    B: PlaceValue[] | null;
-  }>({ A: null, B: null });
+  const [pendingEdits, setPendingEdits] = React.useState<Record<string, PlaceValue[] | null>>({ A: null, B: null });
 
 
   // State for Add Service Dialog
@@ -610,11 +613,12 @@ export default function OrganizeRoutePage() {
 
   React.useEffect(() => {
     // Fetch available drivers from Firestore
-    const q = query(collection(db, 'users'), where('role', '==', 'driver'));
+    const q = selectEligibleDrivers;
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const driversData: Driver[] = [];
       snapshot.forEach(doc => {
         const data = doc.data();
+        if (!isSourceDriverAssignable(data)) return;
         driversData.push({
           id: doc.id,
           name: data.displayName || data.name || 'Motorista sem nome',
@@ -622,7 +626,7 @@ export default function OrganizeRoutePage() {
           phone: data.phone || 'N/A',
           status: data.status || 'offline',
           vehicle: data.vehicle || { type: 'N/A', plate: 'N/A' },
-          lastSeenAt: data.lastSeenAt?.toDate() || new Date(0),
+          lastSeenAt: editorDate(data.lastSeenAt) || new Date(0),
           totalDeliveries: data.totalDeliveries || 0,
           rating: data.rating || 0,
           avatarUrl: data.photoURL,
@@ -642,10 +646,7 @@ export default function OrganizeRoutePage() {
     }
 
     // Buscar rotas que estão em progresso ou despachadas
-    const routesQuery = query(
-      collection(db, 'routes'),
-      where('status', 'in', ['in_progress', 'dispatched'])
-    );
+    const routesQuery = selectActiveRoutes;
 
     const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
       const locationsMap = new Map<string, DriverLocationWithInfo>();
@@ -715,14 +716,8 @@ export default function OrganizeRoutePage() {
     const loadAdditionalRoutes = async () => {
       try {
         const routeDate = new Date(routeData.routeDate);
-        const dayStart = Timestamp.fromDate(startOfDay(routeDate));
-        const dayEnd = Timestamp.fromDate(endOfDay(routeDate));
 
-        const q = query(
-          collection(db, 'routes'),
-          where('plannedDate', '>=', dayStart),
-          where('plannedDate', '<=', dayEnd)
-        );
+        const q = routesOnDay(routeDate);
 
         const querySnapshot = await getDocs(q);
         const routes: RouteInfo[] = [];
@@ -800,7 +795,7 @@ export default function OrganizeRoutePage() {
       return;
     }
 
-    const routeRef = doc(db, 'routes', routeData.currentRouteId);
+    const routeRef = editorRoute(routeData.currentRouteId);
     const unsubscribe = onSnapshot(routeRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -842,7 +837,8 @@ export default function OrganizeRoutePage() {
   }, [routeData?.isExistingRoute, routeData?.currentRouteId]);
 
   React.useEffect(() => {
-    const storedData = sessionStorage.getItem('newRouteData');
+    const draftId=native ? new URLSearchParams(window.location.search).get('draft'):null;
+    const storedData = draftId ? JSON.stringify({isDraft:true,draftRouteId:draftId}):sessionStorage.getItem(draftKey);
 
     if (storedData) {
       const parsedData: RouteData = JSON.parse(storedData);
@@ -853,7 +849,7 @@ export default function OrganizeRoutePage() {
         const loadRouteFromFirestore = async () => {
           setIsLoading(true);
           try {
-            const routeRef = doc(db, 'routes', parsedData.currentRouteId!);
+            const routeRef = editorRoute(parsedData.currentRouteId!);
             const routeSnap = await getDoc(routeRef);
 
             if (routeSnap.exists()) {
@@ -868,6 +864,7 @@ export default function OrganizeRoutePage() {
                 encodedPolyline: routeData.encodedPolyline,
                 color: routeData.color || parsedData.existingRouteData?.color || '#e60000',
                 visible: true,
+                status: routeData.status,
               });
               setRouteB(null); // Não tem segunda rota
 
@@ -916,7 +913,7 @@ export default function OrganizeRoutePage() {
         const loadDraftFromFirestore = async () => {
           setIsLoading(true);
           try {
-            const draftRef = doc(db, 'routes', parsedData.draftRouteId!);
+            const draftRef = editorRoute(parsedData.draftRouteId!);
             const draftSnap = await getDoc(draftRef);
 
             if (!draftSnap.exists()) {
@@ -931,6 +928,7 @@ export default function OrganizeRoutePage() {
             }
 
             const draftData = draftSnap.data();
+            draftSourceKeys.current = new Set((draftData.stops ?? []).map(getStopIdentityKey));
             console.log('📄 Rascunho carregado do Firestore:', draftData);
 
             // Atualizar routeData com dados do Firestore
@@ -945,8 +943,14 @@ export default function OrganizeRoutePage() {
             setRouteData(updatedRouteData);
 
             // Verificar se já tem rotas organizadas salvas
-            if (draftData.organizedRoutes && draftData.organizedRoutes.length > 0) {
+            if (Array.isArray(draftData.organizedRoutes)) {
               console.log('📊 Restaurando rotas organizadas:', draftData.organizedRoutes.length);
+              dispatchedDraftKeys.current = new Set(draftData.organizedRoutes
+                .filter((entry: DraftArrangement) => entry.dispatched).map((entry: DraftArrangement) => entry.key));
+              const assigned = draftData.organizedRoutes.map((entry: DraftArrangement) => entry.stops);
+              const available = availableRouteStops(draftData.unassignedStops ?? draftData.stops ?? [], assigned);
+              savedDraftPlan.current = draftArrangementFingerprint(draftRef.id, draftData.organizedRoutes, available);
+              setUnassignedStops(available);
 
               // Restaurar rotas salvas
               for (const savedRoute of draftData.organizedRoutes) {
@@ -989,9 +993,8 @@ export default function OrganizeRoutePage() {
               }
 
               // Restaurar nomes das rotas se existirem
-              if (draftData.routeNames) {
-                setRouteNames(draftData.routeNames);
-              }
+              const storedNames = Object.fromEntries(draftData.organizedRoutes.map((item: DraftArrangement) => [item.key, item.name]));
+              setRouteNames(previous => ({ ...previous, ...storedNames, ...draftData.routeNames }));
 
               setIsLoading(false);
             } else {
@@ -1164,42 +1167,28 @@ export default function OrganizeRoutePage() {
   React.useEffect(() => {
     // Funciona tanto para rotas draft quanto para rotas existentes (Lunna)
     const routeId = routeData?.draftRouteId || routeData?.currentRouteId;
-    if (!routeId) return;
+    if (isLoading || !routeId) return;
 
-    const routeRef = doc(db, 'routes', routeId);
+    const routeRef = editorRoute(routeId);
 
     const unsubscribe = onSnapshot(routeRef, (snapshot) => {
       if (!snapshot.exists()) return;
 
       const data = snapshot.data();
-      // Verificar tanto o campo 'stops' quanto 'unassignedStops' do Firestore
-      // O sistema Lunna salva novos pontos em 'unassignedStops'
-      const firestoreStops: PlaceValue[] = data.stops || [];
-      const firestoreUnassignedStops: PlaceValue[] = data.unassignedStops || [];
-      const allFirestoreStops = [...firestoreStops, ...firestoreUnassignedStops];
-
-      // Coletar IDs de todos os stops já carregados na interface
-      const currentStopIds = new Set<string>();
-
-      if (routeA?.stops) {
-        routeA.stops.forEach(s => currentStopIds.add(s.id));
-      }
-      if (routeB?.stops) {
-        routeB.stops.forEach(s => currentStopIds.add(s.id));
-      }
-      dynamicRoutes.forEach(route => {
-        if (route.data?.stops) {
-          route.data.stops.forEach(s => currentStopIds.add(s.id));
-        }
-      });
-      unassignedStops.forEach(s => currentStopIds.add(s.id));
-
-      // Filtrar stops que não estão na interface
-      const newStops = allFirestoreStops.filter(s => !currentStopIds.has(s.id));
+      const persistedPool: PlaceValue[] = data.unassignedStops ?? [];
+      const original: PlaceValue[] = routeData?.isDraft ? data.stops ?? [] : [];
+      const newlyImported = original.filter(stop => !draftSourceKeys.current.has(getStopIdentityKey(stop)));
+      if (routeData?.isDraft) draftSourceKeys.current = new Set(original.map(getStopIdentityKey));
+      const arranged: PlaceValue[][] = Array.isArray(data.organizedRoutes)
+        ? data.organizedRoutes.map((entry: DraftArrangement) => entry.stops) : [];
+      const newStops = availableRouteStops([...newlyImported, ...persistedPool], [
+        ...arranged, routeA?.stops ?? [], routeB?.stops ?? [], unassignedStops,
+        ...dynamicRoutes.map(route => route.data.stops),
+      ]);
 
       if (newStops.length > 0) {
         console.log('📥 Novos stops detectados via Lunna:', newStops.length);
-        setUnassignedStops(prev => [...prev, ...newStops]);
+        setUnassignedStops(prev => [...prev, ...availableRouteStops(newStops, [prev])]);
         toast({
           title: 'Novos pontos adicionados',
           description: `${newStops.length} ponto(s) foram adicionados via Lunna e estão em "Não Alocados"`,
@@ -1210,7 +1199,7 @@ export default function OrganizeRoutePage() {
     });
 
     return () => unsubscribe();
-  }, [routeData?.draftRouteId, routeData?.currentRouteId, routeA, routeB, dynamicRoutes, unassignedStops]);
+  }, [isLoading, routeData?.draftRouteId, routeData?.currentRouteId, routeData?.isDraft, routeA, routeB, dynamicRoutes, unassignedStops]);
 
   const geocodeAddress = React.useCallback(
     (address: string): Promise<PlaceValue | null> => {
@@ -1221,8 +1210,11 @@ export default function OrganizeRoutePage() {
             if (status === 'OK' && results && results[0]) {
               const place = results[0];
               const location = place.geometry.location;
+              const component = (type: string) => place.address_components?.find(part => part.types.includes(type));
               resolve({
                 id: `geocoded-${place.place_id}-${Date.now()}`,
+                city: component('administrative_area_level_2')?.long_name ?? component('locality')?.long_name,
+                state: component('administrative_area_level_1')?.short_name,
                 address: place.formatted_address,
                 placeId: place.place_id,
                 lat: location.lat(),
@@ -1243,20 +1235,21 @@ export default function OrganizeRoutePage() {
   );
 
   const reverseGeocode = React.useCallback(
-    (lat: number, lng: number): Promise<Partial<typeof manualService> | null> => {
+    (lat: number, lng: number): Promise<(Partial<typeof manualService> & { uf?: string }) | null> => {
       return new Promise((resolve) => {
         const geocoder = new google.maps.Geocoder();
         geocoder.geocode({ location: { lat, lng } }, (results, status) => {
           if (status === 'OK' && results && results[0]) {
             const place = results[0];
-            const address: Partial<typeof manualService> = {};
+            const address: Partial<typeof manualService> & { uf?: string } = {};
 
             const get = (type: string) => place.address_components.find(c => c.types.includes(type))?.long_name;
 
             address.rua = get('route');
             address.numero = get('street_number');
             address.bairro = get('sublocality_level_1') || get('political');
-            address.cidade = get('administrative_area_level_2');
+            address.cidade = get('administrative_area_level_2') || get('locality');
+            address.uf = place.address_components.find(c => c.types.includes('administrative_area_level_1'))?.short_name;
             address.cep = get('postal_code');
 
             resolve(address);
@@ -1513,11 +1506,14 @@ export default function OrganizeRoutePage() {
       const addressString = numero
         ? `${rua}, ${numero}, ${bairro}, ${cidade}, ${cep}, Brasil`
         : `${rua}, ${bairro}, ${cidade}, ${cep}, Brasil`;
+      const address = await reverseGeocode(lat, lng);
       geocoded = {
         lat,
         lng,
         address: addressString,
         placeId: stopToEdit.stop.placeId || `manual-${Date.now()}`,
+        city: address?.cidade,
+        state: address?.uf,
       };
     } else {
       // Caso contrário, geocodificar o endereço
@@ -1624,15 +1620,26 @@ export default function OrganizeRoutePage() {
     const geocoded = await geocodeAddress(addressString);
 
     if (geocoded) {
-      const newStop: PlaceValue = {
+      let registeredStop: PlaceValue = {
         ...geocoded,
         id: `manual-${Date.now()}`,
-        address: geocoded.address,
         customerName: manualService.customerName,
         phone: manualService.phone,
         notes: manualService.notes,
-        isNewlyAdded: true, // Marcar como recém-adicionado
       };
+      if (native && routeData?.isDraft && routeData.draftRouteId) {
+        try {
+          registeredStop = await addManualStop(routeData.draftRouteId, registeredStop);
+        } catch {
+          toast({
+            variant: 'destructive',
+            title: 'Serviço não adicionado',
+            description: 'Recarregue o rascunho e tente novamente.',
+          });
+          return;
+        }
+      }
+      const newStop = { ...registeredStop, isNewlyAdded: true };
 
       // Add to selected route or unassigned
       if (selectedRouteForNewService === 'unassigned') {
@@ -1673,7 +1680,7 @@ export default function OrganizeRoutePage() {
           // If this is an existing route, update Firestore so driver app receives the update
           if (routeData.isExistingRoute && routeData.currentRouteId) {
             try {
-              const routeRef = doc(db, 'routes', routeData.currentRouteId);
+              const routeRef = editorRoute(routeData.currentRouteId);
               await updateDoc(routeRef, {
                 stops: newStops,
                 encodedPolyline: newRouteInfo.encodedPolyline,
@@ -1769,6 +1776,8 @@ export default function OrganizeRoutePage() {
 
     const activeRouteKey = active.data.current?.routeKey as string | 'unassigned';
     const overRouteKey = over.data.current?.routeKey as string;
+    if (isClosedPlanningRoute(getRoute(activeRouteKey)?.status) ||
+        isClosedPlanningRoute(getRoute(overRouteKey)?.status)) return;
 
     // Case: Moving from unassigned to a route
     if (activeRouteKey === 'unassigned' && overRouteKey && overRouteKey !== 'unassigned') {
@@ -1779,6 +1788,19 @@ export default function OrganizeRoutePage() {
 
       if (!stopToMove) return;
 
+      if (!stopToMove.lat || !stopToMove.lng) {
+        toast({ variant: 'destructive', title: 'Endereço sem coordenadas',
+          description: 'Edite o endereço do ponto antes de incluí-lo na rota.' });
+        return;
+      }
+
+      if (native && overRouteKey === 'A' && routeData.isExistingRoute && routeData.currentRouteId && targetRoute) {
+        await persistPoolMove('allocate', overRouteKey, routeData.currentRouteId, targetRoute, stopToMove,
+          [...(pendingEdits[overRouteKey] ?? targetRoute.stops), stopToMove], routeData.origin);
+        return;
+      }
+
+      markDraftMove();
       // Remove from unassigned by matching the stop ID
       const stopId = String(stopToMove.id ?? stopToMove.placeId);
       setUnassignedStops(prev => prev.filter(s => String(s.id ?? s.placeId) !== stopId));
@@ -1809,7 +1831,7 @@ export default function OrganizeRoutePage() {
         // Se for uma rota existente, persistir no Firestore
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newTargetStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -1820,7 +1842,7 @@ export default function OrganizeRoutePage() {
 
             // Registrar no activity log
             if (user && targetRoute) {
-              logPointAddedToRoute({
+              logLegacyEditorActivity("logPointAddedToRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: stopToMove.id || stopToMove.placeId,
@@ -1843,8 +1865,8 @@ export default function OrganizeRoutePage() {
 
       const routeName = overRouteKey === 'A' ? routeNames.A : overRouteKey === 'B' ? routeNames.B : dynamicRoutes.find(r => r.key === overRouteKey)?.name || `Rota ${overRouteKey}`;
       toast({
-        title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.${routeData.isExistingRoute ? ' O motorista receberá a atualização.' : ''}`,
+        title: routeData.isDraft ? 'Ponto pendente no rascunho' : 'Serviço adicionado',
+        description: `O serviço foi incluído no planejamento de ${routeName}.`
       });
 
       return;
@@ -1948,10 +1970,10 @@ export default function OrganizeRoutePage() {
           _movedFromRoute: activeRouteKey, // Track which route it came from
           _originalRouteColor: sourceRoute.color, // Preserve original route color
           // Rastreamento de movimentação entre rotas
-          previousRouteId: sourceRoute.currentRouteId,
+          previousRouteId: activeRouteKey === 'A' ? routeData.currentRouteId : undefined,
           previousRouteCode: sourceRoute.code,
           movedFromPointCode: stopToMove.pointCode,
-          movedAt: Timestamp.now(),
+          movedAt: new Date(),
           movedBy: user?.uid,
           movedByName: user?.email || 'Usuário',
         };
@@ -1998,8 +2020,14 @@ export default function OrganizeRoutePage() {
       '#bf07e4', // Roxo - Icone address 4.svg
       '#000000', // Preto - Icone address 5.svg
     ];
-    const nextRouteIndex = dynamicRoutes.length;
-    const nextRouteLetter = String.fromCharCode(67 + nextRouteIndex); // C, D, E, F, etc.
+    const used = new Set([...dispatchedDraftKeys.current, ...dynamicRoutes.map(route => route.key)]);
+    const keys = [
+      ...Array.from({ length: 24 }, (_, index) => String.fromCharCode(67 + index)),
+      ...Array.from({ length: 26 }, (_, index) => 'A' + String.fromCharCode(65 + index)),
+    ];
+    const nextRouteIndex = keys.findIndex(key => !used.has(key));
+    if (nextRouteIndex === -1) return;
+    const nextRouteLetter = keys[nextRouteIndex];
     const color = routeColors[nextRouteIndex % routeColors.length];
 
     const newRoute = {
@@ -2031,10 +2059,9 @@ export default function OrganizeRoutePage() {
     }
 
     // Verificar se temos pelo menos uma rota para persistir
-    if (!routeA && !routeB && dynamicRoutes.length === 0) {
-      return;
-    }
+    if (!routeA && !routeB && !dynamicRoutes.length && !unassignedStops.length) return;
 
+    const version=draftMoveVersion.current;
     try {
       const organizedRoutes: Array<{
         key: string;
@@ -2099,33 +2126,38 @@ export default function OrganizeRoutePage() {
         }
       }
 
-      // Atualizar documento do rascunho no Firestore
-      const draftRef = doc(db, 'routes', routeData.draftRouteId);
-      await updateDoc(draftRef, {
-        organizedRoutes,
-        routeNames,
-        updatedAt: serverTimestamp(),
+      const draftRef = editorRoute(routeData.draftRouteId);
+      const available = availableRouteStops(unassignedStops, organizedRoutes.map(route => route.stops));
+      const arrangement = { organizedRoutes, routeNames, unassignedStops: available };
+      const fingerprint = draftArrangementFingerprint(draftRef.id, organizedRoutes, available);
+      if (fingerprint === savedDraftPlan.current) return;
+      const save = draftWrites.current.catch(() => {}).then(async () => {
+        if (fingerprint === savedDraftPlan.current) return;
+        await updateDoc(draftRef, { ...arrangement, updatedAt: serverTimestamp() });
+        savedDraftPlan.current = fingerprint;
       });
-
-      console.log('✅ Rotas organizadas persistidas no Firestore:', organizedRoutes.length);
+      draftWrites.current = save;
+      await save;
+      if (version === draftMoveVersion.current) setDraftMoveState(null);
     } catch (error) {
-      console.error('❌ Erro ao persistir rotas organizadas:', error);
+      if (version && version===draftMoveVersion.current) setDraftMoveState('error');
+      throw error;
     }
-  }, [routeData, routeA, routeB, dynamicRoutes, routeNames]);
+  }, [routeData, routeA, routeB, dynamicRoutes, routeNames, unassignedStops, updateDoc]);
 
   // useEffect para persistir automaticamente quando as rotas mudam (com debounce)
   React.useEffect(() => {
-    if (!routeData?.isDraft || !routeData?.draftRouteId || isLoading) {
+    if (!routeData?.isDraft || !routeData?.draftRouteId || isLoading || Object.values(isSaving).some(Boolean)) {
       return;
     }
 
     // Debounce de 2 segundos para evitar múltiplas escritas
     const timeoutId = setTimeout(() => {
-      persistOrganizedRoutes();
+      void persistOrganizedRoutes().catch(error => console.error('Erro ao persistir o rascunho:', error));
     }, 2000);
 
     return () => clearTimeout(timeoutId);
-  }, [routeA, routeB, dynamicRoutes, routeNames, persistOrganizedRoutes, routeData, isLoading]);
+  }, [routeA, routeB, dynamicRoutes, routeNames, persistOrganizedRoutes, routeData, isLoading, isSaving]);
 
   const handleOptimizeSingleRoute = async (routeKey: 'A' | 'B') => {
     const routeToOptimize = routeKey === 'A' ? routeA : routeB;
@@ -2212,14 +2244,14 @@ export default function OrganizeRoutePage() {
     }
   };
   
-  const handleDispatchRoute = async (routeKey: 'A' | 'B') => {
+  const handleDispatchRoute = async (routeKey: string) => {
     if (!routeData) return;
 
-    const routeToSave = routeKey === 'A' ? routeA : routeB;
-    const routeName = routeNames[routeKey];
+    const routeToSave = getRoute(routeKey);
+    const routeName = routeNames[routeKey] ?? dynamicRoutes.find(route => route.key === routeKey)?.name ?? `Rota ${routeKey}`;
     const driverId = assignedDrivers[routeKey];
 
-    if (!routeToSave) {
+    if (!routeToSave?.stops.length) {
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
         return;
     }
@@ -2232,11 +2264,12 @@ export default function OrganizeRoutePage() {
 
     try {
         const driver = availableDrivers.find(d => d.id === driverId);
+        if (native && routeData.draftRouteId) await persistOrganizedRoutes();
         const routeCode = await generateRouteCode();
         const isDraft = routeData.isDraft && routeData.draftRouteId;
 
         // Gerar códigos sequenciais para os pontos
-        const stopsWithCodes = routeToSave.stops.map((stop, index) => ({
+        const stopsWithCodes = native ? routeToSave.stops : routeToSave.stops.map((stop, index) => ({
             ...stop,
             pointCode: `${routeCode}-${String(index + 1).padStart(3, '0')}`
         }));
@@ -2258,11 +2291,11 @@ export default function OrganizeRoutePage() {
             driverInfo: driver ? { name: driver.name, vehicle: driver.vehicle } : null,
         };
 
-        const docRef = await addDoc(collection(db, "routes"), routeDoc);
+        const docRef = await createEditorRoute(routeDoc, isDraft && native ? {draftId:routeData.draftRouteId!,key:routeKey}:undefined);
 
         // Registrar no activity log
         if (user) {
-            await logRouteDispatched({
+            await logLegacyEditorActivity("logRouteDispatched", {
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 routeId: docRef.id,
@@ -2277,7 +2310,7 @@ export default function OrganizeRoutePage() {
             // Registrar criação dos pontos
             const pointCodes = stopsWithCodes.map(s => s.pointCode).filter((c): c is string => !!c);
             if (pointCodes.length > 0) {
-                await logPointsCreated({
+                await logLegacyEditorActivity("logPointsCreated", {
                     userId: user.uid,
                     userName: user.email || 'Usuário',
                     routeId: docRef.id,
@@ -2297,9 +2330,9 @@ export default function OrganizeRoutePage() {
 
         // Se era um draft, marcar a rota como despachada no array
         // Só deletar o draft quando TODAS as rotas forem despachadas
-        if (isDraft) {
+        if (isDraft && !native) {
             try {
-                const draftRef = doc(db, 'routes', routeData.draftRouteId!);
+                const draftRef = editorRoute(routeData.draftRouteId!);
                 const draftSnap = await getDoc(draftRef);
 
                 if (draftSnap.exists()) {
@@ -2314,11 +2347,11 @@ export default function OrganizeRoutePage() {
                     // Verificar se TODAS as rotas foram despachadas
                     const allDispatched = updatedRoutes.every((r: any) => r.dispatched);
 
-                    if (allDispatched) {
+                    if (allDispatched && !unassignedStops.length) {
                         // Todas as rotas despachadas - deletar o rascunho
                         await deleteDoc(draftRef);
                         console.log('✅ [handleDispatchRoute] Todas rotas despachadas - Draft deletado:', routeData.draftRouteId);
-                        sessionStorage.removeItem('newRouteData');
+                        sessionStorage.removeItem(draftKey);
                     } else {
                         // Ainda tem rotas pendentes - apenas atualizar o array
                         await updateDoc(draftRef, {
@@ -2334,12 +2367,10 @@ export default function OrganizeRoutePage() {
             }
         }
 
-        // Remove the dispatched route from state
-        if (routeKey === 'A') {
-            setRouteA(null);
-        } else {
-            setRouteB(null);
-        }
+        dispatchedDraftKeys.current.add(routeKey);
+        if (routeKey === 'A') setRouteA(null);
+        else if (routeKey === 'B') setRouteB(null);
+        else setDynamicRoutes(previous => previous.filter(route => route.key !== routeKey));
 
     } catch (error) {
         console.error('Erro ao salvar rota:', error);
@@ -2380,7 +2411,7 @@ export default function OrganizeRoutePage() {
     setIsSaving(prev => ({ ...prev, [routeKey]: true }));
 
     try {
-        const routeRef = doc(db, 'routes', currentRouteId);
+        const routeRef = editorRoute(currentRouteId);
 
         // Buscar a rota atual do Firestore para comparar
         const currentRouteDoc = await getDoc(routeRef);
@@ -2433,7 +2464,7 @@ export default function OrganizeRoutePage() {
                     const oldStop = oldStops.find((s: PlaceValue) => String(s.id ?? s.placeId) === change.stopId);
 
                     if (stop && oldStop) {
-                        await logPointReordered({
+                        await logLegacyEditorActivity("logPointReordered", {
                             userId: user.uid,
                             userName: user.email || 'Usuário',
                             pointId: stop.id || stop.placeId,
@@ -2457,7 +2488,7 @@ export default function OrganizeRoutePage() {
             const oldDriverId = currentRouteData.driverId;
             const oldDriverName = currentRouteData.driverInfo?.name;
             if (oldDriverId !== driverId) {
-                logDriverChanged({
+                logLegacyEditorActivity("logDriverChanged",{
                     userId: user.uid,
                     userName: user.email || 'Usuário',
                     routeId: currentRouteId,
@@ -2475,7 +2506,7 @@ export default function OrganizeRoutePage() {
         // Se houver mudanças e a rota estiver em progresso, notificar o motorista
         if (changes.length > 0 && currentRouteData.status === 'in_progress' && currentRouteData.driverId) {
           try {
-            const notifyFn = httpsCallable(functions, 'notifyRouteChanges');
+            const notifyFn = callEditor.bind(null, 'notifyRouteChanges');
             await notifyFn({
               routeId: currentRouteId,
               driverId: currentRouteData.driverId,
@@ -2550,7 +2581,7 @@ export default function OrganizeRoutePage() {
     // Helper para registrar remoção no activity log
     const logRemoval = () => {
       if (user && removedStop && routeData.isExistingRoute && routeData.currentRouteId) {
-        logPointRemovedFromRoute({
+        logLegacyEditorActivity("logPointRemovedFromRoute",{
           userId: user.uid,
           userName: user.email || 'Usuário',
           pointId: removedStop.id || removedStop.placeId,
@@ -2578,7 +2609,7 @@ export default function OrganizeRoutePage() {
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
-          const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          const routeRef = editorRoute(routeData.currentRouteId);
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -2607,7 +2638,7 @@ export default function OrganizeRoutePage() {
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2693,6 +2724,8 @@ export default function OrganizeRoutePage() {
       bairro: targetStop.bairro || '',
       cidade: targetStop.cidade || '',
       notes: targetStop.notes || '',
+      lat: null,
+      lng: null,
     });
 
     // Open edit dialog
@@ -2714,34 +2747,57 @@ export default function OrganizeRoutePage() {
     }
   };
 
-  const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: 'A' | 'B') => {
+  const persistPoolMove = async (
+    kind: 'allocate' | 'return', routeKey: string, routeId: string, target: RouteInfo,
+    stop: PlaceValue, plannedStops: PlaceValue[], origin: PlaceValue,
+  ) => {
+    const draft = pendingEdits[routeKey];
+    const metrics = resolveRoutePlanMetrics(plannedStops, await computeRoute(origin, plannedStops));
+    await commitRoutePoolMove(movePoolStop, [kind, routeId, stop, {
+      expectedStatus: target.status, baseStops: target.stops, plannedStops, metrics,
+    }], {
+      toast, notify: saved => sendNotice(saved.noticeId),
+      apply: (saved, updatePool, savedMetrics) => {
+        setRoute(routeKey, previous => previous ? { ...previous, ...savedMetrics, stops: saved.stops } : previous);
+        setUnassignedStops(updatePool);
+        setPendingEdits(previous => previous[routeKey] === draft ? { ...previous, [routeKey]: null } : previous);
+      },
+    });
+  };
+
+  const handleRemoveFromRouteTimeline = async (stop: PlaceValue, index: number, routeKey: string) => {
     if (!routeData) return;
 
-    const targetRoute = routeKey === 'A' ? routeA : routeB;
-    const setter = routeKey === 'A' ? setRouteA : setRouteB;
+    const targetRoute = getRoute(routeKey);
 
     if (!targetRoute) return;
 
     // Remove the stop from the route and add to unassigned
     const newStops = targetRoute.stops.filter((_, i) => i !== index);
-    setUnassignedStops(prev => [...prev, stop]);
+    if (native && routeKey === 'A' && routeData.isExistingRoute && routeData.currentRouteId) {
+      await persistPoolMove('return', routeKey, routeData.currentRouteId, targetRoute, stop,
+        (pendingEdits[routeKey] ?? targetRoute.stops).filter(item => item.id !== stop.id), routeData.origin);
+      return;
+    }
+    markDraftMove();
+    setUnassignedStops(prev => upsertStopInCollection(prev, stop));
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
-      setter({
+      setRoute(routeKey, () => ({
         ...targetRoute,
         stops: [],
         encodedPolyline: '',
         distanceMeters: 0,
         duration: '0s'
-      });
+      }));
       toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
     } else {
       // Recalculate route with remaining stops
-      setter(prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
+      setRoute(routeKey, prev => prev ? { ...prev, stops: newStops, encodedPolyline: '' } : null);
       const newRouteInfo = await computeRoute(routeData.origin, newStops);
       if (newRouteInfo) {
-        setter(prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
+        setRoute(routeKey, prev => prev ? { ...prev, ...newRouteInfo, stops: newStops } : null);
       }
       toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.` });
     }
@@ -2771,7 +2827,7 @@ export default function OrganizeRoutePage() {
       // Update Firestore if existing route
       if (routeData.isExistingRoute && routeData.currentRouteId) {
         try {
-          const routeRef = doc(db, 'routes', routeData.currentRouteId);
+          const routeRef = editorRoute(routeData.currentRouteId);
           await updateDoc(routeRef, {
             stops: [],
             encodedPolyline: '',
@@ -2781,7 +2837,7 @@ export default function OrganizeRoutePage() {
 
           // Registrar no activity log
           if (user) {
-            logPointRemovedFromRoute({
+            logLegacyEditorActivity("logPointRemovedFromRoute",{
               userId: user.uid,
               userName: user.email || 'Usuário',
               pointId: stop.id || stop.placeId,
@@ -2810,7 +2866,7 @@ export default function OrganizeRoutePage() {
         // Update Firestore if existing route
         if (routeData.isExistingRoute && routeData.currentRouteId) {
           try {
-            const routeRef = doc(db, 'routes', routeData.currentRouteId);
+            const routeRef = editorRoute(routeData.currentRouteId);
             await updateDoc(routeRef, {
               stops: newStops,
               encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2820,7 +2876,7 @@ export default function OrganizeRoutePage() {
 
             // Registrar no activity log
             if (user) {
-              logPointRemovedFromRoute({
+              logLegacyEditorActivity("logPointRemovedFromRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: stop.id || stop.placeId,
@@ -2918,7 +2974,7 @@ export default function OrganizeRoutePage() {
     // If this is an existing route, save changes to Firestore
     if (routeData.isExistingRoute && routeData.currentRouteId && newRouteInfo) {
       try {
-        const routeRef = doc(db, 'routes', routeData.currentRouteId);
+        const routeRef = editorRoute(routeData.currentRouteId);
         await updateDoc(routeRef, {
           stops: cleanedStops,
           encodedPolyline: newRouteInfo.encodedPolyline,
@@ -2933,11 +2989,11 @@ export default function OrganizeRoutePage() {
             const fromRoute = fromRouteKey === 'A' ? routeA : routeB;
 
             if (fromRoute && movedStop.previousRouteCode) {
-              await logPointMovedToRoute({
+              await logLegacyEditorActivity("logPointMovedToRoute",{
                 userId: user.uid,
                 userName: user.email || 'Usuário',
                 pointId: movedStop.id || movedStop.placeId,
-                oldRouteId: fromRoute.currentRouteId || '',
+                oldRouteId: movedStop.previousRouteId || '',
                 oldRouteCode: movedStop.previousRouteCode,
                 oldPointCode: movedStop.movedFromPointCode || 'N/A',
                 newRouteId: routeData.currentRouteId,
@@ -2980,15 +3036,16 @@ export default function OrganizeRoutePage() {
 
   React.useEffect(() => {
     // If all routes have been dispatched, redirect
-    if (!isLoading && !routeA && !routeB) {
+    if (!isLoading && !routeA && !routeB && !dynamicRoutes.length && !unassignedStops.length) {
         toast({
             title: 'Todas as rotas foram despachadas!',
             description: 'Redirecionando para a página de rotas.',
         });
-        sessionStorage.removeItem('newRouteData');
-        setTimeout(() => router.push('/routes'), 1500);
+        sessionStorage.removeItem(draftKey);
+        const redirect = window.setTimeout(() => router.push('/routes'), 1500);
+        return () => window.clearTimeout(redirect);
     }
-  }, [isLoading, routeA, routeB, router, toast]);
+  }, [isLoading, routeA, routeB, dynamicRoutes.length, unassignedStops.length, router, toast, draftKey]);
 
   if (isLoading && !routeData) {
     return (
@@ -3049,12 +3106,7 @@ export default function OrganizeRoutePage() {
   const handleRefreshDriverLocation = async (driverId: string) => {
     try {
       // Criar documento de solicitação de atualização
-      const requestRef = doc(db, 'locationUpdateRequests', driverId);
-      await setDoc(requestRef, {
-        driverId,
-        requestedAt: serverTimestamp(),
-        status: 'pending',
-      });
+      await requestDriverLocation(driverId);
 
       toast({
         title: 'Atualização solicitada',
@@ -3115,7 +3167,7 @@ export default function OrganizeRoutePage() {
                  {unassignedStops.length > 0 && (
                     <Popover>
                         <PopoverTrigger asChild>
-                            <Button variant="outline" className="relative h-9 w-9 rounded-full">
+                            <Button variant="outline" aria-label="Serviços não alocados" className="relative h-9 w-9 rounded-full">
                                 <PackagePlus className="h-5 w-5" />
                                 <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                                     {unassignedStops.length}
@@ -3182,7 +3234,7 @@ export default function OrganizeRoutePage() {
                 )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
+                        <Button aria-label="Adicionar ao planejamento" variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
                             <Plus className="h-4 w-4" />
                         </Button>
                     </DropdownMenuTrigger>
@@ -3197,22 +3249,17 @@ export default function OrganizeRoutePage() {
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
-                <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                  <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <Wand2 className="mr-2 h-4 w-4" />
-                      Organizar
-                    </TabsTrigger>
-                    <TabsTrigger value="assign" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <User className="mr-2 h-4 w-4" />
-                      Atribuir
-                    </TabsTrigger>
-                    <TabsTrigger value="review" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <Check className="mr-2 h-4 w-4" />
-                      Revisar
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
+                {draftMoveState && (
+                  <div className="flex items-center gap-2 text-sm" role="status">
+                    {draftMoveState === 'pending' ? 'Salvando rascunho…' : 'Falha ao salvar o rascunho'}
+                    {draftMoveState === 'error' && (
+                      <Button variant="outline" size="sm" onClick={() => { setDraftMoveState('pending'); void persistOrganizedRoutes().catch(error => console.error('Erro ao persistir o rascunho:', error)); }}>
+                        Tentar novamente
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <RoutePlanningTabs />
               </div>
             </div>
           </div>
@@ -3279,7 +3326,7 @@ export default function OrganizeRoutePage() {
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell className="py-4 px-4">
                                         <RouteTimeline
-                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
+                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map((s: PlaceValue) => s.id ?? s.placeId).join('-')}`}
                                         routeKey={routeItem.key}
                                         stops={pendingEdits[routeItem.key] || routeItem.data.stops}
                                         originalStops={pendingEdits[routeItem.key] ? routeItem.data.stops : undefined}
@@ -3722,6 +3769,8 @@ export default function OrganizeRoutePage() {
             bairro: '',
             cidade: '',
             notes: '',
+            lat: null,
+            lng: null,
           });
         }
         setIsEditStopDialogOpen(open);

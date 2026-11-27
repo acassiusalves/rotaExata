@@ -9,7 +9,6 @@ import {
   Trash2,
   Eye,
   EyeOff,
-  Filter,
   Search,
   Calendar,
   Plus,
@@ -32,27 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { db } from '@/lib/firebase/client';
-import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
-  deleteDoc,
-  Timestamp,
-  where,
-} from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
@@ -68,157 +46,172 @@ import {
 } from '@/components/ui/alert-dialog';
 import Link from 'next/link';
 import { CreateNotificationDialog } from '@/components/notifications/create-notification-dialog';
+import { staffNotificationError } from '@/components/notifications/staff-notification-messages';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import type { StaffNotification, StaffNotificationChange, StaffNotificationsPage, StaffPushReason } from '@/lib/staff/notification-contract';
 
-interface Notification {
-  id: string;
-  type: 'route_change' | 'route_assigned' | 'route_completed' | 'system' | 'alert';
-  title: string;
-  message: string;
-  read: boolean;
-  opened?: boolean;
-  openedAt?: Timestamp | null;
-  routeId?: string;
-  reportId?: string;
-  routeName?: string;
-  driverId?: string;
-  driverName?: string;
-  timestamp: Timestamp;
-  priority: 'low' | 'medium' | 'high';
-  createdBy?: string;
-}
+const endpoint='/api/staff/notifications';
+const skippedPushLabels:Record<StaffPushReason,string>={
+  recipient_unavailable:'Motorista indisponível',
+  consent_missing:'Push sem permissão',
+  token_missing:'Push sem dispositivo',
+  token_unlinked:'Dispositivo sem vínculo',
+  binding_invalid:'Vínculo de push indisponível',
+  destination_changed:'Destino do push mudou',
+};
+type NotificationAction=Omit<Extract<StaffNotificationChange,{action:'mark'}>,'commandId'> |
+  Omit<Extract<StaffNotificationChange,{action:'delete'}>,'commandId'>;
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = React.useState<Notification[]>([]);
-  const [filteredNotifications, setFilteredNotifications] = React.useState<Notification[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [filterType, setFilterType] = React.useState<string>('all');
-  const [filterStatus, setFilterStatus] = React.useState<string>('all');
-  const [notificationToDelete, setNotificationToDelete] = React.useState<string | null>(null);
-  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
-  const { toast } = useToast();
+  const staff=useOptionalStaff();
+  if (nativeStaffEnabled && !staff) return null;
+  return <Notifications key={staff ? `${staff.userId}:${staff.scopeId}`:'legacy'} staff={staff} />;
+}
 
-  // Load notifications from Firestore
-  React.useEffect(() => {
-    const q = query(
-      collection(db, 'notifications'),
-      orderBy('timestamp', 'desc')
-    );
+function Notifications({staff}:{staff:ReturnType<typeof useOptionalStaff>}) {
+  const request=staff?.request;
+  const [notifications,setNotifications]=React.useState<StaffNotification[]>([]);
+  const [loading,setLoading]=React.useState(true);
+  const [error,setError]=React.useState('');
+  const [searchTerm,setSearchTerm]=React.useState('');
+  const [filterType,setFilterType]=React.useState('all');
+  const [filterStatus,setFilterStatus]=React.useState('all');
+  const [notificationToDelete,setNotificationToDelete]=React.useState<StaffNotification|null>(null);
+  const [createDialogOpen,setCreateDialogOpen]=React.useState(false);
+  const [pages,setPages]=React.useState<string[]>([]);
+  const [nextCursor,setNextCursor]=React.useState<string|null>(null);
+  const [refresh,setRefresh]=React.useState(0);
+  const [saving,setSaving]=React.useState(false);
+  const action=React.useRef<AbortController>();
+  const pending=React.useRef<{key:string;id:string}>();
+  const {toast}=useToast();
+  const cursor=pages.at(-1);
+  const canManage=!staff || staff.paths.includes('/notifications');
+  const canViewReports=!staff || staff.paths.includes('/admin/erros');
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const notifs: Notification[] = [];
-        snapshot.forEach((doc) => {
-          notifs.push({ id: doc.id, ...doc.data() } as Notification);
-        });
-        setNotifications(notifs);
-        setFilteredNotifications(notifs);
+  React.useEffect(()=>()=>action.current?.abort(),[]);
+  React.useEffect(()=>{
+    if (request) return;
+    let active=true;
+    let unsubscribe:(()=>void)|undefined;
+    function fail() {
+      if (active) {setError('Não foi possível carregar as notificações.');setLoading(false);}
+    }
+    void import('@/components/notifications/legacy-notification-data').then(({watchLegacyNotifications})=>{
+      if (!active) return;
+      unsubscribe=watchLegacyNotifications(rows=>{
+        if (!active) return;
+        setNotifications(rows);
         setLoading(false);
-      },
-      (error) => {
-        console.error('Error loading notifications:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao carregar notificações',
-          description: 'Não foi possível carregar as notificações.',
-        });
-        setLoading(false);
+        setError('');
+      },fail);
+    }).catch(fail);
+    return ()=>{active=false;unsubscribe?.();};
+  },[request,refresh]);
+
+  React.useEffect(()=>{
+    if (!request) return;
+    const controller=new AbortController();
+    const params=new URLSearchParams();
+    if (filterType!=='all') params.set('type',filterType);
+    if (filterStatus!=='all') params.set('status',filterStatus);
+    if (searchTerm) params.set('search',searchTerm);
+    if (cursor) params.set('cursor',cursor);
+    let wait=20_000;
+    let inFlight=false;
+    let timer:number|undefined;
+    setLoading(true);
+    setError('');
+    async function load() {
+      if (controller.signal.aborted || inFlight || !request) return;
+      inFlight=true;
+      window.clearTimeout(timer);
+      try {
+        const result=await request<StaffNotificationsPage>(endpoint+'?'+params,{signal:controller.signal});
+        if (controller.signal.aborted) return;
+        setNotifications(result.notifications);
+        setNextCursor(result.cursor);
+        setError('');
+        wait=20_000;
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setError(staffNotificationError(error,'Não foi possível carregar as notificações.'));
+          setNextCursor(null);
+          wait=Math.min(60_000,wait*2);
+        }
+      } finally {
+        inFlight=false;
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          timer=window.setTimeout(visible,wait);
+        }
       }
-    );
-
-    return () => unsubscribe();
-  }, [toast]);
-
-  // Filter notifications
-  React.useEffect(() => {
-    let filtered = notifications;
-
-    // Filter by type
-    if (filterType !== 'all') {
-      filtered = filtered.filter((n) => n.type === filterType);
     }
-
-    // Filter by status (read/unread)
-    if (filterStatus === 'read') {
-      filtered = filtered.filter((n) => n.read);
-    } else if (filterStatus === 'unread') {
-      filtered = filtered.filter((n) => !n.read);
+    function visible() {
+      if (document.visibilityState==='visible') void load();
     }
+    timer=window.setTimeout(load,150);
+    window.addEventListener('focus',visible);
+    document.addEventListener('visibilitychange',visible);
+    return ()=>{
+      controller.abort();
+      window.clearTimeout(timer);
+      window.removeEventListener('focus',visible);
+      document.removeEventListener('visibilitychange',visible);
+    };
+  },[request,filterType,filterStatus,searchTerm,cursor,refresh]);
 
-    // Filter by search term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (n) =>
-          n.title.toLowerCase().includes(term) ||
-          n.message.toLowerCase().includes(term) ||
-          n.driverName?.toLowerCase().includes(term) ||
-          n.routeName?.toLowerCase().includes(term)
-      );
-    }
+  const filteredNotifications=request ? notifications : notifications.filter(item=>{
+    const term=searchTerm.toLowerCase();
+    return (filterType==='all' || item.type===filterType) &&
+      (filterStatus==='all' || item.read===(filterStatus==='read')) &&
+      (!term || [item.title,item.message,item.driverName,item.routeName].some(value=>value?.toLowerCase().includes(term)));
+  });
 
-    setFilteredNotifications(filtered);
-  }, [notifications, filterType, filterStatus, searchTerm]);
+  function changeFilter(set:(value:string)=>void,value:string) {
+    if (request) setPages([]);
+    set(value);
+  }
+  function reload() {setRefresh(current=>current+1);}
 
-  const handleMarkAsRead = async (notificationId: string, currentStatus: boolean) => {
+  async function changeNotification(command:NotificationAction) {
+    if (!canManage || action.current) return;
+    const controller=new AbortController();
+    action.current=controller;
+    setSaving(true);
+    const key=JSON.stringify(command);
+    if (pending.current?.key!==key) pending.current={key,id:crypto.randomUUID()};
     try {
-      await updateDoc(doc(db, 'notifications', notificationId), {
-        read: !currentStatus,
-      });
-      toast({
-        title: !currentStatus ? 'Marcado como lido' : 'Marcado como não lido',
-        description: 'Status da notificação atualizado.',
-      });
+      if (request) {
+        await request(endpoint,{method:'PATCH',signal:controller.signal,body:JSON.stringify({...command,commandId:pending.current.id})});
+        if (controller.signal.aborted) return;
+        reload();
+      } else {
+        const legacy=await import('@/components/notifications/legacy-notification-data');
+        if (command.action==='delete') await legacy.deleteLegacyNotification(command.item.id);
+        else await legacy.markLegacyNotifications(command.items.map(item=>item.id),command.read);
+      }
+      if (controller.signal.aborted) return;
+      pending.current=undefined;
+      if (command.action==='delete') setNotificationToDelete(null);
+      toast({title:command.action==='delete' ? 'Notificação excluída':'Leitura atualizada'});
     } catch (error) {
-      console.error('Error updating notification:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível atualizar a notificação.',
-      });
+      if (!controller.signal.aborted) {
+        toast({variant:'destructive',title:'Erro ao atualizar as notificações',
+          description:staffNotificationError(error,'Tente novamente para conferir o resultado.')});
+        if (request) reload();
+      }
+    } finally {
+      if (action.current===controller) {
+        action.current=undefined;
+        if (!controller.signal.aborted) setSaving(false);
+      }
     }
-  };
+  }
 
-  const handleMarkAllAsRead = async () => {
-    try {
-      const unreadNotifications = notifications.filter((n) => !n.read);
-      await Promise.all(
-        unreadNotifications.map((n) =>
-          updateDoc(doc(db, 'notifications', n.id), { read: true })
-        )
-      );
-      toast({
-        title: 'Todas marcadas como lidas',
-        description: `${unreadNotifications.length} notificações foram marcadas como lidas.`,
-      });
-    } catch (error) {
-      console.error('Error marking all as read:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível marcar todas como lidas.',
-      });
-    }
-  };
-
-  const handleDeleteNotification = async (notificationId: string) => {
-    try {
-      await deleteDoc(doc(db, 'notifications', notificationId));
-      toast({
-        title: 'Notificação excluída',
-        description: 'A notificação foi removida com sucesso.',
-      });
-      setNotificationToDelete(null);
-    } catch (error) {
-      console.error('Error deleting notification:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Erro',
-        description: 'Não foi possível excluir a notificação.',
-      });
-    }
-  };
+  const asCommandItem=({id,revision}:StaffNotification)=>({id,revision});
+  const unread=notifications.filter(item=>item.canChange && !item.read);
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -283,16 +276,16 @@ export default function NotificationsPage() {
               {unreadCount} não {unreadCount === 1 ? 'lida' : 'lidas'}
             </Badge>
           )}
-          {unreadCount > 0 && (
-            <Button variant="outline" onClick={handleMarkAllAsRead}>
+          {canManage && unread.length > 0 && (
+            <Button variant="outline" disabled={loading || saving || !!error} onClick={()=>void changeNotification({action:'mark',items:unread.map(asCommandItem),read:true})}>
               <CheckCircle className="mr-2 h-4 w-4" />
-              Marcar todas como lidas
+              {request ? 'Marcar lidas nesta página':'Marcar todas como lidas'}
             </Button>
           )}
-          <Button onClick={() => setCreateDialogOpen(true)}>
+          {canManage && <Button onClick={() => setCreateDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Nova Notificação
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -306,7 +299,7 @@ export default function NotificationsPage() {
           <CardContent>
             <div className="text-2xl font-bold">{notifications.length}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Todas as notificações
+              {request ? 'Notificações nesta página':'Todas as notificações'}
             </p>
           </CardContent>
         </Card>
@@ -335,7 +328,7 @@ export default function NotificationsPage() {
                 notifications.filter((n) => {
                   if (!n.timestamp) return false;
                   const today = new Date();
-                  const notifDate = n.timestamp.toDate();
+                  const notifDate = new Date(n.timestamp);
                   return (
                     notifDate.getDate() === today.getDate() &&
                     notifDate.getMonth() === today.getMonth() &&
@@ -381,12 +374,13 @@ export default function NotificationsPage() {
               <Input
                 placeholder="Pesquisar notificações..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(event) => changeFilter(setSearchTerm,event.target.value)}
+                maxLength={200}
                 className="pl-8"
               />
             </div>
 
-            <Select value={filterType} onValueChange={setFilterType}>
+            <Select value={filterType} onValueChange={value=>changeFilter(setFilterType,value)}>
               <SelectTrigger>
                 <SelectValue placeholder="Tipo de notificação" />
               </SelectTrigger>
@@ -400,7 +394,7 @@ export default function NotificationsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <Select value={filterStatus} onValueChange={value=>changeFilter(setFilterStatus,value)}>
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -423,11 +417,16 @@ export default function NotificationsPage() {
           <CardDescription>
             {filterType !== 'all' || filterStatus !== 'all' || searchTerm
               ? 'Resultados filtrados'
-              : 'Todas as notificações do sistema'}
+              : request ? 'Página de notificações':'Todas as notificações do sistema'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {error ? (
+            <div className="space-y-2" role="alert">
+              <p className="text-destructive">{error}</p>
+              <Button variant="outline" onClick={reload}>Tentar novamente</Button>
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
@@ -450,7 +449,7 @@ export default function NotificationsPage() {
             <div className="space-y-3">
               {filteredNotifications.map((notification) => (
                 <div
-                  key={notification.id}
+                  key={notification.kind+':'+notification.id}
                   className={cn(
                     'flex items-start gap-4 p-4 rounded-lg border transition-colors',
                     notification.read
@@ -474,7 +473,7 @@ export default function NotificationsPage() {
                         <p className="text-sm text-muted-foreground mt-1">
                           {notification.message}
                         </p>
-                        {notification.reportId && (
+                        {notification.reportId && canViewReports && (
                           <Link className="mt-2 inline-block text-sm font-medium underline"
                             href={`/admin/erros?report=${encodeURIComponent(notification.reportId)}`}>
                             Abrir chamado
@@ -488,11 +487,15 @@ export default function NotificationsPage() {
                       {notification.timestamp && (
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
-                          {format(notification.timestamp.toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                          {format(new Date(notification.timestamp), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                         </span>
                       )}
                       {notification.driverName && (
                         <span>• Motorista: {notification.driverName}</span>
+                      )}
+                      {notification.author && <span>• Autor: {notification.author}</span>}
+                      {notification.routeId && staff?.paths.includes('/routes') && (
+                        <Link className="underline" href={`/routes/${encodeURIComponent(notification.routeId)}/acompanhar`}>Abrir rota</Link>
                       )}
                       {notification.routeName && (
                         <span>• {notification.routeName}</span>
@@ -500,14 +503,20 @@ export default function NotificationsPage() {
                       {notification.opened && notification.openedAt && (
                         <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
                           <Eye className="h-3 w-3 mr-1" />
-                          Aberta {format(notification.openedAt.toDate(), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                          Aberta {format(new Date(notification.openedAt), "dd/MM 'às' HH:mm", { locale: ptBR })}
                         </Badge>
                       )}
-                      {!notification.opened && notification.read && (
+                      {!request && !notification.opened && notification.read && (
                         <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                           <Send className="h-3 w-3 mr-1" />
                           Enviada
                         </Badge>
+                      )}
+                      {request && notification.push && notification.push!=='not_requested' && (
+                        <Badge variant="outline">{
+                          notification.push==='skipped' && notification.pushReason ? skippedPushLabels[notification.pushReason] :
+                            {accepted:'Push aceito',failed:'Falha de push',skipped:'Push indisponível',uncertain:'Push sem confirmação'}[notification.push]
+                        }</Badge>
                       )}
                       <Badge variant="outline" className="ml-auto text-xs">
                         {getTypeLabel(notification.type)}
@@ -516,11 +525,13 @@ export default function NotificationsPage() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2">
+                  {canManage && notification.canChange && <div className="flex items-center gap-2">
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleMarkAsRead(notification.id, notification.read)}
+                      aria-label={notification.read ? 'Marcar como não lida':'Marcar como lida'}
+                      disabled={saving}
+                      onClick={()=>void changeNotification({action:'mark',items:[asCommandItem(notification)],read:!notification.read})}
                     >
                       {notification.read ? (
                         <EyeOff className="h-4 w-4" />
@@ -531,20 +542,26 @@ export default function NotificationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setNotificationToDelete(notification.id)}
+                      aria-label="Excluir notificação"
+                      disabled={saving}
+                      onClick={() => setNotificationToDelete(notification)}
                     >
                       <Trash2 className="h-4 w-4 text-red-500" />
                     </Button>
-                  </div>
+                  </div>}
                 </div>
               ))}
             </div>
           )}
+          {request && !error && (pages.length>0 || nextCursor) && <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={loading || !pages.length} onClick={()=>setPages(current=>current.slice(0,-1))}>Anterior</Button>
+            <Button variant="outline" size="sm" disabled={loading || !nextCursor} onClick={()=>nextCursor && setPages(current=>[...current,nextCursor])}>Mais antigas</Button>
+          </div>}
         </CardContent>
       </Card>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!notificationToDelete} onOpenChange={(open) => !open && setNotificationToDelete(null)}>
+      <AlertDialog open={!!notificationToDelete} onOpenChange={(open) => !open && !saving && setNotificationToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir notificação?</AlertDialogTitle>
@@ -553,9 +570,13 @@ export default function NotificationsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={saving}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => notificationToDelete && handleDeleteNotification(notificationToDelete)}
+              disabled={saving}
+              onClick={event=>{
+                event.preventDefault();
+                if (notificationToDelete) void changeNotification({action:'delete',item:asCommandItem(notificationToDelete)});
+              }}
               className="bg-red-500 hover:bg-red-600"
             >
               Excluir
@@ -568,6 +589,8 @@ export default function NotificationsPage() {
       <CreateNotificationDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
+        request={request}
+        onCreated={reload}
       />
     </div>
   );

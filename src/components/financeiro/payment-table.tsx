@@ -8,6 +8,7 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   SortingState,
+  type RowSelectionState,
   useReactTable,
 } from '@tanstack/react-table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -59,7 +60,7 @@ const statusMap: Record<PaymentStatus, { label: string; variant: 'default' | 'se
 
 export function PaymentTable({ payments }: PaymentTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [rowSelection, setRowSelection] = React.useState({});
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [selectedPayment, setSelectedPayment] = React.useState<DriverPayment | null>(null);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [payDialogOpen, setPayDialogOpen] = React.useState(false);
@@ -109,7 +110,7 @@ export function PaymentTable({ payments }: PaymentTableProps) {
     if (!user) return;
 
     const selectedIds = Object.keys(rowSelection)
-      .filter((key) => rowSelection[key as any])
+      .filter((key) => rowSelection[key])
       .map((index) => payments[parseInt(index)].id);
 
     if (selectedIds.length === 0) {

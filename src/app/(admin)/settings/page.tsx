@@ -13,14 +13,23 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { db } from '@/lib/firebase/client';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useStaff } from '@/components/staff/staff-session';
+import { staffPlannedPlaceSchema } from '@/lib/staff/route-contract';
 import { useToast } from '@/hooks/use-toast';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
 import { MapPin, Loader2 } from 'lucide-react';
 import type { PlaceValue } from '@/lib/types';
 
+type SettingsResponse={
+  delivery:{enabled:boolean;maxDistance:number;revision:string|null};
+  origin:{place:PlaceValue|null;revision:string|null};
+};
+
 export default function SettingsPage() {
+  const {request}=useStaff();
+  const [revision,setRevision]=React.useState<{delivery:string|null;origin:string|null}>();
+  const [error,setError]=React.useState(false);
+  const [reload,setReload]=React.useState(0);
   const [deliveryDistanceValidation, setDeliveryDistanceValidation] = React.useState(false);
   const [maxDeliveryDistance, setMaxDeliveryDistance] = React.useState(0.5);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -30,46 +39,29 @@ export default function SettingsPage() {
   const [isResolvingLink, setIsResolvingLink] = React.useState(false);
   const { toast } = useToast();
 
-  React.useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        // Load general settings
-        const settingsRef = doc(db, 'settings', 'general');
-        const settingsSnap = await getDoc(settingsRef);
-
-        if (settingsSnap.exists()) {
-          const data = settingsSnap.data();
-          setDeliveryDistanceValidation(data.deliveryDistanceValidation ?? false);
-          setMaxDeliveryDistance(data.maxDeliveryDistance ?? 0.5);
-        }
-
-        // Load default origin settings
-        const originRef = doc(db, 'settings', 'defaultOrigin');
-        const originSnap = await getDoc(originRef);
-
-        if (originSnap.exists()) {
-          const data = originSnap.data();
-          if (data?.origin) {
-            setDefaultOrigin(data.origin);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading settings:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadSettings();
-  }, []);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setIsLoading(true);
+    setError(false);
+    request<SettingsResponse>('/api/staff/settings',{signal:controller.signal}).then(result=>{
+      if (controller.signal.aborted) return;
+      setDeliveryDistanceValidation(result.delivery.enabled);
+      setMaxDeliveryDistance(result.delivery.maxDistance);
+      setDefaultOrigin(result.origin.place);
+      setRevision({delivery:result.delivery.revision,origin:result.origin.revision});
+    }).catch(()=>{if (!controller.signal.aborted) setError(true);})
+      .finally(()=>{if (!controller.signal.aborted) setIsLoading(false);});
+    return ()=>controller.abort();
+  },[request,reload]);
 
   const handleSaveDeliveryValidation = async () => {
     try {
-      const settingsRef = doc(db, 'settings', 'general');
-      await setDoc(settingsRef, {
-        deliveryDistanceValidation,
-        maxDeliveryDistance,
-      }, { merge: true });
+      if (!revision) return;
+      const result=await request<SettingsResponse>('/api/staff/settings',{
+        method:'PATCH',body:JSON.stringify({kind:'delivery',expectedRevision:revision.delivery,
+          enabled:deliveryDistanceValidation,maxDistance:maxDeliveryDistance}),
+      });
+      setRevision({delivery:result.delivery.revision,origin:result.origin.revision});
 
       toast({
         title: 'Configurações salvas!',
@@ -96,16 +88,9 @@ export default function SettingsPage() {
     if (!originLink.trim()) return;
     setIsResolvingLink(true);
     try {
-      const res = await fetch('/api/resolve-maps-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: originLink.trim() }),
+      const dados=await request<{lat:number;lng:number}>('/api/staff/maps/link?view=settings',{
+        method:'POST',body:JSON.stringify({url:originLink.trim()}),
       });
-      const dados = await res.json();
-      if (!res.ok) {
-        toast({ variant: 'destructive', title: 'Link não reconhecido', description: dados.error });
-        return;
-      }
 
       // O SDK do Maps é carregado pelo AutocompleteInput desta mesma tela. Se o
       // operador colar o link antes de o loader terminar, window.google não existe.
@@ -152,11 +137,12 @@ export default function SettingsPage() {
 
     setIsSavingOrigin(true);
     try {
-      const originRef = doc(db, 'settings', 'defaultOrigin');
-      await setDoc(originRef, {
-        origin: defaultOrigin,
-        updatedAt: new Date(),
+      if (!revision) return;
+      const result=await request<SettingsResponse>('/api/staff/settings',{
+        method:'PATCH',body:JSON.stringify({kind:'origin',expectedRevision:revision.origin,
+          origin:staffPlannedPlaceSchema.parse(defaultOrigin)}),
       });
+      setRevision({delivery:result.delivery.revision,origin:result.origin.revision});
 
       toast({
         title: 'Origem padrão salva!',
@@ -173,6 +159,11 @@ export default function SettingsPage() {
       setIsSavingOrigin(false);
     }
   };
+
+  if (error) return <div className="space-y-3 p-6">
+    <p role="alert">Não foi possível carregar as configurações.</p>
+    <Button variant="outline" onClick={()=>setReload(value=>value+1)}>Tentar novamente</Button>
+  </div>;
 
   return (
     <div className="space-y-6">

@@ -1,5 +1,6 @@
 'use client';
 
+
 import * as React from 'react';
 import { ChevronsUpDown } from 'lucide-react';
 import {
@@ -162,10 +163,8 @@ function formatPendingHeadline(driver: Driver): string {
 const getDriverColumns = (
   onViewDetailsClick: (driver: Driver) => void,
   onEditClick: (driver: Driver) => void,
-  onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void,
-  onResetPasswordClick: (driver: Driver) => void,
-  onImpersonateClick: (driver: Driver) => void
+  onViewEarnings?: (driver: Driver) => void,
+  onOpenApp?: (driver: Driver) => void,
 ): ColumnDef<Driver>[] => [
   {
     accessorKey: 'name',
@@ -424,26 +423,14 @@ const getDriverColumns = (
                     <DropdownMenuItem onClick={() => onViewDetailsClick(driver)}>
                        Ver Detalhes
                     </DropdownMenuItem>
+                    {onViewEarnings && <DropdownMenuItem onSelect={() => onViewEarnings(driver)}>
+                      Ver ganhos (suporte)
+                    </DropdownMenuItem>}
+                    {onOpenApp && <DropdownMenuItem onSelect={() => onOpenApp(driver)}>
+                      Abrir app do motorista
+                    </DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => onEditClick(driver)}>
                        Editar
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => onImpersonateClick(driver)}>
-                       <Smartphone className="mr-2 h-4 w-4" />
-                       Testar como Motorista
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onForceLogoutClick(driver)}>
-                       <LogOut className="mr-2 h-4 w-4" />
-                       Deslogar Motorista
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onResetPasswordClick(driver)}>
-                       <KeyRound className="mr-2 h-4 w-4" />
-                       Resetar Senha
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-destructive" onClick={() => onDeleteClick(driver)}>
-                       <Trash2 className="mr-2 h-4 w-4" />
-                       Remover
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -453,39 +440,19 @@ const getDriverColumns = (
   },
 ];
 
-export function DriverTable({
-  drivers,
-  onViewDetailsClick,
-  onEditClick,
-  onDeleteClick,
-  onForceLogoutClick,
-  onResetPasswordClick,
-  onImpersonateClick
-}: {
-  drivers: Driver[],
-  onViewDetailsClick: (driver: Driver) => void,
-  onEditClick: (driver: Driver) => void,
-  onDeleteClick: (driver: Driver) => void,
-  onForceLogoutClick: (driver: Driver) => void,
-  onResetPasswordClick: (driver: Driver) => void,
-  onImpersonateClick: (driver: Driver) => void
+export function DriverTable({drivers,onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp}:{
+  drivers:Driver[];
+  onViewDetailsClick:(driver:Driver)=>void;
+  onEditClick:(driver:Driver)=>void;
+  onViewEarnings?:(driver:Driver)=>void;
+  onOpenApp?:(driver:Driver)=>void;
 }) {
   // Ordenação padrão: status ascendente (ocupados primeiro, offline por último)
   const [sorting, setSorting] = React.useState<SortingState>([
     { id: 'status', desc: false }
   ]);
 
-  const columns = React.useMemo(
-    () => getDriverColumns(
-      onViewDetailsClick,
-      onEditClick,
-      onDeleteClick,
-      onForceLogoutClick,
-      onResetPasswordClick,
-      onImpersonateClick
-    ),
-    [onViewDetailsClick, onEditClick, onDeleteClick, onForceLogoutClick, onResetPasswordClick, onImpersonateClick]
-  );
+  const columns=React.useMemo(()=>getDriverColumns(onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp),[onViewDetailsClick,onEditClick,onViewEarnings,onOpenApp]);
 
   const table = useReactTable({
     data: drivers,

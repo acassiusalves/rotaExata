@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "migrate:driver-deliveries": "tsx scripts/update-driver-deliveries.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "test:rules": "firebase emulators:exec --project demo-rotaexata-driver --only firestore --config firebase.test.json \"node --test test/firestore-driver-rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --project demo-rotaexata-driver --only firestore --config firebase.test.json \"node --test test/firestore-driver-rules.test.mjs\"",
+    "test:planning": "node --experimental-strip-types --test test/staff-plan-batch.emulator.mjs",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
@@ -48,6 +50,7 @@
     "@radix-ui/react-tooltip": "^1.1.8",
     "@radix-ui/react-visually-hidden": "^1.2.4",
     "@react-google-maps/api": "^2.20.7",
+    "@supabase/supabase-js": "2.91.1",
     "@tanstack/react-table": "^8.19.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -55,7 +58,9 @@
     "dotenv": "^16.5.0",
     "embla-carousel-react": "^8.6.0",
     "firebase": "^11.9.1",
+    "firebase-admin": "12.7.0",
     "genkit": "^1.14.1",
+    "google-auth-library": "9.15.1",
     "lucide-react": "^0.475.0",
     "next": "^15.5.7",
     "next-pwa": "^5.6.0",
@@ -72,10 +77,12 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "4.0.1",
+    "@playwright/test": "1.65.1",
     "@types/google.maps": "^3.55.11",
     "@types/node": "^20",
     "@types/papaparse": "^5.3.14",
     "@types/react": "^18",
+    "@types/react-dom": "18.3.7",
     "esbuild": "0.25.11",
     "eslint": "8.57.0",
     "eslint-config-next": "15.3.3",

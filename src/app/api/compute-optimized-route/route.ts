@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { requireStaffEditor } from '@/lib/server/staff/editor-access';
+import { staffEditorSurfaceSchema } from '@/lib/staff/access';
+import { EarningsError,earningsErrorResponse,readJsonBody } from '@/lib/server/earnings/transport';
 import { NextResponse } from 'next/server';
 import type { PlaceValue } from '@/lib/types';
 import { getGoogleMapsApiKey } from '@/lib/firebase/admin';
@@ -24,6 +29,17 @@ interface OptimizedRouteResult {
 // TTL do cache em segundos (3 minutos - menor por usar TRAFFIC_AWARE)
 const CACHE_TTL = 180;
 
+const coordinate=z.object({lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180)}).strict();
+const nativeInput=z.object({origin:coordinate,stops:z.array(coordinate).max(400)}).strict();
+
+async function readRouteInput(request:Request) {
+  if (!nativeStaffEnabled) return await request.json() as {origin:PlaceValue;stops:PlaceValue[]};
+  const body=z.object({surface:staffEditorSurfaceSchema,body:nativeInput}).strict().safeParse(await readJsonBody(request,80_000));
+  if (!body.success) throw new EarningsError(422,'staff_invalid_map_route');
+  await requireStaffEditor(request,body.data.surface);
+  return body.data.body as {origin:PlaceValue;stops:PlaceValue[]};
+}
+
 export async function POST(req: Request) {
   try {
     // Rate limiting
@@ -37,10 +53,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { origin, stops } = (await req.json()) as {
-      origin: PlaceValue;
-      stops: PlaceValue[];
-    };
+    const {origin,stops}=await readRouteInput(req);
 
     if (!stops || stops.length === 0) {
       return NextResponse.json({
@@ -123,6 +136,7 @@ export async function POST(req: Request) {
       headers: { 'X-Cache': 'MISS' }
     });
   } catch (e: unknown) {
+    if (e instanceof EarningsError) return earningsErrorResponse(e);
     const errorMessage = e instanceof Error ? e.message : 'Unknown error';
     console.error('Server Error in compute-optimized-route:', e);
     return NextResponse.json(

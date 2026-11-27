@@ -1,3 +1,4 @@
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { NextRequest, NextResponse } from "next/server";
 import { getGoogleMapsApiKey, verifyAuthToken, hasAllowedRole } from '@/lib/firebase/admin';
 import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/lib/rate-limit';
@@ -5,6 +6,7 @@ import { rateLimit, rateLimitConfigs, getClientIP, rateLimitHeaders } from '@/li
 const ALLOWED_ROLES = ['admin', 'gestor', 'socio'];
 
 export async function GET(req: NextRequest) {
+  if (nativeStaffEnabled) return NextResponse.json({error:'staff_legacy_endpoint_retired'},{status:410});
   try {
     // Rate limiting
     const clientIP = getClientIP(req);

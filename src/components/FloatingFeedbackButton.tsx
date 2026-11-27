@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/hooks/use-auth';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { useAuth } from '@/hooks/auth-context';
+import { useOptionalDriverRuntime } from '@/components/driver/driver-runtime';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,11 +21,17 @@ import { useToast } from '@/hooks/use-toast';
 
 export function FloatingFeedbackButton() {
   const { user } = useAuth();
-  return <FeedbackButton key={user?.uid ?? 'anonymous'} />;
+  const driver=useOptionalDriverRuntime();
+  const staff=useOptionalStaff();
+  return <FeedbackButton key={staff?.userId ?? driver?.userId ?? user?.uid ?? 'anonymous'} />;
 }
 
 function FeedbackButton() {
   const { user, loading } = useAuth();
+  const driver=useOptionalDriverRuntime();
+  const staff=useOptionalStaff();
+  const nativeRequest=staff?.request ?? (driver?.native ? driver.request:undefined);
+  const endpoint=staff ? '/api/staff/feedbacks':'/api/driver/feedbacks';
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(emptyReportDraft);
   const requestId = useRef<string | undefined>(undefined);
@@ -33,66 +41,52 @@ function FeedbackButton() {
   const [capturedLogs, setCapturedLogs] = useState<any[]>([]);
   const { toast } = useToast();
 
-  const originalConsoleError = useRef<any>(null);
-
-  // Hook into console.error to capture latest errors
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    const originalConsoleError = console.error;
+    let active = true;
 
-    originalConsoleError.current = console.error;
-
-    console.error = (...args: any[]) => {
-      // Store the error (limit to last 10)
-      setCapturedLogs(prev => {
-        const newLogs = [...prev, { timestamp: new Date().toISOString(), args: args.map(arg => String(arg)) }];
-        return newLogs.slice(-10);
-      });
-      // Call original
-      if (originalConsoleError.current) {
-        originalConsoleError.current.apply(console, args);
+    const captureError = (...args: unknown[]) => {
+      if (active) {
+        setCapturedLogs(previous => [...previous, {
+          timestamp: new Date().toISOString(),
+          args: args.map(arg => String(arg)),
+        }].slice(-10));
       }
+      originalConsoleError.apply(console, args);
     };
+    console.error = captureError;
 
     return () => {
-      if (originalConsoleError.current) {
-        console.error = originalConsoleError.current;
-      }
+      active = false;
+      if (console.error === captureError) console.error = originalConsoleError;
     };
   }, []);
 
   // Only render if user is loaded
-  if (loading || !user) {
+  if (!nativeRequest && (loading || !user)) {
     return null;
   }
 
   const submission = readSubmission(draft);
   const handleSubmit = async () => {
-    if (!user || !submission || inFlight.current) return;
+    if ((!user && !nativeRequest) || !submission || inFlight.current || driver?.readOnly) return;
     const controller = new AbortController();
     inFlight.current = controller;
     requestId.current ??= crypto.randomUUID();
     setIsSubmitting(true);
     try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/feedbacks', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...submission,
-          submissionId: requestId.current,
-          url: window.location.href,
-          userAgent: navigator.userAgent,
-          resolution: `${window.innerWidth}x${window.innerHeight}`,
-          logs: capturedLogs,
-        }),
+      const body=JSON.stringify({
+        ...submission,submissionId:requestId.current,url:window.location.href,userAgent:navigator.userAgent,
+        resolution:`${window.innerWidth}x${window.innerHeight}`,logs:capturedLogs,
       });
-
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || 'Falha ao enviar chamado.');
+      if (nativeRequest) await nativeRequest(endpoint,{method:'POST',signal:controller.signal,body});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks',{method:'POST',signal:controller.signal,
+          headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body});
+        const data=await response.json().catch(()=>null);
+        if (!response.ok) throw new Error(data?.error || 'Falha ao enviar chamado.');
+      }
 
       if (controller.signal.aborted) return;
       window.dispatchEvent(new Event(REPORT_CREATED_EVENT));

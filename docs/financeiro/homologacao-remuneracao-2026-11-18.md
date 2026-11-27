@@ -1,0 +1,86 @@
+# Homologação da remuneração em Supabase
+
+## Resultado local em 18/11/2026
+
+A jornada sintética usou Supabase Auth, PostgREST, Realtime e PostgreSQL 17 locais, com Firestore emulado. O motorista acessou a rota com a sessão Supabase, iniciou, confirmou uma entrega e encerrou. A API gravou a prova da prestação. A mesma revisão enviada duas vezes produziu um lançamento de **R$ 37,00 a conferir**. O operador aprovou e registrou a baixa. O titular viu os três estados e três eventos Realtime. A segunda conta tentou acessar a rota e recebeu 404. Ao consultar e assinar o lançamento de outra conta, recebeu zero linhas REST e zero eventos Realtime.
+
+Na interface web local, o operador entrou pela conta Supabase, simulou R$ 38,00 com o exemplo de duas paradas e publicou a versão 1. Ao recarregar, a tela mostrou a versão vigente e os valores gravados. O extrato foi conferido no navegador em viewport móvel com duas contas sintéticas. O login de uma conta com TOTP exigiu o desafio antes do financeiro. O código inválido exibiu erro, o cancelamento encerrou a sessão e retirou o token do armazenamento, e o código válido liberou a consulta de regras.
+
+As APIs operacionais de escrita foram ensaiadas com Firebase Auth e Firestore emulados. Chamadas anônimas e chamadas de motorista com um identificador de operador no corpo foram recusadas. A criação legítima atribuiu a autoria ao identificador do operador autenticado.
+
+## Integridade do financeiro
+
+- Duas publicações simultâneas com a mesma revisão esperada produziram uma versão e um conflito.
+- Dois comandos concorrentes sobre um pagamento aprovado produziram um desfecho e um conflito. Quando uma exclusão da rota chegou primeiro, a baixa concorrente foi recusada e o valor aprovado permaneceu congelado em revisão.
+- Ajustes de parada de R$ 5 para R$ 7, R$ 8 e R$ 8 registraram deltas de R$ 2 e R$ 1. O ajuste de total aparece no painel e no extrato com a diferença correspondente.
+- A pausa da emissão preservou a inbox e o extrato confirmado. O recebimento continuou durável, e um trabalhador em andamento respeitou a pausa ao tentar concluir.
+- A importação sintética gravou dois documentos no staging e confirmou o replay. A primeira promoção deixou ambos privados por falta de vínculo. Depois de inserir uma correspondência comprovada, promoveu uma linha e manteve a outra em revisão. A promoção ocorreu com a visibilidade desligada.
+
+## Snapshot histórico
+
+O dry-run do snapshot de origem de 18/11/2026 às 18:30:13.973649 UTC somou 374 documentos e **R$ 28.690,00 nos registros**. São 373 pendentes e um aprovado. Há 93 sem UID histórico, 114 casos cuja composição requer conferência e dez valores zerados na versão 2. O inventário encontrou 536 rotas concluídas e 69 autoencerradas sem documento. Essas rotas continuam sem lançamento. A regra legada ativa estava na versão 3.
+
+## Staging no projeto compartilhado
+
+As quatro migrations constam no histórico do projeto Sistema Lunna. O escopo `e82fdc1f-e12a-42ea-9429-82a1bfec172e` recebeu 374 documentos privados em oito lotes, com ID de execução `62f1a57c-f8d7-4a5e-9040-6d779b7c99d4`. A conciliação comparou ID, revisão, fingerprint, original e candidato em todos os documentos e encontrou zero divergências. A repetição reconheceu 374 documentos e criou zero. A leitura da origem após o staging, às 19:44:27 UTC, encontrou zero inclusões, alterações ou remoções.
+
+Os registros preservados somam R$ 28.667,00 pendentes e R$ 23,00 aprovados. Todos os 374 carregam a lacuna do snapshot original da regra. O valor financeiro ainda exige conferência. O manifesto tem fingerprint `713485d63ee58a3885cb35527c5d11f236f465afe6c82fe5e186f1635be215ff`.
+
+Na conferência do staging, o escopo tinha zero membros, zero lançamentos, zero linhas de extrato e zero eventos de origem. Os quatro controles estavam desligados e o diretório canônico tinha zero perfis e zero vínculos. A promoção depende da prova de quem prestou o serviço e da reconciliação dos valores em revisão.
+
+## Verificações e limites
+
+Foram executados 80 testes da aplicação, 19 das Cloud Functions, 14 das Firestore Rules e cinco suítes SQL. A aplicação compilou no modo Vercel com variáveis sintéticas. O typecheck global retornou 84 diagnósticos que já existiam na base. O ensaio SQL usou a estrutura Auth efetiva do GoTrue, o contrato mínimo do vínculo CRM e a migration do diretório de plataforma. O histórico completo do owner tem uma versão CRM duplicada e exige tratamento em sua frente.
+
+As verificações locais usaram identidades sintéticas. O ensaio da conta Google no ambiente de destino está registrado no fechamento de produção. A interface web em viewport móvel e o ensaio da API operacional são evidências locais. O corte de Auth da PWA inteira exige validar uploads, presença, notificações, perfil, chamados e a jornada operacional com uma única sessão canônica. O ensaio físico depende de aparelho Android autorizado.
+
+## Fechamento da revisão e da interface
+
+Uma revisão final com GPT Astra identificou onze pontos críticos ou importantes. O GPT Sol corrigiu a autorização dos escritores de rotas, a separação entre staging e promoção, a integridade do manifesto, a distância não calculada, a data do encerramento administrativo, a retenção do pagamento após divergência da fonte, a referência e a apuração no extrato, o MFA, o ajuste global, a precisão dos recibos e o preflight OIDC. As regressões passaram após a correção. O ensaio com a identidade Google efetiva consta no fechamento de produção.
+
+O navegador local confirmou a rota sintética `FILA-LOCAL` como **Em apuração** para o titular. A segunda conta recebeu um extrato vazio, sem essa rota. O cancelamento do MFA foi conferido após a resposta 204 de logout: token removido e recarregamento na tela de entrada. Os ensaios foram feitos no Chrome com viewport móvel e contas sintéticas.
+
+Dois achados menores foram adiados: a atualização automática volta à primeira página da paginação; o contador no singular ainda usa o plural de “lançamentos”.
+
+O verificador de segurança do Supabase confirmou as doze tabelas privadas com RLS e sem acesso direto. Seus avisos informativos de RLS sem política são intencionais: o acesso ocorre pelas RPCs de servidor. As quatorze RPCs públicas do módulo negam EXECUTE a anon e authenticated e fixam search_path. O alerta de proteção contra senhas vazadas já existia antes desta migração e pertence à configuração geral de Auth. [Referência dos avisos](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
+
+A entrega está preservada nas branches locais `codex/remuneracao-entregadores-supabase` (RotaExata) e `codex/remuneracao-entregadores-supabase-db` (Luna). O estado de publicação e os critérios pendentes estão registrados no fechamento de produção deste relatório.
+
+## PWA com sessão nativa
+
+No Chrome em viewport móvel, um motorista sintético entrou por `/login`, voltou à rota original, iniciou, registrou a entrega com um comprovante do Storage emulado, reeditou a observação e concluiu. A rota apareceu no histórico. A mesma conclusão gravada pelo navegador gerou prova de servidor e um envelope processado pelo inbox do Supabase local. A repetição foi identificada como duplicata. Pelo menu da PWA, o motorista abriu Meus ganhos e voltou às rotas com **uma única autenticação de senha**. O lançamento apareceu a conferir com **R$ 37,00**. O passo de ponte usou a emissão local com a revisão da rota desse ensaio.
+
+O painel de contas usou a sessão Supabase do operador. O JWT antigo recebeu 401 imediatamente após revogação. O motorista bloqueado teve o acesso operacional recusado, inclusive depois de entrar de novo, e a reativação restaurou o acesso. Uma senha rejeitada pelo Auth preservou a exigência de troca. A troca bem-sucedida removeu a exigência e permitiu o novo login. O ensaio de recuperação PKCE e o reenvio de confirmação foram verificados no Mailpit sintético. O teste passou pelo túnel local da VM e preservou o callback emitido pelo GoTrue. A senha sintética foi restaurada e a conta de teste de confirmação removida.
+
+O Firebase Messaging permanece como transporte. A entrega de push em aparelho e a instalação Android continuam pendentes. Os testes web usaram os emuladores. A publicação e a ativação operacionais estão registradas no fechamento de produção.
+
+
+O corte do Storage foi composto sobre uma cópia da release ativa. No emulador, tokens Firebase de dois motoristas sintéticos perderam leitura e escrita no caminho de comprovantes. O operador autenticado manteve acesso válido. O emulador recusou acesso anônimo, MIME incompatível e arquivo no limite de 5 MiB. O acesso administrativo de servidor funcionou e o rollback restaurou o acesso da coorte.
+
+## Verificação após a revisão do corte
+
+A homologação integrada repetiu a emissão de **R$ 37,00**, a aprovação, a baixa, e a leitura restrita ao motorista. Houve três eventos Realtime para o titular e zero para a outra conta. A API recusou conclusão sem comprovante, respondeu ao replay idêntico sem duplicar o registro de atividade e recusou a revisão desatualizada. Uma parada desvinculada ficou fora do roteiro e da contagem de conclusão.
+
+O comprovante novo foi gravado no Storage emulado e lido pela API privada. O titular leu a imagem, a outra conta recebeu 404 e o token revogado recebeu 401. A validação de push aceitou somente a associação da sessão ativa e recusou a prova após revogação. Os testes do emissor e do worker usaram mensagens sintéticas, inclusive entrega atrasada após troca de conta.
+
+No Chrome, uma falha 503 preservou a foto e a observação da confirmação e bloqueou a escrita até a revalidação. O motorista saiu de Meus ganhos offline, recarregou e permaneceu desconectado após reconectar. O operador sintético recuperou a senha via Mailpit e PKCE e voltou ao painel original. A senha da conta de teste foi restaurada.
+
+
+A migração de controles de conta foi aplicada ao Sistema Lunna como `20261119005719_rota_driver_account_controls.sql`, com o SHA-256 `ddd405bce6351f52b72e5c088ae2590ae36301993cec7eefc0570b5f6f95e960`. As três funções remotas corresponderam às definições homologadas. A importação de identidades e o estado da candidata constam no fechamento de produção.
+
+
+## Fechamento de produção em 19/11/2026 UTC
+
+O canário no Supabase hospedado confirmou preservação de UUID e senha, recusa de senha incorreta, bloqueio de contas não verificadas e banidas, callback do RotaExata e a exigência de TOTP para alcançar AAL2. As três contas de canário foram removidas. O cadastro público foi desligado. Nenhum e-mail real foi disparado durante o ensaio.
+
+A importação criou 25 contas e reconciliou 30 perfis, 30 vínculos e 30 associações de escopo. Vinte e duas associações estão ativas, incluindo os 15 motoristas. Nove motoristas têm e-mail verificado e seis precisam confirmá-lo. Os hashes e fatores das oito contas Supabase preexistentes foram preservados. A comparação de origem encontrou zero divergências e o replay do diretório foi idempotente.
+
+O backend com login Firebase e financeiro fechado passou em sete verificações públicas. A candidata nativa passou em 16 verificações antes da promoção. No domínio canônico, o deployment `dpl_5Lq5MhhhPGpBTgFsqZTNurMs6Qc3` passou em 15 verificações sem sessão de usuário. Foram conferidos os endpoints nativos, a recusa de APIs legadas, o manifesto e os workers. O deployment final `dpl_7excCYiDS9LvqqBVVfKPxCQfjChJ` usa o mesmo código com identificador de build `a23d128c21cd-native-v1`. Candidata e domínio passaram nas três verificações da troca de versão, do modo nativo e da proteção do runtime.
+
+As Rules de Firestore e Storage entraram em vigor e o documento de fase recebeu os 15 motoristas às 02:04:40 UTC. O corte preservou o estado da rota aberta e a confirmação de e-mail. A autenticação integrada com a jornada e a inspeção de mídia foram verificadas com contas sintéticas em ambiente isolado. O acesso de uma conta real no domínio, a instalação Android e uma entrega FCM em aparelho ainda aguardam conferência.
+
+O retry publicado entregou um evento sintético do tipo `gap` ao receptor usando OIDC da conta dedicada. O primeiro ACK foi confirmado às 01:46:28.869 UTC e o replay às 01:48:02.956 UTC. O destino preservou uma única linha de inbox, arquivada como `ignored:operational_canary`. O ensaio deixou zero créditos e zero linhas de extrato, sem alterações de rotas reais, e-mails ou notificações.
+
+Em um segundo ensaio, a gravação de uma rota sintética no Firestore disparou automaticamente o Eventarc. A captura gravou a outbox e enviou o evento por OIDC. O PostgreSQL recebeu o snapshot às 02:15:16.363 UTC, confirmou o recebimento e o processou como `ignored:abandoned`. A remoção condicionada da rota sintética também gerou um evento automático. O worker o classificou como `review:source_deleted` e o operador o arquivou como `ignored:operational_canary`. O ensaio deixou zero créditos e zero linhas de extrato, com zero alterações de rotas reais, e-mails e notificações. A rota real continuava em andamento na leitura das 02:18:29 UTC.
+
+A captura Eventarc, o retry e a reconciliação foram verificados ativos com a mesma conta dedicada e watermark `2026-11-19T02:04:40.435528Z`. O Supabase habilitou captura, emissão, comandos e extrato com esse corte. Na leitura de fechamento, havia três eventos ignorados, zero tarifas publicadas e zero lançamentos. Os 374 históricos permanecem privados. A emissão real depende de uma regra publicada vigente no momento da conclusão elegível. A primeira emissão, aprovação e baixa em produção ainda aguardam conferência.

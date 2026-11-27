@@ -8,7 +8,7 @@ import { logLunnaStatusUpdated } from './firebase/activity-log';
  * Atualiza o campo logisticsStatus no pedido quando o motorista completa/falha uma entrega
  */
 export async function syncLunnaOrderStatus(
-  routeInfo: RouteInfo,
+  routeInfo: RouteInfo & { id?: string },
   stop: PlaceValue,
   newStatus: 'entregue' | 'falha'
 ) {

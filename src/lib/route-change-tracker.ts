@@ -1,6 +1,5 @@
-import { PlaceValue, RouteChangeNotification } from './types';
-import { Timestamp } from 'firebase/firestore';
-import { getStopIdentityKey } from './route-stop-utils';
+import type { PlaceValue, RouteChangeNotification } from './types';
+import { getStopIdentityKey } from './route-stop-utils.ts';
 
 export interface RouteChange {
   stopId: string;
@@ -154,7 +153,7 @@ export function markModifiedStops(
     const modifiedStop: any = {
       ...stop,
       wasModified: true,
-      modifiedAt: Timestamp.now(),
+      modifiedAt: new Date(),
       modificationType: primaryChange.changeType,
     };
 
@@ -179,7 +178,7 @@ export function createNotification(
     routeId,
     driverId,
     changes,
-    createdAt: Timestamp.now(),
+    createdAt: new Date(),
     acknowledged: false,
   };
 }

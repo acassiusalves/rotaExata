@@ -12,22 +12,12 @@ import {
   Weight,
   Calendar,
 } from 'lucide-react';
-import { db } from '@/lib/firebase/client';
-import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
-import { useAuth } from '@/hooks/use-auth';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { driverPages } from '@/lib/driver/runtime-client';
+import type { DriverRoute } from '@/lib/driver/runtime-contract';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
-
-type RouteDocument = {
-  id: string;
-  name: string;
-  status: 'dispatched' | 'in_progress' | 'completed';
-  plannedDate: Timestamp;
-  completedAt?: Timestamp;
-  stops: any[];
-  distanceMeters: number;
-};
 
 const formatDistance = (meters: number = 0) => (meters / 1000).toFixed(0);
 
@@ -109,51 +99,22 @@ const getTotalWeight = (stops: any[]) => {
 };
 
 export default function MyRoutesHistoryPage() {
-  const { user } = useAuth();
-  const [routes, setRoutes] = React.useState<RouteDocument[]>([]);
+  const { request,endpoint } = useDriverRuntime();
+  const [routes, setRoutes] = React.useState<DriverRoute[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const { toast } = useToast();
 
   React.useEffect(() => {
-    if (!user) {
-      setIsLoading(false);
-      return;
-    }
-
-    const q = query(
-      collection(db, 'routes'),
-      where('driverId', '==', user.uid),
-      where('status', '==', 'completed')
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const routesData: RouteDocument[] = [];
-        querySnapshot.forEach((doc) => {
-          routesData.push({
-            id: doc.id,
-            ...doc.data(),
-          } as RouteDocument);
-        });
-        // Sort by completion date, most recent first
-        routesData.sort((a, b) => (b.completedAt?.toMillis() || 0) - (a.completedAt?.toMillis() || 0));
-        setRoutes(routesData);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching route history: ', error);
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao buscar histórico',
-          description: 'Não foi possível carregar as rotas concluídas.',
-        });
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user, toast]);
+    const ctrl=new AbortController();
+    void driverPages<DriverRoute>(request,endpoint,'history',ctrl.signal).then(result=>{
+      if (ctrl.signal.aborted) return;
+      result.sort((a,b)=>(Date.parse(b.completedAt ?? '')||0)-(Date.parse(a.completedAt ?? '')||0));
+      setRoutes(result);
+    }).catch(()=>{
+      if (!ctrl.signal.aborted) toast({variant:'destructive',title:'Não foi possível carregar o histórico'});
+    }).finally(()=>{if (!ctrl.signal.aborted) setIsLoading(false);});
+    return()=>ctrl.abort();
+  },[request,endpoint,toast]);
 
   const stats = React.useMemo(() => {
     return {
@@ -248,7 +209,7 @@ export default function MyRoutesHistoryPage() {
                     <Calendar className="h-4 w-4" />
                     <span>
                       Concluída em{' '}
-                      {format(route.completedAt.toDate(), "dd/MM/yyyy 'às' HH:mm", {
+                      {format(new Date(route.completedAt), "dd/MM/yyyy 'às' HH:mm", {
                         locale: ptBR,
                       })}
                     </span>

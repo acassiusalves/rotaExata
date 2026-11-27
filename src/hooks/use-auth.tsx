@@ -1,33 +1,18 @@
 
 "use client";
 
-import React, { useState, useEffect, createContext, useContext } from 'react';
-import { User, UserCredential, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import React, { useState, useEffect } from 'react';
+import { User, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
+import { signOutEarningsIfPresent } from '@/lib/earnings/client';
+import { AuthContext } from './auth-context';
+export { useAuth } from './auth-context';
 import { Toaster } from '@/components/ui/toaster';
 import { createLogger } from '@/lib/logger';
 import { clearImpersonationSession, isImpersonationSessionActive } from '@/lib/impersonation-session';
 
 const log = createLogger('AuthProvider');
-
-interface AuthContextType {
-  user: User | null;
-  userRole: string | null;
-  mustChangePassword?: boolean;
-  loading: boolean;
-  signIn: (email: string, pass: string) => Promise<UserCredential>;
-  signOut: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextType>({
-    user: null,
-    userRole: null,
-    mustChangePassword: false,
-    loading: true,
-    signIn: async () => { throw new Error('AuthProvider not initialized'); },
-    signOut: async () => { throw new Error('AuthProvider not initialized'); },
-});
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -84,7 +69,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
-            role = data?.role || 'socio';
+            role = typeof data?.role === 'string' && data?.active !== false ? data.role : null;
             setUserRole(role);
             setMustChangePassword(data?.mustChangePassword || false);
             log.debug('Usuário autenticado:', {
@@ -96,7 +81,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           } else {
             // Handle case where user exists in Auth but not in Firestore
             log.warn(`User ${user.uid} found in Auth but not in Firestore.`);
-            role = 'socio'; // default role
+            role = null;
             setUserRole(role);
             setMustChangePassword(false);
           }
@@ -248,7 +233,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         log.error('Falha ao registrar status offline no signOut', err);
       }
     }
-    await firebaseSignOut(auth);
+    await Promise.all([firebaseSignOut(auth), signOutEarningsIfPresent()]);
     clearImpersonationSession();
     setUser(null);
     setUserRole(null);
@@ -274,8 +259,4 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
        </>
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  return useContext(AuthContext);
 };

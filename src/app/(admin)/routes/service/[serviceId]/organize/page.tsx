@@ -1,13 +1,19 @@
 'use client';
 
 import * as React from 'react';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import ServiceAcompanharPage from '../acompanhar/page';
+import { editorDate,useRouteEditor, routeRef as editorRoute, serviceRef as editorService, editorTime as serverTimestamp, serviceRoutes, ordersByNumber } from '@/components/staff/use-route-editor';
 import { useRouter, useParams } from 'next/navigation';
-import { db } from '@/lib/firebase/client';
-import { doc, getDoc, getDocs, collection, query, where, Timestamp, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import type { LunnaService, PlaceValue } from '@/lib/types';
 
 export default function ServiceOrganizePage() {
+  return nativeStaffEnabled ? <ServiceAcompanharPage />:<LegacyServiceOrganizePage />;
+}
+
+function LegacyServiceOrganizePage() {
+  const { readDocument:getDoc, readList:getDocs, update:updateDoc, draftKey } = useRouteEditor();
   const router = useRouter();
   const params = useParams();
   const serviceId = params.serviceId as string;
@@ -18,7 +24,7 @@ export default function ServiceOrganizePage() {
     const loadServiceAndRedirect = async () => {
       try {
         // Buscar dados do serviço
-        const serviceRef = doc(db, 'services', serviceId);
+        const serviceRef = editorService(serviceId);
         const serviceSnap = await getDoc(serviceRef);
 
         if (!serviceSnap.exists()) {
@@ -51,19 +57,12 @@ export default function ServiceOrganizePage() {
           return;
         }
 
-        const plannedDate = serviceData.plannedDate instanceof Timestamp
-          ? serviceData.plannedDate.toDate()
-          : serviceData.plannedDate instanceof Date
-            ? serviceData.plannedDate
-            : new Date();
+        const plannedDate=editorDate(serviceData.plannedDate) ?? new Date();
         const routeDateISO = plannedDate.toISOString();
         const routeTime = `${String(plannedDate.getHours()).padStart(2, '0')}:${String(plannedDate.getMinutes()).padStart(2, '0')}`;
 
         // Buscar rotas já existentes para este serviço
-        const existingRoutesQuery = query(
-          collection(db, 'routes'),
-          where('serviceId', '==', serviceId)
-        );
+        const existingRoutesQuery = serviceRoutes(serviceId);
         const existingRoutesSnap = await getDocs(existingRoutesQuery);
 
         const existingServiceRoutes: Array<{
@@ -135,7 +134,7 @@ export default function ServiceOrganizePage() {
             for (let i = 0; i < orderNumbers.length; i += 30) {
               const batch = orderNumbers.slice(i, i + 30);
               const ordersSnap = await getDocs(
-                query(collection(db, 'orders'), where('number', 'in', batch))
+                ordersByNumber(batch)
               );
               for (const orderDoc of ordersSnap.docs) {
                 const orderData = orderDoc.data();
@@ -161,7 +160,7 @@ export default function ServiceOrganizePage() {
                   try {
                     const cleanedUnassigned = routeUnassignedStops.filter(s => !s.orderNumber || !unlinkedOrders.has(s.orderNumber));
 
-                    await updateDoc(doc(db, 'routes', route.id), {
+                    await updateDoc(editorRoute(route.id), {
                       stops: route.stops,
                       unassignedStops: cleanedUnassigned,
                       updatedAt: serverTimestamp(),
@@ -190,7 +189,7 @@ export default function ServiceOrganizePage() {
               );
               if (serviceData.allStops.length < origAllStopsLen) {
                 try {
-                  const serviceRef = doc(db, 'services', serviceId);
+                  const serviceRef = editorService(serviceId);
                   await updateDoc(serviceRef, {
                     allStops: serviceData.allStops,
                     'stats.totalDeliveries': serviceData.allStops.length,
@@ -278,7 +277,7 @@ export default function ServiceOrganizePage() {
         console.log('📦 [ServiceOrganize] Origin completo:', routeData.origin);
 
         // Não precisa mais do sessionStorage - usar URL diretamente
-        // sessionStorage.setItem('newRouteData', JSON.stringify(routeData));
+        // sessionStorage.setItem(draftKey, JSON.stringify(routeData));
 
         // Redirecionar para a nova URL com serviceId
         router.push(`/routes/service/${serviceId}/acompanhar`);

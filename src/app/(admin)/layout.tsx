@@ -1,12 +1,22 @@
 
 'use client';
 import { MainLayout } from '@/components/layout/main-layout';
-import { useAuth } from '@/hooks/use-auth';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { StaffGate } from '@/components/staff/staff-session';
+import { EarningsShell } from '@/components/earnings/earnings-shell';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
+import { useAuth } from '@/hooks/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Toaster } from '@/components/ui/toaster';
 
-export default function AdminLayout({
+export default function AdminLayout({children}:{children:React.ReactNode}) {
+  if (nativeStaffEnabled) return <EarningsShell portal staffLogin><StaffGate><MainLayout>{children}</MainLayout><Toaster /></StaffGate></EarningsShell>;
+  return <FirebaseAdminLayout>{children}</FirebaseAdminLayout>;
+}
+
+function FirebaseAdminLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -17,8 +27,8 @@ export default function AdminLayout({
   useEffect(() => {
     if (!loading) {
       if (!user) {
-        router.push('/login');
-      } else if (userRole && !['admin', 'socio', 'gestor'].includes(userRole)) {
+        router.push(nativeDriverEnabled ? '/login?admin=1' : '/login');
+      } else if (!userRole || !['admin', 'socio', 'gestor'].includes(userRole)) {
         // Se não é admin/socio/gestor, redireciona para área do motorista
         router.push('/my-routes');
       }
@@ -34,7 +44,7 @@ export default function AdminLayout({
   }
 
   // Renderiza nulo enquanto redireciona para evitar piscar o layout errado
-  if (!user || (userRole && !['admin', 'socio', 'gestor'].includes(userRole))) {
+  if (!user || (!userRole || !['admin', 'socio', 'gestor'].includes(userRole))) {
     return (
         <div className="flex h-screen w-full items-center justify-center bg-background">
           <Loader2 className="h-8 w-8 animate-spin" />

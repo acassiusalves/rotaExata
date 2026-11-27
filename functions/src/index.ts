@@ -1,18 +1,35 @@
+import {onDocumentWritten} from "firebase-functions/v2/firestore";
+import {defineString} from "firebase-functions/params";
+import {onSchedule} from "firebase-functions/v2/scheduler";
+import {protectCompletion} from "./earnings-source-adapter";
+import {captureFinancialRoute,reconcileFinancialRoutes,retryCapturedFinancialRoutes} from "./earnings-source-bridge";
 
-import {onCall,HttpsError} from "firebase-functions/v2/https";
+import {onCall,HttpsError,type CallableRequest} from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
-import {getFirestore,FieldValue} from "firebase-admin/firestore";
+import {getFirestore,FieldValue,Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {randomBytes} from "node:crypto";
+import {driverPushMessage} from "./driver-push";
 import {checkInviteConflict} from "./invite-conflict";
+import {blocksLegacyDriverAccountAction, isNativeDriverUuid, sourceDriverAssignable, type LegacyDriverAccountAction} from "./legacy-driver-accounts";
+import {legacyRotaStaffAllowed} from "./legacy-staff-cutover";
 import {buildSyncPatch} from "./sync-user";
 import {resolveAutoCompletion} from "./auto-completion";
 import {sendPushWithOutcome, persistPushOutcome, type PushOutcome} from "./push-outcome";
+import {
+  type ReopenableRoute,
+  MIN_REOPEN_REASON_LENGTH,
+  REOPEN_REFUSAL_MESSAGES,
+  buildReopenHistoryEntry,
+  isEligibleForAutoCompletion,
+  resolveReopen,
+} from "./route-reopen";
 
 initializeApp();
 
+const earningsBridgeAccount = defineString("ROTA_EARNINGS_BRIDGE_EMAIL");
 const ADMIN_ROLES = ["admin", "socio", "gestor"];
 const DEFAULT_TEMPORARY_PASSWORD = "123456";
 const ACTIVE_DRIVER_ROUTE_STATUSES = new Set([
@@ -41,6 +58,39 @@ async function assertAuthorizedRole(
   }
 
   return userRole;
+}
+
+async function assertLegacyDriverAccountAllowed(action: LegacyDriverAccountAction): Promise<void> {
+  if ("role" in action && action.role !== "driver") return;
+  const db = getFirestore();
+  const phase = await db.doc("rotaAuthTransition/driver").get();
+  const profile = "uid" in action && isNativeDriverUuid(action.uid) ? (await db.collection("users").doc(action.uid).get()).data() : undefined;
+  if (blocksLegacyDriverAccountAction(phase.data(), action, profile)) {
+    throw new HttpsError("failed-precondition", "Use o painel nativo de contas de motoristas em /driver/admin/accounts.");
+  }
+}
+
+async function assertLegacyRotaStaffEnabled(req:CallableRequest):Promise<void> {
+  if (!req.auth) throw new HttpsError("unauthenticated","Sessão operacional ausente");
+  const phase=(await getFirestore().doc("rotaAuthTransition/staff").get()).data();
+  if (!legacyRotaStaffAllowed(phase)) {
+    throw new HttpsError("failed-precondition","Abra o RotaExata e entre com sua conta Lunna.");
+  }
+}
+
+async function requireOperationalOperator(req: CallableRequest, roles: string[] = ADMIN_ROLES) {
+  const token = req.rawRequest?.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+  if (!req.auth || !token || token.length > 16384) throw new HttpsError("unauthenticated","Sessão operacional ausente");
+  const verified = await getAuth().verifyIdToken(token,true).catch(() => null);
+  if (!verified || verified.uid!==req.auth.uid || verified.firebase.sign_in_provider==="custom") {
+    throw new HttpsError("permission-denied","Sessão operacional inválida");
+  }
+  const profile=(await getFirestore().collection("users").doc(verified.uid).get()).data();
+  if (!profile || !roles.includes(profile.role) || profile.active===false || profile.disabled===true || profile.mustChangePassword===true) {
+    throw new HttpsError("permission-denied","Apenas operadores ativos podem alterar a operação");
+  }
+  await assertLegacyDriverAccountAllowed({uid:verified.uid});
+  return {uid:verified.uid,profile};
 }
 
 function generateTemporaryPassword(): string {
@@ -169,6 +219,7 @@ async function generateRouteCode(): Promise<string> {
 export const inviteUser = onCall(
   {region:"southamerica-east1"},
   async (req)=>{
+    await assertLegacyRotaStaffEnabled(req);
     const d=req.data||{};
     const email=String(d.email||"").trim().toLowerCase();
     const role=String(d.role||"").trim();
@@ -182,10 +233,9 @@ export const inviteUser = onCall(
       );
     }
     try{
-      await assertAuthorizedRole(
-        req.auth?.uid,
-        "Apenas administradores, sócios e gestores podem convidar usuários"
-      );
+      await requireOperationalOperator(req);
+
+      await assertLegacyDriverAccountAllowed({role});
 
       const auth=getAuth();
       const db=getFirestore();
@@ -267,18 +317,18 @@ export const inviteUser = onCall(
 export const deleteUser = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
-    await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem remover usuários"
-    );
+    await requireOperationalOperator(req);
 
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
     
+    await assertLegacyDriverAccountAllowed({uid});
+
     try {
       const db = getFirestore();
       const auth = getAuth();
@@ -337,6 +387,7 @@ export const deleteUser = onCall(
 export const resetUserPassword = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
@@ -344,13 +395,13 @@ export const resetUserPassword = onCall(
       throw new HttpsError("invalid-argument", "UID do usuário é obrigatório");
     }
 
-    const requesterRole = await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem resetar senhas"
-    );
-    const requesterUid = req.auth?.uid || "";
+    const operator=await requireOperationalOperator(req);
+    const requesterRole=operator.profile.role;
+    const requesterUid=operator.uid;
 
     try {
+      await assertLegacyDriverAccountAllowed({uid});
+
       const auth = getAuth();
       const db = getFirestore();
       const userRef = db.collection("users").doc(uid);
@@ -419,6 +470,7 @@ export const resetUserPassword = onCall(
 export const updateDriverProfile = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
     const displayName = String(d.displayName || "").trim();
@@ -426,17 +478,13 @@ export const updateDriverProfile = onCall(
     const vehicleType = String(d.vehicle?.type || "").trim();
     const vehiclePlate = String(d.vehicle?.plate || "").trim().toUpperCase();
 
-    await assertAuthorizedRole(
-      req.auth?.uid,
-      "Apenas administradores, sócios e gestores podem editar motoristas"
-    );
+    await requireOperationalOperator(req);
 
     if (!uid || !displayName) {
       throw new HttpsError("invalid-argument", "uid e displayName são obrigatórios");
     }
 
     const db = getFirestore();
-    const auth = getAuth();
     const userRef = db.collection("users").doc(uid);
     const userDoc = await userRef.get();
 
@@ -454,9 +502,7 @@ export const updateDriverProfile = onCall(
       plate: vehiclePlate || "N/A",
     };
 
-    await auth.updateUser(uid, {
-      displayName,
-    });
+    if (!userData.nativeDriverProvisioningId) await getAuth().updateUser(uid,{displayName});
 
     await userRef.set(
       {
@@ -507,12 +553,15 @@ export const updateDriverProfile = onCall(
 export const deleteRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
     if (!routeId) {
       throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
+
+    await requireOperationalOperator(req);
 
     try {
       const db = getFirestore();
@@ -548,6 +597,7 @@ export const deleteRoute = onCall(
 export const updateRouteName = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const name = String(d.name || "").trim();
@@ -559,6 +609,8 @@ export const updateRouteName = onCall(
     if (!name) {
       throw new HttpsError("invalid-argument", "Nome da rota é obrigatório");
     }
+
+    await requireOperationalOperator(req);
 
     try {
       const db = getFirestore();
@@ -575,6 +627,7 @@ export const updateRouteName = onCall(
 export const updateRouteDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
     const driverId = String(d.driverId || "").trim();
@@ -588,31 +641,38 @@ export const updateRouteDriver = onCall(
       throw new HttpsError("invalid-argument", "ID do motorista é obrigatório");
     }
 
+    await requireOperationalOperator(req);
+
     try {
       const db = getFirestore();
       const routeRef = db.collection("routes").doc(routeId);
 
-      // Buscar a rota atual para verificar o status
-      const routeDoc = await routeRef.get();
-      const routeData = routeDoc.data();
-      const currentStatus = routeData?.status;
+      await db.runTransaction(async tx=>{
+        const profile = isNativeDriverUuid(driverId) ? (await tx.get(db.collection("users").doc(driverId))).data() : undefined;
+        if (!sourceDriverAssignable(driverId,profile)) throw new HttpsError("failed-precondition","O motorista selecionado está indisponível para despacho.");
+        // Buscar a rota atual para verificar o status
+        const routeDoc = await tx.get(routeRef);
+        const routeData = routeDoc.data();
+        const currentStatus = routeData?.status;
 
-      // Se a rota não está em um status ativo, mudar para dispatched ao receber motorista
-      const updateData: Record<string, any> = {
-        driverId,
-        driverInfo
-      };
+        // Se a rota não está em um status ativo, mudar para dispatched ao receber motorista
+        const updateData: Record<string, any> = {
+          driverId,
+          driverInfo
+        };
 
-      // Status que precisam ser convertidos para 'dispatched' quando um motorista é atribuído
-      const inactiveStatuses = ['draft', 'pending'];
-      if (inactiveStatuses.includes(currentStatus)) {
-        updateData.status = 'dispatched';
-        console.log(`📦 Rota ${routeId} mudando de ${currentStatus} para dispatched`);
-      }
+        // Status que precisam ser convertidos para 'dispatched' quando um motorista é atribuído
+        const inactiveStatuses = ['draft', 'pending'];
+        if (inactiveStatuses.includes(currentStatus)) {
+          updateData.status = 'dispatched';
+          console.log(`📦 Rota ${routeId} mudando de ${currentStatus} para dispatched`);
+        }
 
-      await routeRef.update(updateData);
+        tx.update(routeRef,updateData);
+      });
       return { ok: true, message: `Motorista da rota atualizado com sucesso.` };
     } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao atualizar o motorista da rota.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -623,12 +683,15 @@ export const updateRouteDriver = onCall(
 export const duplicateRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
     if (!routeId) {
       throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
     }
+
+    await requireOperationalOperator(req);
 
     try {
       const db = getFirestore();
@@ -663,11 +726,18 @@ export const duplicateRoute = onCall(
         newRouteData.source = "rota-exata";
       }
 
-      // Criar um novo documento
-      await db.collection("routes").add(newRouteData);
+      // Preserve the assignment only while its native projection permits dispatch.
+      const target = db.collection("routes").doc();
+      await db.runTransaction(async tx=>{
+        const driverId = newRouteData.driverId;
+        const profile = isNativeDriverUuid(driverId) ? (await tx.get(db.collection("users").doc(driverId))).data() : undefined;
+        if (!sourceDriverAssignable(driverId,profile)) throw new HttpsError("failed-precondition","O motorista selecionado está indisponível para despacho.");
+        tx.create(target,newRouteData);
+      });
 
       return { ok: true, message: `Rota duplicada com sucesso.` };
     } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao duplicar a rota.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -678,49 +748,30 @@ export const duplicateRoute = onCall(
 export const completeRoute = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
-    // Verificar permissão do usuário
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    const auth = await requireOperationalOperator(req,["admin","socio"]);
 
     try {
-      const db = getFirestore();
-
-      // Buscar role do usuário
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      // Verificar se o usuário tem permissão (admin ou socio)
-      if (userRole !== "admin" && userRole !== "socio") {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores e sócios podem marcar rotas como concluídas"
-        );
-      }
-
+      const db=getFirestore();
       if (!routeId) {
         throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
       }
 
-      // Buscar a rota para verificar se pertence a um serviço
-      const routeDoc = await db.collection("routes").doc(routeId).get();
-
-      if (!routeDoc.exists) {
-        throw new HttpsError("not-found", "Rota não encontrada");
-      }
-
-      const routeData = routeDoc.data();
-
-      // Atualizar status da rota para 'completed'
-      await db.collection("routes").doc(routeId).update({
-        status: "completed",
-        completedAt: FieldValue.serverTimestamp(),
-        completedBy: auth.uid,
+      const routeRef = db.collection("routes").doc(routeId);
+      const evidenceRef = db.collection("rotaEarningRouteEvidence").doc(routeId);
+      const routeData = await db.runTransaction(async (transaction) => {
+        const [route, evidence] = await transaction.getAll(routeRef,evidenceRef);
+        if (!route.exists) throw new HttpsError("not-found","Rota não encontrada");
+        const data = route.data() ?? {};
+        if (data.status==="completed" || data.status==="completed_auto") return data;
+        const closed = {status:"completed", completedAt:Timestamp.now(), completedBy:auth.uid};
+        const completion = protectCompletion({...data,...closed,earningsSourceStart:evidence.data()?.start},"admin-server-v1");
+        transaction.update(routeRef,closed);
+        transaction.set(evidenceRef,{completion:completion ?? null},{merge:true});
+        return data;
       });
 
       // Se a rota pertence a um serviço, atualizar as estatísticas do serviço
@@ -730,6 +781,7 @@ export const completeRoute = onCall(
 
       return { ok: true, message: `Rota marcada como concluída com sucesso.` };
     } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao marcar a rota como concluída.";
       throw new HttpsError("internal", `Firestore Error: ${msg}`);
     }
@@ -754,6 +806,8 @@ export const notifyRouteChanges = onCall(
       throw new HttpsError("invalid-argument", "changes deve ser um array não vazio");
     }
 
+    const operator = await requireOperationalOperator(req);
+
     try {
       const db = getFirestore();
 
@@ -770,7 +824,7 @@ export const notifyRouteChanges = onCall(
       await db.collection("routes").doc(routeId).update({
         pendingChanges: true,
         lastModifiedAt: FieldValue.serverTimestamp(),
-        lastModifiedBy: req.auth?.uid || "admin",
+        lastModifiedBy: operator.uid,
       });
 
       // Buscar FCM token do motorista
@@ -831,7 +885,8 @@ export const notifyRouteChanges = onCall(
           },
         };
 
-        push = await sendPushWithOutcome(true, () => messaging.send(message));
+        const deliverable=await driverPushMessage(db,driverId,driverData,message);
+        push=await sendPushWithOutcome(!!deliverable,()=>messaging.send(deliverable!));
         console.log("Resultado do push de alteração de rota", {routeId, driverId, ...push});
       }
 
@@ -849,6 +904,7 @@ export const notifyRouteChanges = onCall(
 export const sendCustomNotification = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const title = String(d.title || "").trim();
     const message = String(d.message || "").trim();
@@ -856,26 +912,9 @@ export const sendCustomNotification = onCall(
     const priority = String(d.priority || "medium").trim();
     const type = String(d.type || "system").trim();
 
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
+    await requireOperationalOperator(req);
     try {
-      const db = getFirestore();
-
-      // Verificar permissão (admin, socio ou gestor)
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (!["admin", "socio", "gestor"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem enviar notificações customizadas"
-        );
-      }
+      const db=getFirestore();
 
       if (!title || !message) {
         throw new HttpsError("invalid-argument", "Título e mensagem são obrigatórios");
@@ -937,7 +976,9 @@ export const sendCustomNotification = onCall(
             },
           };
 
-          await messaging.send(pushMessage);
+          const deliverable=await driverPushMessage(db,driverId,driverData,pushMessage);
+          if (!deliverable) {failureCount++;continue;}
+          await messaging.send(deliverable);
           successCount++;
           console.log(`✅ Push notification enviada para motorista ${driverId}`);
         } catch (error: any) {
@@ -1001,14 +1042,11 @@ export const authUserMirror=functionsV1.region("southamerica-east1")
 export const forceLogoutDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const uid = String(d.uid || "").trim();
 
-    // Verificar autenticação
-    const authContext = req.auth;
-    if (!authContext) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
+    await requireOperationalOperator(req);
 
     if (!uid) {
       throw new HttpsError("invalid-argument", "UID do motorista é obrigatório");
@@ -1018,17 +1056,7 @@ export const forceLogoutDriver = onCall(
       const auth = getAuth();
       const db = getFirestore();
 
-      // Verificar permissão (admin, socio ou gestor)
-      const userDoc = await db.collection("users").doc(authContext.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (!["admin", "socio", "gestor"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem forçar logout de motoristas"
-        );
-      }
+      await assertLegacyDriverAccountAllowed({uid});
 
       // Revogar todos os tokens de refresh do usuário
       await auth.revokeRefreshTokens(uid);
@@ -1042,6 +1070,7 @@ export const forceLogoutDriver = onCall(
 
       return { ok: true, message: `Logout forçado para motorista ${uid} com sucesso.` };
     } catch (err) {
+      if (err instanceof HttpsError) throw err;
       const error = err as any;
       const msg = error.message || "Falha ao forçar logout";
 
@@ -1167,6 +1196,7 @@ export const cleanupOfflineDrivers = functionsV1
 export const forceCleanupOfflineDrivers = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     await assertAuthorizedRole(
       req.auth?.uid,
       "Apenas administradores, sócios e gestores podem atualizar o status dos motoristas"
@@ -1218,6 +1248,7 @@ export const forceCleanupOfflineDrivers = onCall(
 export const generateDriverImpersonationToken = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const driverId = String(d.driverId || "").trim();
 
@@ -1261,6 +1292,7 @@ export const generateDriverImpersonationToken = onCall(
         );
       }
 
+      await assertLegacyDriverAccountAllowed({uid:driverId});
       // Criar custom token para o motorista
       const customToken = await auth.createCustomToken(driverId);
 
@@ -1289,6 +1321,7 @@ export const generateDriverImpersonationToken = onCall(
       };
     } catch (err) {
       const error = err as any;
+      if (error instanceof HttpsError) throw error;
       const msg = error.message || "Falha ao gerar token de impersonação";
 
       console.error("❌ Erro ao gerar token de impersonação:", error);
@@ -1299,7 +1332,8 @@ export const generateDriverImpersonationToken = onCall(
 
 /* ========== autoCompleteRoutes (scheduled) ========== */
 // Função scheduled que roda a cada 30 minutos para finalizar automaticamente
-// rotas que passaram de 48h desde a plannedDate sem serem concluídas pelo motorista
+// rotas paradas ha mais de 48h (desde a plannedDate ou, se foi reaberta, desde
+// a reabertura) sem serem concluídas pelo motorista
 export const autoCompleteRoutes = functionsV1
   .region("southamerica-east1")
   .pubsub.schedule("every 30 minutes")
@@ -1316,11 +1350,16 @@ export const autoCompleteRoutes = functionsV1
         .where("plannedDate", "<", cutoff)
         .get();
 
+      // O relogio das 48h parte do mais recente entre plannedDate e a ultima
+      // reabertura: sem isso o robo refecharia, na proxima rodada, uma rota
+      // antiga que o admin acabou de reabrir.
       const staleRoutes = {
-        docs: candidateRoutes.docs.filter((routeDoc) => {
-          const status = routeDoc.data()?.status;
-          return status === "dispatched" || status === "in_progress";
-        }),
+        docs: candidateRoutes.docs.filter((routeDoc) =>
+          isEligibleForAutoCompletion(
+            routeDoc.data() as ReopenableRoute,
+            cutoff.getTime()
+          )
+        ),
       };
 
       if (staleRoutes.docs.length === 0) {
@@ -1331,7 +1370,9 @@ export const autoCompleteRoutes = functionsV1
       // Atualizar status em batch
       const batch = db.batch();
       const affectedServiceIds = new Set<string>();
-      staleRoutes.docs.forEach((routeDoc) => {
+      const proofs = await db.getAll(...staleRoutes.docs.map((routeDoc) =>
+        db.collection("rotaEarningRouteEvidence").doc(routeDoc.id)));
+      staleRoutes.docs.forEach((routeDoc, index) => {
         const routeData = routeDoc.data();
 
         const update: Record<string, unknown> = {
@@ -1348,6 +1389,9 @@ export const autoCompleteRoutes = functionsV1
         const desfecho = resolveAutoCompletion(routeData.stops ?? []);
         if (desfecho.worked) {
           update.completedAt = desfecho.finishedAt;
+          const start = proofs[index].data()?.start;
+          const completion = protectCompletion({...routeData, ...update, earningsSourceStart: start}, "auto-server-v1");
+          if (completion) batch.set(proofs[index].ref, {completion}, {merge: true});
         }
 
         batch.update(routeDoc.ref, update);
@@ -1454,7 +1498,8 @@ export const autoCompleteRoutes = functionsV1
             },
           };
 
-          await messaging.send(message);
+          const deliverable=await driverPushMessage(db,driverId,driverDoc.data(),message);
+          if (deliverable) await messaging.send(deliverable);
           console.log(`✅ Notificação de auto-finalização enviada ao motorista ${driverId}`);
         } catch (notifError) {
           console.error(`❌ Erro ao notificar motorista ${driverId}:`, notifError);
@@ -1473,33 +1518,15 @@ export const autoCompleteRoutes = functionsV1
 export const resendRouteToDriver = onCall(
   { region: "southamerica-east1" },
   async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
     const d = req.data || {};
     const routeId = String(d.routeId || "").trim();
 
-    // Verificar autenticação
-    const auth = req.auth;
-    if (!auth) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
-    if (!routeId) {
-      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
-    }
-
+    const auth=await requireOperationalOperator(req,["admin","socio"]);
+    const userData=auth.profile;
+    if (!routeId) throw new HttpsError("invalid-argument","ID da rota é obrigatório");
     try {
-      const db = getFirestore();
-
-      // Verificar role do usuário (admin ou socio)
-      const userDoc = await db.collection("users").doc(auth.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role || "";
-
-      if (userRole !== "admin" && userRole !== "socio") {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores e sócios podem reenviar rotas"
-        );
-      }
+      const db=getFirestore();
 
       // Buscar a rota
       const routeDoc = await db.collection("routes").doc(routeId).get();
@@ -1611,7 +1638,8 @@ export const resendRouteToDriver = onCall(
             },
           };
 
-          await messaging.send(message);
+          const deliverable=await driverPushMessage(db,driverId,driverDoc.data(),message);
+          if (deliverable) await messaging.send(deliverable);
           console.log(`✅ Notificação de reenvio enviada ao motorista ${driverId}`);
         }
       } catch (notifError) {
@@ -1627,34 +1655,220 @@ export const resendRouteToDriver = onCall(
   }
 );
 
+/* ========== reopenRoute (callable) ========== */
+// Reabre uma rota finalizada (completed pelo motorista OU completed_auto pelo
+// robo) e a devolve ao motorista. As regras vivem em ./route-reopen.
+export const reopenRoute = onCall(
+  {region: "southamerica-east1"},
+  async (req) => {
+    await assertLegacyRotaStaffEnabled(req);
+    const d = req.data || {};
+    const routeId = String(d.routeId || "").trim();
+    const reason = String(d.reason || "").trim();
+
+    // Mesma porta de entrada das demais acoes operacionais desta base: sessao
+    // Firebase propria (nunca token customizado de impersonacao), operador
+    // ativo e papel admin/socio.
+    const auth = await requireOperationalOperator(req, ["admin", "socio"]);
+    const userData = auth.profile;
+    if (!routeId) {
+      throw new HttpsError("invalid-argument", "ID da rota é obrigatório");
+    }
+    if (reason.length < MIN_REOPEN_REASON_LENGTH) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Informe o motivo da reabertura (mínimo ${MIN_REOPEN_REASON_LENGTH} caracteres)`
+      );
+    }
+
+    const db = getFirestore();
+    const adminName = userData?.displayName || userData?.email || auth.uid;
+    const routeRef = db.collection("routes").doc(routeId);
+
+    try {
+      // Transacao: o motorista (ou o robo) pode mexer na rota no mesmo instante.
+      const outcome = await db.runTransaction(async (tx) => {
+        const routeSnap = await tx.get(routeRef);
+        if (!routeSnap.exists) {
+          throw new HttpsError("not-found", "Rota não encontrada");
+        }
+        const route = routeSnap.data() as Record<string, any>;
+
+        const paymentsSnap = await tx.get(
+          db.collection("driverPayments").where("routeId", "==", routeId)
+        );
+        const payments = paymentsSnap.docs.map((p) => ({
+          id: p.id,
+          status: p.data().status,
+        }));
+
+        const decision = resolveReopen(route, payments);
+        if (!decision.ok) {
+          throw new HttpsError(
+            "failed-precondition",
+            REOPEN_REFUSAL_MESSAGES[decision.reason]
+          );
+        }
+
+        // Pagamento pendente fica valido, mas o financeiro precisa saber que a
+        // rota vai ser finalizada de novo e o calculo pode mudar.
+        const quando = new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        });
+        for (const payment of paymentsSnap.docs) {
+          if (!decision.pendingPaymentIds.includes(payment.id)) continue;
+          const notaAnterior = payment.data().notes;
+          tx.update(payment.ref, {
+            notes:
+              `${notaAnterior ? `${notaAnterior}\n` : ""}` +
+              `Rota reaberta em ${quando}: recalcular este pagamento ` +
+              "após a nova finalização.",
+            routeReopenedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+
+        tx.update(routeRef, {
+          status: decision.targetStatus,
+          reopenedAt: FieldValue.serverTimestamp(),
+          reopenedBy: auth.uid,
+          reopenReason: reason,
+          reopenCount: FieldValue.increment(1),
+          reopenHistory: FieldValue.arrayUnion(
+            buildReopenHistoryEntry(route, {
+              at: Timestamp.now(),
+              by: auth.uid,
+              reason,
+            })
+          ),
+          completedAt: FieldValue.delete(),
+          autoCompletedAt: FieldValue.delete(),
+          completedBy: FieldValue.delete(),
+        });
+
+        return {
+          route,
+          fromStatus: String(route.status),
+          targetStatus: decision.targetStatus,
+          hasPendingPayment: decision.pendingPaymentIds.length > 0,
+        };
+      });
+
+      const {route, fromStatus, targetStatus, hasPendingPayment} = outcome;
+      const driverId = route.driverId as string;
+      const driverName = route.driverInfo?.name || driverId;
+      const routeCode = route.code || routeId;
+
+      // Daqui em diante e "melhor esforco": a rota ja foi reaberta.
+      if (route.serviceId) {
+        try {
+          await reconcileServiceProgress(route.serviceId);
+        } catch (serviceError) {
+          console.error(
+            `❌ Erro ao reconciliar serviço ${route.serviceId}:`,
+            serviceError
+          );
+        }
+      }
+
+      try {
+        await db.collection("activity_log").add({
+          timestamp: FieldValue.serverTimestamp(),
+          eventType: "route_reopened",
+          userId: auth.uid,
+          userName: adminName,
+          entityType: "route",
+          entityId: routeId,
+          entityCode: routeCode,
+          serviceId: route.serviceId || null,
+          serviceCode: route.serviceCode || null,
+          routeId: routeId,
+          routeCode: routeCode,
+          action:
+            `Rota ${routeCode} reaberta por ${adminName} ` +
+            `(motorista ${driverName}). Motivo: ${reason}`,
+          changes: [
+            {
+              field: "status",
+              oldValue: fromStatus,
+              newValue: targetStatus,
+              fieldLabel: "Status",
+            },
+          ],
+          metadata: {driverId, driverName, reason},
+        });
+      } catch (logError) {
+        console.error("❌ Erro ao gravar log de reabertura:", logError);
+      }
+
+      try {
+        const driverDoc = await db.collection("users").doc(driverId).get();
+        const fcmToken = driverDoc.data()?.fcmToken;
+
+        if (fcmToken) {
+          const notificationTitle = "Rota reaberta";
+          const notificationBody =
+            "Uma rota foi reaberta para você. Acesse o app para concluí-la.";
+
+          const message = {
+            data: {
+              routeId,
+              type: "route_reopened",
+              title: notificationTitle,
+              body: notificationBody,
+              notificationTitle,
+              notificationBody,
+            },
+            token: fcmToken,
+            android: {priority: "high" as const},
+            webpush: {
+              notification: {
+                title: notificationTitle,
+                body: notificationBody,
+                icon: "/icons/pwa-192.png",
+                badge: "/icons/pwa-192.png",
+                requireInteraction: true,
+                tag: `reopened_${routeId}`,
+              },
+              fcmOptions: {link: `/my-routes/${routeId}`},
+            },
+          };
+
+          const deliverable = await driverPushMessage(
+            db, driverId, driverDoc.data(), message
+          );
+          if (deliverable) await getMessaging().send(deliverable);
+        }
+      } catch (notifError) {
+        console.error("❌ Erro ao notificar motorista na reabertura:", notifError);
+      }
+
+      return {
+        ok: true,
+        targetStatus,
+        hasPendingPayment,
+        message: "Rota reaberta com sucesso.",
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      const msg = error.message || "Falha ao reabrir a rota.";
+      throw new HttpsError("internal", `Erro: ${msg}`);
+    }
+  }
+);
+
 /* ========== forceCompleteService (callable) ========== */
 // Função para forçar conclusão de um serviço completo (serviço + todas as rotas)
 // Disponível apenas para admins
 export const forceCompleteService = onCall(
   { region: "southamerica-east1" },
   async (req) => {
-    const authContext = req.auth;
-    const { serviceId } = req.data;
-
-    if (!authContext) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado");
-    }
-
-    const db = getFirestore();
-
+    await assertLegacyRotaStaffEnabled(req);
+    const authContext=await requireOperationalOperator(req,["admin","socio"]);
+    const {serviceId}=req.data;
+    const db=getFirestore();
+    const userData=authContext.profile;
     try {
-      // Verificar se o usuário é admin ou socio
-      const userDoc = await db.collection("users").doc(authContext.uid).get();
-      const userData = userDoc.data();
-      const userRole = userData?.role;
-
-      if (!["admin", "socio"].includes(userRole)) {
-        throw new HttpsError(
-          "permission-denied",
-          "Apenas administradores podem forçar conclusão de serviços"
-        );
-      }
-
       if (!serviceId || typeof serviceId !== "string") {
         throw new HttpsError("invalid-argument", "serviceId deve ser fornecido");
       }
@@ -1763,4 +1977,21 @@ export const forceCompleteService = onCall(
       throw new HttpsError("internal", `Erro: ${msg}`);
     }
   }
+);
+
+export const captureRotaEarnings = onDocumentWritten(
+  {document: "routes/{routeId}", region: "southamerica-east1", retry: true, serviceAccount: earningsBridgeAccount},
+  async (event) => {
+    await captureFinancialRoute(event.params.routeId,event.data?.before,event.data?.after,event.time);
+  },
+);
+
+export const retryRotaEarnings = onSchedule(
+  {schedule: "every 2 minutes", region: "southamerica-east1", timeoutSeconds: 120, maxInstances: 1, serviceAccount: earningsBridgeAccount},
+  async () => { await retryCapturedFinancialRoutes(); },
+);
+
+export const reconcileRotaEarnings = onSchedule(
+  {schedule: "every 10 minutes", region: "southamerica-east1", timeoutSeconds: 540, maxInstances: 1, serviceAccount: earningsBridgeAccount},
+  async () => { await reconcileFinancialRoutes(); },
 );

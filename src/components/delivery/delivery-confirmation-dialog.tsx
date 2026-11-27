@@ -1,5 +1,7 @@
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Dialog,
@@ -36,8 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { db } from '@/lib/firebase/client';
-import { doc, getDoc } from 'firebase/firestore';
+import type { DriverDeliveryValidation } from '@/lib/driver/runtime-contract';
 
 interface DeliveryConfirmationDialogProps {
   isOpen: boolean;
@@ -57,6 +58,7 @@ interface DeliveryConfirmationDialogProps {
   complement?: string;
   stopLocation?: { lat: number; lng: number };
   currentLocation?: { lat: number; lng: number } | null;
+  validationSettings: DriverDeliveryValidation;
   viewOnly?: boolean; // Modo de visualização apenas para rotas concluídas
   // Dados existentes para edição (quando reabrir)
   existingData?: {
@@ -88,6 +90,7 @@ export function DeliveryConfirmationDialog({
   stopLocation,
   currentLocation,
   viewOnly = false,
+  validationSettings,
   existingData,
   // Props Lunna
   isLunnaOrder = false,
@@ -114,11 +117,6 @@ export function DeliveryConfirmationDialog({
   const [error, setError] = React.useState<string | null>(null);
   // Flag para evitar que o useEffect sobrescreva edições do usuário
   const [hasUserEdited, setHasUserEdited] = React.useState(false);
-  const [validationSettings, setValidationSettings] = React.useState<{
-    enabled: boolean;
-    maxDistance: number;
-  } | null>(null);
-
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [isCameraActive, setIsCameraActive] = React.useState(false);
@@ -204,39 +202,6 @@ export function DeliveryConfirmationDialog({
       }
     }
   }, [isOpen, isLunnaOrder, items, expectedValue, existingData?.payments, hasUserEdited, deliveredItemIds.size]);
-
-  // Load validation settings
-  React.useEffect(() => {
-    const loadValidationSettings = async () => {
-      try {
-        const settingsRef = doc(db, 'settings', 'general');
-        const settingsSnap = await getDoc(settingsRef);
-
-        if (settingsSnap.exists()) {
-          const data = settingsSnap.data();
-          setValidationSettings({
-            enabled: data.deliveryDistanceValidation ?? false,
-            maxDistance: data.maxDeliveryDistance ?? 0.5,
-          });
-        } else {
-          setValidationSettings({
-            enabled: false,
-            maxDistance: 0.5,
-          });
-        }
-      } catch (error) {
-        console.error('Error loading validation settings:', error);
-        setValidationSettings({
-          enabled: false,
-          maxDistance: 0.5,
-        });
-      }
-    };
-
-    if (isOpen) {
-      loadValidationSettings();
-    }
-  }, [isOpen]);
 
   // Camera handling
   const startCamera = async () => {
@@ -411,7 +376,7 @@ export function DeliveryConfirmationDialog({
     setError(null);
 
     // Validação de distância (somente para entregas bem-sucedidas)
-    if (deliveryStatus === 'completed' && validationSettings?.enabled) {
+    if (deliveryStatus === 'completed' && validationSettings.enabled) {
       // Verifica se a localização está disponível
       if (!currentLocation) {
         setError(
@@ -625,7 +590,7 @@ export function DeliveryConfirmationDialog({
                   // Modo visualização: apenas mostrar a foto se existir
                   existingData?.attemptPhotoUrl ? (
                     <div className="relative">
-                      <img src={existingData.attemptPhotoUrl} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={existingData.attemptPhotoUrl} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic">Nenhuma foto registrada</p>
@@ -669,7 +634,7 @@ export function DeliveryConfirmationDialog({
                       </>
                     ) : (
                       <div className="relative">
-                        <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                        <DeliveryPhoto src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                         <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
@@ -699,7 +664,7 @@ export function DeliveryConfirmationDialog({
                       </div>
                     ) : (
                       <div className="relative">
-                        <img src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
+                        <DeliveryPhoto src={attemptPhoto} alt="Foto da tentativa de entrega" className="w-full rounded-lg" />
                         <Button onClick={() => { setAttemptPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                       </div>
                     )}
@@ -718,7 +683,7 @@ export function DeliveryConfirmationDialog({
                   <Label>Foto da Entrega</Label>
                   {existingData?.photoUrl ? (
                     <div className="relative">
-                      <img src={existingData.photoUrl} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={existingData.photoUrl} alt="Foto da entrega" className="w-full rounded-lg" />
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground italic">Nenhuma foto registrada</p>
@@ -748,7 +713,7 @@ export function DeliveryConfirmationDialog({
                     </>
                   ) : (
                     <div className="relative">
-                      <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
                       <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}
@@ -768,7 +733,7 @@ export function DeliveryConfirmationDialog({
                     </div>
                   ) : (
                     <div className="relative">
-                      <img src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
+                      <DeliveryPhoto src={photo} alt="Foto da entrega" className="w-full rounded-lg" />
                       <Button onClick={() => { setPhoto(null); setHasUserEdited(true); }} variant="destructive" size="icon" className="absolute top-2 right-2"> <X className="h-4 w-4" /> </Button>
                     </div>
                   )}

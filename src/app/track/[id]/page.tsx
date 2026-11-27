@@ -17,8 +17,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { db } from '@/lib/firebase/client';
-import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { EarningsRequestError,EarningsShell,useEarnings } from '@/components/earnings/earnings-shell';
+import { useStaffQuery } from '@/components/staff/use-staff-query';
+import { staffRouteDates } from '@/lib/staff/route-dates';
 import type { PlaceValue, RouteInfo, DriverLocation } from '@/lib/types';
 import { RouteMap } from '@/components/maps/RouteMap';
 import { format } from 'date-fns';
@@ -69,47 +70,33 @@ type RouteDocument = RouteInfo & {
     plate: string;
     phone?: string;
   } | null;
-  plannedDate: Timestamp;
+  plannedDate: Date;
   origin: PlaceValue;
   currentStopIndex?: number;
 };
 
-export default function PublicTrackingPage() {
+export default function TrackingPage() {
+  return <EarningsShell portal><InternalTracking /></EarningsShell>;
+}
+
+function InternalTracking() {
   const params = useParams();
   const routeId = params?.id as string;
-  const [route, setRoute] = React.useState<RouteDocument | null>(null);
-  const [driverLocation, setDriverLocation] = React.useState<DriverLocation | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (!routeId) return;
-
-    const docRef = doc(db, 'routes', routeId);
-    const unsubscribe = onSnapshot(
-      docRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setRoute({ id: docSnap.id, ...data } as RouteDocument);
-
-          if (data.currentLocation) {
-            setDriverLocation(data.currentLocation as DriverLocation);
-          }
-        } else {
-          setError('Rota não encontrada');
-        }
-        setIsLoading(false);
-      },
-      (err) => {
-        console.error('Error fetching route:', err);
-        setError('Erro ao carregar rastreamento');
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [routeId]);
+  const {request}=useEarnings();
+  const load=React.useCallback(async(signal:AbortSignal)=>{
+    const path='/api/staff/tracking/'+encodeURIComponent(routeId);
+    let result:{route:RouteDocument};
+    try {
+      result=await request(path,{signal});
+    } catch (error) {
+      if (!(error instanceof EarningsRequestError) || error.status!==403) throw error;
+      result=await request(path+'?view=driver',{signal});
+    }
+    return staffRouteDates<RouteDocument>(result.route);
+  },[request,routeId]);
+  const {data:route,error:requestError,loading:isLoading}=useStaffQuery(load,8000);
+  const driverLocation=route?.currentLocation;
+  const error=requestError ? 'A rota interna não está disponível para esta conta.' : null;
 
   const getDeliveredCount = () => {
     if (!route) return 0;
@@ -177,9 +164,9 @@ export default function PublicTrackingPage() {
               <Package className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Rastreamento de Entrega</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Acompanhamento interno</h1>
               <p className="text-sm text-muted-foreground">
-                {format(route.plannedDate.toDate(), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                {format(route.plannedDate || new Date(), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
               </p>
             </div>
           </div>
@@ -265,7 +252,7 @@ export default function PublicTrackingPage() {
                       ? {
                           lat: driverLocation.lat,
                           lng: driverLocation.lng,
-                          heading: driverLocation.heading,
+                          heading: driverLocation.heading ?? undefined,
                         }
                       : undefined
                   }
@@ -361,7 +348,7 @@ export default function PublicTrackingPage() {
                           <p className="text-xs text-green-700 mt-1">
                             ✓ Entregue às{' '}
                             {format(
-                              (stop.completedAt as Timestamp).toDate(),
+                              stop.completedAt instanceof Date ? stop.completedAt : stop.completedAt.toDate(),
                               'HH:mm',
                               { locale: ptBR }
                             )}

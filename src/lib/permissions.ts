@@ -97,7 +97,7 @@ export const defaultPagePermissions: Record<string, RoleKey[]> = {
   '/reports/numbers': ['admin', 'socio', 'gestor'],
 
   // Financeiro
-  '/financeiro': ['admin', 'socio'],
+  '/financeiro': ['admin', 'socio', 'gestor'],
   '/financeiro/regras': ['admin', 'socio'],
   '/financeiro/pagamentos': ['admin', 'socio', 'gestor'],
 

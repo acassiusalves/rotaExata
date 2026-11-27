@@ -19,92 +19,27 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { db } from '@/lib/firebase/client';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
-  Timestamp,
-  serverTimestamp,
-} from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useAuth } from '@/hooks/use-auth';
-import { isImpersonationSessionActive } from '@/lib/impersonation-session';
+import { useDriverRuntime } from '@/components/driver/driver-runtime';
+import { useDriverResource } from '@/hooks/use-driver-resource';
+import { driverCommand,driverQuery } from '@/lib/driver/runtime-client';
+import type { DriverInbox } from '@/lib/driver/runtime-contract';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
-interface Notification {
-  id: string;
-  type: 'route_change' | 'route_assigned' | 'route_completed' | 'system' | 'alert';
-  title: string;
-  message: string;
-  read: boolean;
-  opened?: boolean;
-  openedAt?: Timestamp | null;
-  routeId?: string;
-  reportId?: string;
-  routeName?: string;
-  driverId?: string;
-  driverName?: string;
-  timestamp: Timestamp;
-  priority: 'low' | 'medium' | 'high';
-}
-
 export default function DriverNotificationsPage() {
-  const { user } = useAuth();
-  const [notifications, setNotifications] = React.useState<Notification[]>([]);
-  const [loading, setLoading] = React.useState(true);
-
-  // Carregar notificações do motorista
-  React.useEffect(() => {
-    if (!user) return;
-
-    const q = query(
-      collection(db, 'notifications'),
-      where('driverId', '==', user.uid),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const notifs: Notification[] = [];
-        snapshot.forEach((doc) => {
-          notifs.push({ id: doc.id, ...doc.data() } as Notification);
-        });
-        setNotifications(notifs);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Erro ao carregar notificações:', error);
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // Marcar notificação como aberta quando visualizada
-  const handleMarkAsOpened = async (notificationId: string, alreadyOpened: boolean) => {
-    if (alreadyOpened || isImpersonationSessionActive()) {
-      return;
-    }
-
+  const {request,endpoint,readOnly,assist}=useDriverRuntime();
+  const {data,loading,error,refresh}=useDriverResource<{notifications:DriverInbox[]}>(driverQuery(endpoint,'inbox'));
+  const notifications=data?.notifications ?? [];
+  async function handleMarkAsOpened(id:string,alreadyOpened:boolean) {
+    if (alreadyOpened || readOnly || assist) return;
     try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, {
-        opened: true,
-        openedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error('Erro ao marcar notificação como aberta:', error);
-    }
-  };
+      await driverCommand(request,endpoint,{kind:'inbox-open',id});
+      refresh();
+      window.dispatchEvent(new Event('rotaexata:driver-notification'));
+    } catch { /* Retry on the next open. */ }
+  }
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -140,6 +75,7 @@ export default function DriverNotificationsPage() {
 
   const unreadCount = notifications.filter((n) => !n.opened).length;
 
+  if (error && !data) return <p role="alert" className="p-4">Não foi possível carregar as notificações.</p>;
   if (loading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
@@ -231,7 +167,7 @@ export default function DriverNotificationsPage() {
                   {notification.timestamp && (
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
-                      {format(notification.timestamp.toDate(), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                      {format(new Date(notification.timestamp ?? 0), "dd/MM 'às' HH:mm", { locale: ptBR })}
                     </span>
                   )}
                   {notification.routeName && (

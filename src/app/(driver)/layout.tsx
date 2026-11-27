@@ -1,147 +1,58 @@
-
 'use client';
-import React, { useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+
+import type { ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { Bell,Home } from 'lucide-react';
+import { DriverRuntimeProvider,useDriverRuntime } from '@/components/driver/driver-runtime';
+import { AssistBanner } from '@/components/driver/assist-banner';
 import { DriverNavigationDrawer } from '@/components/driver/driver-navigation-drawer';
-import { useAuth } from '@/hooks/use-auth';
 import { useDeviceInfo } from '@/hooks/use-device-info';
-import { useIsImpersonating, exitImpersonationMode, getImpersonatedDriverName } from '@/hooks/use-impersonation';
-import { Loader2, Bell, Home, X } from 'lucide-react';
+import { useDriverResource } from '@/hooks/use-driver-resource';
 import { NotificationPermissionPrompt } from '@/components/notifications/notification-permission-prompt';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar,AvatarFallback,AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import Link from 'next/link';
-import { db } from '@/lib/firebase/client';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { Toaster } from '@/components/ui/toaster';
+import { driverQuery } from '@/lib/driver/runtime-client';
+import type { DriverInbox } from '@/lib/driver/runtime-contract';
+import { FloatingFeedbackButton } from '@/components/FloatingFeedbackButton';
 
-export default function DriverLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { user, userRole, loading, mustChangePassword } = useAuth();
-  const router = useRouter();
-  const pathname = usePathname();
-  const [unreadCount, setUnreadCount] = React.useState(0);
-  const isImpersonating = useIsImpersonating();
-  const impersonatedDriverName = getImpersonatedDriverName();
+function DriverLayoutContent({children}:{children:ReactNode}) {
+  const {profile,userId,endpoint,readOnly,native,signOut,assist}=useDriverRuntime();
+  const pathname=usePathname();
+  const {data}=useDriverResource<{notifications:DriverInbox[]}>(driverQuery(endpoint,'inbox'));
+  const unread=data?.notifications.filter(item=>!item.opened).length ?? 0;
+  const initials=(profile.displayName || profile.email || 'Motorista').split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
+  // "passive": esta aba não é o aparelho do motorista (modo teste legado ou operador do painel).
+  const passive=readOnly || !!assist;
+  useDeviceInfo(!passive);
 
-  // Coletar informacoes do dispositivo do motorista
-  useDeviceInfo(userRole === 'driver');
+  return <div className="flex min-h-screen w-full flex-col">
+    {assist && <AssistBanner driverName={assist.driverName} staffName={assist.staffName} onEnd={()=>void signOut()} />}
+    {readOnly && <div className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b bg-amber-100 px-3 py-2 text-xs text-amber-950">
+      <span>Modo teste · {profile.displayName}</span>
+      <Button size="sm" variant="ghost" onClick={()=>void signOut()}>Sair do modo teste</Button>
+    </div>}
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:h-16">
+      <DriverNavigationDrawer />
+      {pathname!=='/my-routes' && <Button variant="ghost" size="icon" asChild>
+        <Link href="/my-routes"><Home className="h-5 w-5" /><span className="sr-only">Voltar às rotas</span></Link>
+      </Button>}
+      <div className="flex-1" />
+      <Button variant="ghost" size="icon" className="relative" asChild>
+        <Link href="/driver/notifications"><Bell className="h-5 w-5" />
+          {unread>0 && <Badge variant="destructive" className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center p-0 text-xs">{unread>9?'9+':unread}</Badge>}
+          <span className="sr-only">Notificações</span></Link>
+      </Button>
+      <Avatar className="h-8 w-8"><AvatarImage src={profile.photoURL} /><AvatarFallback>{initials}</AvatarFallback></Avatar>
+    </header>
+    <main className="flex-1 bg-muted/40"><div className="mx-auto w-full max-w-md">{children}</div></main>
+    {!passive && <NotificationPermissionPrompt userId={userId} userRole="driver" />}
+    {native && <>{!assist && <FloatingFeedbackButton />}<Toaster /></>}
+  </div>;
+}
 
-  useEffect(() => {
-    if (!loading && mustChangePassword) {
-      router.replace('/auth/change-password');
-    }
-  }, [loading, mustChangePassword, router]);
-
-  // Carregar contador de notificações não lidas
-  useEffect(() => {
-    if (!user) return;
-
-    const q = query(
-      collection(db, 'notifications'),
-      where('driverId', '==', user.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const count = snapshot.docs.filter(doc => !doc.data().opened).length;
-      setUnreadCount(count);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  if (loading || mustChangePassword) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
-  const getInitials = (name: string | null | undefined) => {
-    if (!name) return 'U';
-    const names = name.split(' ');
-    if (names.length > 1) {
-      return `${names[0][0]}${names[names.length - 1][0]}`;
-    }
-    return name.substring(0, 2);
-  };
-
-  // Verificar se está na página inicial (Rotas Ativas)
-  const isHomePage = pathname === '/my-routes';
-
-  return (
-    <div className="flex min-h-screen w-full flex-col">
-      {/* Banner de Impersonação - visível apenas quando em modo teste */}
-      {isImpersonating && (
-        <div className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-yellow-400 bg-yellow-100 px-3 py-2 text-xs sm:text-sm">
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="text-base flex-shrink-0">🧪</span>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1 min-w-0">
-              <span className="font-semibold text-yellow-900 whitespace-nowrap">
-                Modo Teste
-              </span>
-              <span className="text-yellow-800 truncate">
-                <span className="hidden sm:inline">- Visualizando como </span>
-                <span className="sm:hidden">como </span>
-                <span className="font-medium">{impersonatedDriverName || 'Motorista'}</span>
-              </span>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={exitImpersonationMode}
-            className="h-7 gap-1 text-yellow-900 hover:bg-yellow-200 hover:text-yellow-900 flex-shrink-0 px-2"
-          >
-            <X className="h-3.5 w-3.5" />
-            <span className="sr-only">Sair do Modo Teste</span>
-          </Button>
-        </div>
-      )}
-      {/* Header do motorista com novo design */}
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:h-16 sm:px-6">
-        <DriverNavigationDrawer />
-        {!isHomePage && (
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/my-routes">
-              <Home className="h-5 w-5" />
-              <span className="sr-only">Voltar para página inicial</span>
-            </Link>
-          </Button>
-        )}
-        <div className="flex-1" />
-        <Button variant="ghost" size="icon" className="relative" asChild>
-          <Link href="/driver/notifications">
-            <Bell className="h-5 w-5" />
-            {unreadCount > 0 && (
-              <Badge
-                variant="destructive"
-                className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
-              >
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </Badge>
-            )}
-            <span className="sr-only">Notificações</span>
-          </Link>
-        </Button>
-        <Avatar className="h-8 w-8">
-          <AvatarImage src={user?.photoURL ?? undefined} />
-          <AvatarFallback>{getInitials(user?.displayName || user?.email)}</AvatarFallback>
-        </Avatar>
-      </header>
-      <main className="flex-1 bg-muted/40">
-        <div className="mx-auto w-full max-w-md">
-          {children}
-        </div>
-      </main>
-      {/* Prompt de permissão de notificações */}
-      {user && userRole && (
-        <NotificationPermissionPrompt userId={user.uid} userRole={userRole} />
-      )}
-    </div>
-  );
+export default function DriverLayout({children}:{children:ReactNode}) {
+  return <DriverRuntimeProvider><DriverLayoutContent>{children}</DriverLayoutContent></DriverRuntimeProvider>;
 }

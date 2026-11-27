@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import type {NextConfig} from 'next';
 import withPWA from 'next-pwa';
+import defaultRuntimeCaching from 'next-pwa/cache';
 
 function getGitCommitSha() {
   try {
@@ -52,13 +53,17 @@ function resolveBuildId() {
 const buildId = resolveBuildId();
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async rewrites() {
+    if (process.env.NEXT_PUBLIC_ROTA_DRIVER_AUTH!=='supabase') return [];
+    return {beforeFiles:[{source:'/sw.js',destination:'/retire-rota-worker.js'}],afterFiles:[],fallback:[]};
+  },
+  async headers() {
+    return [{source:'/sw.js',headers:[{key:'Cache-Control',value:'no-cache, must-revalidate'}]}];
+  },
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  generateBuildId: async () => buildId,
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -106,7 +111,8 @@ const pwaConfig = withPWA({
   skipWaiting: true,
   clientsClaim: true,
   // TEMPORÁRIO: Desabilitar PWA até resolver conflito com Firebase
-  disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1',
+  disable: process.env.NODE_ENV === 'development' || process.env.VERCEL === '1' ||
+    process.env.NEXT_PUBLIC_ROTA_DRIVER_AUTH==='supabase',
   sw: 'sw.js',
   reloadOnOnline: true,
   fallbacks: {
@@ -114,6 +120,11 @@ const pwaConfig = withPWA({
   },
   buildExcludes: [/middleware-manifest\.json$/],
   publicExcludes: ['!firebase-messaging-sw.js'],
+  runtimeCaching: [
+    { urlPattern: /\/api\/(?:financeiro|driver|feedbacks|staff)(?:\/|\?|$)/, handler: 'NetworkOnly' },
+    { urlPattern: /\/(?:auth|rest)\/v1\//, handler: 'NetworkOnly' },
+    ...defaultRuntimeCaching,
+  ],
 });
 
 export default pwaConfig(nextConfig);

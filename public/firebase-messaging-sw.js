@@ -10,6 +10,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+importScripts('/rota-push-grant.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
@@ -27,65 +28,84 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 // Inicializar Firebase Messaging
+// Preserve the guard before the SDK can auto-render queued pre-cutover payloads.
+self.addEventListener('push',event=>{
+  let payload;
+  try {payload=event.data?.json();} catch {return;}
+  if (payload?.notification && typeof event.stopImmediatePropagation==='function') {
+    event.stopImmediatePropagation();
+    event.waitUntil(showDriverNotification(payload));
+  }
+});
+self.addEventListener('message',event=>{
+  if (event.data?.type==='rota-flush-push') event.waitUntil(flushRotaPushRevocations().catch(()=>{}));
+});
 const messaging = firebase.messaging();
 
-// Handler para mensagens recebidas em background
-messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Recebida mensagem em background:', payload);
+function notificationTarget(routeId) {
+  return typeof routeId==='string' && /^[A-Za-z0-9_-]{1,150}$/.test(routeId)
+    ? '/my-routes/'+routeId : '/driver/notifications';
+}
 
-  // Priorizar dados do payload.data para evitar "from RotaExata"
-  const notificationTitle = payload.data?.title || payload.data?.notificationTitle || payload.notification?.title || 'Nova Notificação';
-  const notificationBody = payload.data?.body || payload.data?.notificationBody || payload.notification?.body || 'Você tem uma nova mensagem';
+async function resolveBoundPush(data) {
+  try {
+    const grant=await readRotaPushGrant();
+    if (!grant || grant.id!==data.bindingId) return null;
+    const response=await fetch('/api/driver/push-delivery',{
+      method:'POST',cache:'no-store',redirect:'error',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({bindingId:grant.id,proof:grant.proof,deliveryId:data.deliveryId}),
+    });
+    if (!response.ok || (await readRotaPushGrant())?.id!==grant.id) return null;
+    const payload=await response.json();
+    return notificationTarget(payload.routeId);
+  } catch {return null;}
+}
 
-  const notificationOptions = {
-    body: notificationBody,
-    icon: '/icons/pwa-192.png',
-    badge: '/icons/pwa-192.png',
-    data: payload.data,
-    tag: payload.data?.routeId || payload.data?.type || 'notification',
-    requireInteraction: payload.data?.priority === 'high',
-    actions: [
-      {
-        action: 'open',
-        title: 'Abrir'
-      },
-      {
-        action: 'close',
-        title: 'Fechar'
-      }
-    ]
+async function acceptUnboundPush(data) {
+  try {
+    const grant=await readRotaPushGrant();
+    if (grant) return false;
+    const result=await fetch('/api/driver/push-delivery',{cache:'no-store',redirect:'error'});
+    return result.ok && (!(await result.json()).native || data.legacyPush==='1');
+  } catch {return false;}
+}
+
+async function showDriverNotification(payload) {
+  await flushRotaPushRevocations().catch(()=>{});
+  const data=payload.data ?? {};
+  const bound=data.boundPush==='1';
+  if (bound) {
+    if (!await resolveBoundPush(data)) return;
+  } else if (!await acceptUnboundPush(data)) return;
+  const title=bound ? 'RotaExata' : data.title || data.notificationTitle || payload.notification?.title || 'Nova Notificação';
+  const body=bound ? 'Você tem uma atualização. Abra o RotaExata para consultar.' :
+    data.body || data.notificationBody || payload.notification?.body || 'Você tem uma nova mensagem';
+  const options={
+    body,icon:'/icons/pwa-192.png',badge:'/icons/pwa-192.png',
+    data:bound ? {boundPush:'1',bindingId:data.bindingId,deliveryId:data.deliveryId} : data,
+    tag:bound ? 'rota-bound:'+data.deliveryId : data.routeId || data.type || 'notification',
+    actions:[{action:'open',title:'Abrir'},{action:'close',title:'Fechar'}],
   };
+  return self.registration.showNotification(title,options);
+}
+messaging.onBackgroundMessage(showDriverNotification);
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
-});
-
-// Handler para cliques na notificação
-self.addEventListener('notificationclick', (event) => {
-  console.log('[firebase-messaging-sw.js] Clique na notificação:', event);
-
+self.addEventListener('notificationclick',event=>{
   event.notification.close();
-
-  if (event.action === 'close') {
-    return;
-  }
-
-  // Abrir ou focar na janela da aplicação
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Se há uma janela aberta, focar nela
-      for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus();
-        }
+  if (event.action==='close') return;
+  const data=event.notification.data ?? {};
+  event.waitUntil((async()=>{
+    const target=data.boundPush==='1' ? await resolveBoundPush(data) : notificationTarget(data.routeId);
+    if (!target) return;
+    const windows=await clients.matchAll({type:'window',includeUncontrolled:true});
+    for (const client of windows) {
+      if (new URL(client.url).origin!==self.location.origin || !client.focus) continue;
+      if (new URL(client.url).pathname===target) return client.focus();
+      if (client.navigate) {
+        const navigated=await client.navigate(target).catch(()=>null);
+        if (navigated) return navigated.focus();
       }
-      // Caso contrário, abrir nova janela
-      if (clients.openWindow) {
-        const routeId = event.notification.data?.routeId;
-        const url = routeId ? `/my-routes/${routeId}` : '/driver/notifications';
-        return clients.openWindow(url);
-      }
-    })
-  );
+    }
+    return clients.openWindow?.(target);
+  })());
 });
-
-console.log('[firebase-messaging-sw.js] Service Worker de Firebase Messaging carregado');

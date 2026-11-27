@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import type { PlaceValue } from "@/lib/types";
+import { geocodedMunicipality } from "@/lib/geocoded-municipality";
 
 export function AutocompleteInput({
   id,
@@ -11,6 +12,7 @@ export function AutocompleteInput({
   onChange,
   placeholder = "Digite o endereço",
   disabled = false,
+  includeMunicipality = false,
 }: {
   id?: string;
   label?: string;
@@ -18,6 +20,7 @@ export function AutocompleteInput({
   onChange: (v: PlaceValue | null) => void;
   placeholder?: string;
   disabled?: boolean;
+  includeMunicipality?: boolean;
 }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const acRef = React.useRef<google.maps.places.Autocomplete | null>(null);
@@ -39,6 +42,7 @@ export function AutocompleteInput({
 
   React.useEffect(() => {
     let mounted = true;
+    let listener: google.maps.MapsEventListener | undefined;
     const loader = new Loader({
       apiKey: process.env.NEXT_PUBLIC_GMAPS_KEY!,
       libraries: ["places", "geometry", "geocoding", "marker"],
@@ -49,10 +53,10 @@ export function AutocompleteInput({
     loader.load().then(() => {
       if (!mounted || !inputRef.current) return;
       acRef.current = new google.maps.places.Autocomplete(inputRef.current!, {
-        fields: ["place_id", "formatted_address", "geometry"],
+        fields: ["place_id", "formatted_address", "geometry", ...(includeMunicipality ? ["address_components"] : [])],
         componentRestrictions: { country: ["br"] },
       });
-      acRef.current.addListener("place_changed", () => {
+      listener = acRef.current.addListener("place_changed", () => {
         const p = acRef.current!.getPlace();
         if (!p || !p.geometry) {
             return;
@@ -67,13 +71,17 @@ export function AutocompleteInput({
           address: p.formatted_address ?? "",
           lat: loc.lat(),
           lng: loc.lng(),
+          ...(includeMunicipality ? geocodedMunicipality(p.address_components) : {}),
         };
         onChangeRef.current(placeValue);
       });
     });
 
-    return () => { mounted = false; };
-  }, []);
+    return () => {
+      mounted = false;
+      listener?.remove();
+    };
+  }, [includeMunicipality]);
 
   return (
     <div className="w-full">

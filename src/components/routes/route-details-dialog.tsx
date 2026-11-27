@@ -1,6 +1,8 @@
 
 'use client';
 
+import { DeliveryPhoto } from '@/components/delivery/delivery-photo';
+
 import * as React from 'react';
 import {
   Dialog,
@@ -38,11 +40,12 @@ import {
   Package,
 } from 'lucide-react';
 import type { PlaceValue, RouteInfo, Payment, ActivityLogEntry } from '@/lib/types';
-import { Timestamp, collection, query, where, orderBy, limit, onSnapshot, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
+import type { Timestamp } from 'firebase/firestore';
+import { usePathname } from 'next/navigation';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import Image from 'next/image';
 import { RouteMapDialog, RouteDocument } from './route-map-dialog';
 import { LunnaBadge } from './lunna-badge';
 
@@ -54,9 +57,17 @@ const formatDuration = (durationString: string = '0s') => {
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 };
+const asDate=(value:unknown)=>{
+  if (value instanceof Date) return value;
+  if (typeof value==='string') {
+    const result=new Date(value);
+    return Number.isFinite(result.getTime()) ? result:undefined;
+  }
+  if (value && typeof value==='object' && 'toDate' in value && typeof value.toDate==='function') return value.toDate() as Date;
+};
 const formatTimestamp = (ts: Timestamp | Date | undefined) => {
-  if (!ts) return 'N/A';
-  const date = ts instanceof Timestamp ? ts.toDate() : ts;
+  const date=asDate(ts);
+  if (!date) return 'N/A';
   return format(date, 'HH:mm', { locale: ptBR });
 };
 
@@ -88,6 +99,9 @@ const getFailureReasonLabel = (value?: string) => {
 };
 
 
+type RemovedStop=Omit<ActivityLogEntry,'timestamp'|'eventType'> & {id:string;eventType:string;timestamp:ActivityLogEntry['timestamp']|string|null};
+type Removal=RemovedStop & {related?:RemovedStop};
+
 interface RouteDetailsDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -100,79 +114,78 @@ export function RouteDetailsDialog({
   route,
 }: RouteDetailsDialogProps) {
   const [isMapOpen, setIsMapOpen] = React.useState(false);
-  const [removedStops, setRemovedStops] = React.useState<ActivityLogEntry[]>([]);
+  const [removedStops, setRemovedStops] = React.useState<RemovedStop[]>([]);
   const [destinationRoutes, setDestinationRoutes] = React.useState<Record<string, { routeCode: string; routeId: string }>>({});
+  const [removalsError,setRemovalsError]=React.useState(false);
+  const staff=useOptionalStaff();
+  const request=staff?.request;
+  const actor=staff ? staff.userId+':'+staff.scopeId:null;
+  const pathname=usePathname();
+  const source=pathname==='/history/motorista' ? 'driver':pathname==='/history/rotas' ? 'routes':null;
 
-  // Buscar paradas que foram removidas desta rota
-  React.useEffect(() => {
-    if (!route?.id) return;
+  React.useEffect(()=>{
+    setRemovedStops([]);
+    setDestinationRoutes({});
+    setRemovalsError(false);
+    if (!isOpen || !route?.id) return;
+    const controller=new AbortController();
 
-    const q = query(
-      collection(db, 'activity_log'),
-      where('routeId', '==', route.id),
-      where('eventType', '==', 'point_removed_from_route'),
-      orderBy('timestamp', 'desc'),
-      limit(50)
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const entries: ActivityLogEntry[] = [];
-      snapshot.forEach((doc) => {
-        entries.push({ id: doc.id, ...doc.data() } as ActivityLogEntry & { id: string });
-      });
-      setRemovedStops(entries);
-
-      // Para cada ponto removido, buscar se foi transferido para outra rota
-      const destinations: Record<string, { routeCode: string; routeId: string }> = {};
-      for (const entry of entries) {
-        const pointId = entry.pointId || entry.entityId;
-        if (!pointId) continue;
-
-        // Buscar transferência (point_transferred) com esse pointId como origem
-        const transferQuery = query(
-          collection(db, 'activity_log'),
-          where('pointId', '==', pointId),
-          where('eventType', '==', 'point_transferred'),
-          orderBy('timestamp', 'desc'),
-          limit(1)
-        );
-        const transferSnap = await getDocs(transferQuery);
-        if (!transferSnap.empty) {
-          const transferData = transferSnap.docs[0].data();
-          if (transferData.metadata?.targetRouteName || transferData.metadata?.targetRouteId) {
-            destinations[pointId] = {
-              routeCode: transferData.metadata.targetRouteName || 'Rota desconhecida',
-              routeId: transferData.metadata.targetRouteId || '',
-            };
-          }
+    if (nativeStaffEnabled) {
+      if (!request || !source) return;
+      void request<{removed:Removal[]}>('/api/staff/history?'+new URLSearchParams({view:'removals',routeId:route.id,source}),
+        {signal:controller.signal}).then(({removed})=>{
+        if (controller.signal.aborted) return;
+        setRemovedStops(removed);
+        const destinations:Record<string,{routeCode:string;routeId:string}>={};
+        for (const row of removed) {
+          const pointId=row.pointId ?? row.entityId;
+          const related=row.related;
+          if (!pointId || !related) continue;
+          const target=related.eventType==='point_transferred' ? related.metadata?.targetRouteId:related.routeId;
+          const code=related.eventType==='point_transferred' ? related.metadata?.targetRouteName:related.routeCode;
+          if (typeof target==='string' || typeof code==='string') destinations[pointId]={
+            routeId:typeof target==='string' ? target:'',
+            routeCode:typeof code==='string' ? code:'Rota desconhecida',
+          };
         }
+        setDestinationRoutes(destinations);
+      }).catch(()=>{if (!controller.signal.aborted) setRemovalsError(true);});
+      return ()=>controller.abort();
+    }
 
-        // Se não achou transferência, buscar point_added_to_route em outra rota
-        if (!destinations[pointId]) {
-          const addedQuery = query(
-            collection(db, 'activity_log'),
-            where('pointId', '==', pointId),
-            where('eventType', '==', 'point_added_to_route'),
-            orderBy('timestamp', 'desc'),
-            limit(1)
-          );
-          const addedSnap = await getDocs(addedQuery);
-          if (!addedSnap.empty) {
-            const addedData = addedSnap.docs[0].data();
-            if (addedData.routeId && addedData.routeId !== route.id) {
-              destinations[pointId] = {
-                routeCode: addedData.routeCode || 'Rota desconhecida',
-                routeId: addedData.routeId,
-              };
-            }
-          }
-        }
-      }
-      setDestinationRoutes(destinations);
-    });
-
-    return () => unsubscribe();
-  }, [route?.id]);
+    let unsubscribe:(()=>void)|undefined;
+    void Promise.all([import('@/lib/firebase/client'),import('firebase/firestore')])
+      .then(([{db},{collection,query,where,orderBy,limit,onSnapshot,getDocs}] )=>{
+        if (controller.signal.aborted) return;
+        const entries=collection(db,'activity_log');
+        const q=query(entries,where('routeId','==',route.id),where('eventType','==','point_removed_from_route'),
+          orderBy('timestamp','desc'),limit(50));
+        unsubscribe=onSnapshot(q,snapshot=>{
+          if (controller.signal.aborted) return;
+          const rows=snapshot.docs.map(doc=>({...doc.data(),id:doc.id} as RemovedStop));
+          setRemovedStops(rows);
+          void Promise.all(rows.map(async row=>{
+            const pointId=row.pointId || row.entityId;
+            if (!pointId) return null;
+            const transfers=await getDocs(query(entries,where('pointId','==',pointId),
+              where('eventType','==','point_transferred'),orderBy('timestamp','desc'),limit(1)));
+            const moved=transfers.docs[0]?.data()?.metadata;
+            if (moved?.targetRouteName || moved?.targetRouteId) return [pointId,{
+              routeCode:moved.targetRouteName || 'Rota desconhecida',routeId:moved.targetRouteId || '',
+            }] as const;
+            const additions=await getDocs(query(entries,where('pointId','==',pointId),
+              where('eventType','==','point_added_to_route'),orderBy('timestamp','desc'),limit(1)));
+            const added=additions.docs[0]?.data();
+            return added?.routeId && added.routeId!==route.id ? [pointId,{
+              routeCode:added.routeCode || 'Rota desconhecida',routeId:added.routeId,
+            }] as const:null;
+          })).then(destinations=>{
+            if (!controller.signal.aborted) setDestinationRoutes(Object.fromEntries(destinations.filter(row=>row!==null)));
+          }).catch(()=>{if (!controller.signal.aborted) setRemovalsError(true);});
+        },()=>{if (!controller.signal.aborted) setRemovalsError(true);});
+      }).catch(()=>{if (!controller.signal.aborted) setRemovalsError(true);});
+    return ()=>{controller.abort();unsubscribe?.();};
+  },[route?.id,isOpen,request,source,actor]);
 
   if (!route) return null;
 
@@ -198,7 +211,8 @@ export function RouteDetailsDialog({
                 <h4 className="font-semibold text-sm">Motorista</h4>
                 <div className="flex items-center gap-2">
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src={route.driverInfo?.avatarUrl} />
+                    <AvatarImage src={route.driverInfo && 'avatarUrl' in route.driverInfo && typeof route.driverInfo.avatarUrl==='string' ?
+                      route.driverInfo.avatarUrl:undefined} />
                     <AvatarFallback>
                       {route.driverInfo?.name.charAt(0)}
                     </AvatarFallback>
@@ -213,7 +227,7 @@ export function RouteDetailsDialog({
               <div className="space-y-1">
                 <h4 className="font-semibold text-sm">Data</h4>
                 <p className="text-sm">
-                  {format(route.plannedDate.toDate(), 'dd/MM/yyyy')}
+                  {asDate(route.plannedDate) ? format(asDate(route.plannedDate)!, 'dd/MM/yyyy') : 'Data não registrada'}
                 </p>
               </div>
               <div className="space-y-1">
@@ -270,7 +284,7 @@ export function RouteDetailsDialog({
                               <p>
                                 <strong>Transferida em:</strong>{' '}
                                 {format(
-                                  stop.movedAt instanceof Timestamp ? stop.movedAt.toDate() : new Date(stop.movedAt),
+                                  asDate(stop.movedAt) ?? new Date(0),
                                   "dd/MM/yyyy 'às' HH:mm",
                                   { locale: ptBR }
                                 )}
@@ -316,21 +330,19 @@ export function RouteDetailsDialog({
                            {stop.notes && (
                             <div>
                                 <h5 className="text-xs font-semibold mb-1">Obs. do Motorista:</h5>
-                                <p className="text-sm italic">"{stop.notes}"</p>
+                                <p className="text-sm italic">“{stop.notes}”</p>
                             </div>
                           )}
                           {stop.photoUrl && (
                             <div>
                                 <h5 className="text-xs font-semibold mb-1">Comprovante:</h5>
-                                <a href={stop.photoUrl} target="_blank" rel="noopener noreferrer">
-                                    <Image
+                                <DeliveryPhoto expand
                                         src={stop.photoUrl}
                                         alt={`Comprovante da parada ${index + 1}`}
                                         width={200}
                                         height={150}
                                         className="rounded-md object-cover border"
                                     />
-                                </a>
                             </div>
                           )}
                         </>
@@ -349,6 +361,7 @@ export function RouteDetailsDialog({
                 ))}
               </Accordion>
 
+              {removalsError && <p role="status" className="text-sm text-muted-foreground">Não foi possível carregar as paradas removidas.</p>}
               {removedStops.length > 0 && (
                 <div className="mt-6 pt-6 border-t">
                   <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
@@ -406,7 +419,7 @@ export function RouteDetailsDialog({
 
                           <div className="flex items-center justify-between pl-6">
                             <p className="text-xs text-muted-foreground">
-                              Removida em {format((entry.timestamp as Timestamp).toDate(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                              {asDate(entry.timestamp) ? 'Removida em '+format(asDate(entry.timestamp)!, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : 'Data da remoção indisponível'}
                               {entry.userName && ` por ${entry.userName}`}
                             </p>
                             {destination && (

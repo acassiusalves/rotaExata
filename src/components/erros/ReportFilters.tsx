@@ -7,10 +7,11 @@ export const initialReportFilters = { origin: '', category: '', status: '', auth
 export type ReportFilterValues = typeof initialReportFilters;
 export type ReportCounts = { total: number; pending: number; in_progress: number; resolved: number };
 
-export function ReportFilters({ values, onChange, counts }: {
+export function ReportFilters({ values, onChange, counts, rotaOnly=false }: {
   values: ReportFilterValues;
   onChange: (next: ReportFilterValues) => void;
   counts?: ReportCounts;
+  rotaOnly?: boolean;
 }) {
   const input = 'min-w-0 rounded-md border bg-background px-2 py-2 text-sm';
   const selectors = [
@@ -27,7 +28,7 @@ export function ReportFilters({ values, onChange, counts }: {
   return (
     <div className="space-y-3 pb-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-        {selectors.map(([key, label, options]) => (
+        {selectors.filter(([key])=>!rotaOnly || key!=='origin').map(([key, label, options]) => (
           <label key={key} className="grid gap-1 text-sm font-medium">
             {label}
             <select aria-label={label} className={input} value={values[key]} onChange={(event) => onChange({ ...values, [key]: event.target.value })}>
@@ -46,7 +47,7 @@ export function ReportFilters({ values, onChange, counts }: {
       </div>
       {counts && (
         <p aria-live="polite" className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          <strong>{counts.total} chamados</strong>
+          <strong>{counts.total} chamados{rotaOnly ? ' nesta página':''}</strong>
           <span>{counts.pending} pendentes</span>
           <span>{counts.in_progress} em andamento</span>
           <span>{counts.resolved} resolvidos</span>

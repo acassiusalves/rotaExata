@@ -1,27 +1,10 @@
-'use client';
-import { useAuth } from '@/hooks/use-auth';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
+import { redirect } from 'next/navigation';
+import LegacyHome from '@/components/auth/legacy-home';
+import { nativeDriverEnabled } from '@/lib/driver/mode';
 
 export default function Page() {
-  const { userRole, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (loading) return;
-    if (['admin', 'socio', 'gestor'].includes(userRole || '')) {
-      router.replace('/dashboard');
-    } else if (userRole === 'driver') {
-      router.replace('/my-routes');
-    } else {
-      router.replace('/login');
-    }
-  }, [userRole, loading, router]);
-
-  return (
-    <div className="flex h-screen w-full items-center justify-center bg-background">
-      <Loader2 className="h-8 w-8 animate-spin" />
-    </div>
-  );
+  if (nativeStaffEnabled) redirect('/login');
+  if (nativeDriverEnabled) redirect('/my-routes');
+  return <LegacyHome />;
 }

@@ -1,5 +1,7 @@
 
 'use client';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { FloatingFeedbackButton } from '@/components/FloatingFeedbackButton';
 import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
@@ -8,6 +10,7 @@ import React, { useState } from 'react';
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const staff=useOptionalStaff();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Special layout for new route page and map page
@@ -17,6 +20,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
      return (
       <div className="flex h-[100dvh] min-h-0 w-full">
         <UpdateAvailableBanner />
+        {staff?.paths.includes('/admin/erros') && <FloatingFeedbackButton />}
         {/* Sidebar on the left for full-height pages (except map) */}
         <Sidebar isOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 flex-col min-h-0">
@@ -29,6 +33,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen w-full">
       <UpdateAvailableBanner />
+        {staff?.paths.includes('/admin/erros') && <FloatingFeedbackButton />}
       <Sidebar isOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
       <div className="flex flex-1 flex-col">
         <Header />

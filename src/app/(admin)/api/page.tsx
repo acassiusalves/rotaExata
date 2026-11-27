@@ -15,150 +15,55 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Terminal, CheckCircle, UserCog } from 'lucide-react';
-import { functions } from '@/lib/firebase/client';
-import { httpsCallable } from 'firebase/functions';
-import { useAuth } from '@/hooks/use-auth';
-import { auth } from '@/lib/firebase/client';
+import { useStaff } from '@/components/staff/staff-session';
+import { EarningsRequestError } from '@/lib/earnings/session-request';
+
+type MapsStatus={configured:boolean;browserConfigured:boolean;revision:string|null};
 
 export default function ApiPage() {
-  const [apiKey, setApiKey] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [isSaved, setIsSaved] = React.useState(false);
-  const [isSyncing, setIsSyncing] = React.useState(false);
-  const [isLoadingKey, setIsLoadingKey] = React.useState(true);
-  const { toast } = useToast();
-  const { user } = useAuth();
+  const [apiKey,setApiKey]=React.useState('');
+  const [maps,setMaps]=React.useState<MapsStatus>();
+  const [isLoading,setIsLoading]=React.useState(false);
+  const [isSyncing,setIsSyncing]=React.useState(false);
+  const [isLoadingKey,setIsLoadingKey]=React.useState(true);
+  const {toast}=useToast();
+  const {request}=useStaff();
+  const endpoint='/api/staff/integrations/maps';
+  const isSaved=maps?.configured===true && !apiKey;
 
-  // Helper para obter token de autenticação
-  const getAuthToken = async (): Promise<string | null> => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return null;
-    try {
-      return await currentUser.getIdToken();
-    } catch {
-      return null;
-    }
-  };
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    request<MapsStatus>(endpoint,{signal:controller.signal}).then(setMaps)
+      .catch(()=>{}).finally(()=>{if (!controller.signal.aborted) setIsLoadingKey(false);});
+    return ()=>controller.abort();
+  },[request]);
 
-  // Load existing API key on mount
-  React.useEffect(() => {
-    const loadApiKey = async () => {
-      try {
-        setIsLoadingKey(true);
-        const token = await getAuthToken();
-        if (!token) {
-          setIsLoadingKey(false);
-          return;
-        }
-
-        const response = await fetch('/api/get-api-key', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.key) {
-            setApiKey(data.key);
-            setIsSaved(true);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load API key:', error);
-      } finally {
-        setIsLoadingKey(false);
-      }
-    };
-
-    // Aguardar o usuário estar autenticado antes de carregar
-    if (user) {
-      loadApiKey();
-    }
-  }, [user]);
-
-
-  const handleSave = async () => {
-    if (!apiKey) {
-      toast({
-        variant: 'destructive',
-        title: "Chave inválida",
-        description: "Por favor, insira uma chave de API.",
-      });
-      return;
-    }
-
-    const token = await getAuthToken();
-    if (!token) {
-      toast({
-        variant: 'destructive',
-        title: "Não autenticado",
-        description: "Você precisa estar logado para salvar a chave.",
-      });
-      return;
-    }
-
+  async function handleSave() {
+    if (!apiKey.trim() || !maps) return;
     setIsLoading(true);
-    setIsSaved(false);
     try {
-      const response = await fetch('/api/save-api-key', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ key: apiKey }),
+      const update=await request<MapsStatus>(endpoint,{
+        method:'PATCH',body:JSON.stringify({key:apiKey,expectedRevision:maps.revision}),
       });
+      setMaps(update);
+      setApiKey('');
+      toast({title:'Chave atualizada',description:'A configuração do servidor foi salva.'});
+    } catch(error) {
+      const conflict=error instanceof EarningsRequestError && error.status===409;
+      toast({variant:'destructive',title:'Não foi possível salvar a chave',
+        description:conflict?'A configuração mudou. Recarregue a página.':'Confira se a chave está habilitada para a API de rotas.'});
+    } finally {setIsLoading(false);}
+  }
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Falha ao salvar a chave.');
-      }
-
-      setIsSaved(true);
-      toast({
-        title: "Chave Salva!",
-        description: "Sua chave de API do Google Maps foi salva com sucesso no servidor.",
-      });
-
-    } catch (error: any) {
-       toast({
-        variant: 'destructive',
-        title: "Erro ao salvar!",
-        description: error.message || "Não foi possível salvar a chave de API.",
-      });
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSyncUser = async () => {
-    if (!user || !user.email) {
-      toast({ variant: 'destructive', title: "Erro", description: "Usuário não autenticado." });
-      return;
-    }
+  async function handleSyncUser() {
     setIsSyncing(true);
     try {
-      const syncAuthUsers = httpsCallable(functions, 'syncAuthUsers');
-      const result: any = await syncAuthUsers({ email: user.email });
-      
-      toast({
-        title: "Sincronização Concluída!",
-        description: `Usuário ${user.email} sincronizado com o papel: ${result.data.role}.`,
-      });
-    } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: "Erro na Sincronização",
-        description: error.message || "Não foi possível sincronizar o usuário.",
-      });
-       console.error(error);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
+      const current=await request<{role:string}>('/api/staff/session');
+      toast({title:'Cadastro conferido',description:'Papel vigente no RotaExata: '+current.role+'.'});
+    } catch {
+      toast({variant:'destructive',title:'Não foi possível conferir seu cadastro'});
+    } finally {setIsSyncing(false);}
+  }
 
   return (
     <div className="space-y-6">
@@ -175,12 +80,7 @@ export default function ApiPage() {
         <Terminal className="h-4 w-4" />
         <AlertTitle>Chave de API do Cliente (Navegador)</AlertTitle>
         <AlertDescription>
-          Para que os mapas interativos funcionem no navegador, a chave de API também precisa estar disponível para o cliente. Por favor, adicione sua chave ao arquivo <code className="font-semibold text-foreground">.env</code> na raiz do projeto.
-          <br /><br />
-          1. Abra ou crie o arquivo <code className="font-semibold text-foreground">.env</code>.<br />
-          2. Adicione a linha: <code className="font-semibold text-foreground">NEXT_PUBLIC_GMAPS_KEY=&quot;SUA_CHAVE_DE_API_AQUI&quot;</code><br />
-          3. Substitua &quot;SUA_CHAVE_DE_API_AQUI&quot; pela sua chave real.<br />
-          4. Reinicie o servidor de desenvolvimento.
+          {maps?.browserConfigured ? 'Chave do navegador configurada.':'A chave do navegador é configurada na publicação do RotaExata.'}
         </AlertDescription>
       </Alert>
 
@@ -192,6 +92,7 @@ export default function ApiPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {!isLoadingKey && !maps && <p role="alert" className="mb-3 text-sm">Não foi possível verificar a configuração.</p>}
           <div className="grid gap-2">
             <Label htmlFor="gmaps-key">Chave de API do Google Maps</Label>
             <div className="relative">
@@ -202,7 +103,6 @@ export default function ApiPage() {
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
-                  setIsSaved(false);
                 }}
                 disabled={isLoading || isLoadingKey}
                 className={isSaved ? 'border-green-500 pr-10' : ''}
@@ -214,7 +114,7 @@ export default function ApiPage() {
           </div>
         </CardContent>
         <CardFooter>
-          <Button onClick={handleSave} disabled={isLoading || !apiKey}>
+          <Button onClick={handleSave} disabled={isLoading || !apiKey || !maps}>
             {isLoading ? 'Salvando e Testando...' : 'Salvar e Testar Chave'}
           </Button>
         </CardFooter>
@@ -222,15 +122,15 @@ export default function ApiPage() {
 
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>Sincronização de Usuários com Firestore</CardTitle>
+          <CardTitle>Cadastro da minha conta</CardTitle>
           <CardDescription>
-            Use este botão para forçar a criação ou atualização do seu documento de usuário no Firestore com a permissão correta. Útil se sua permissão de &apos;admin&apos; não estiver sendo reconhecida.
+            Consulte a função vigente da sua conta e confira se o cadastro está em dia.
           </CardDescription>
         </CardHeader>
         <CardFooter>
            <Button onClick={handleSyncUser} disabled={isSyncing} variant="secondary">
             <UserCog className="mr-2 h-4 w-4" />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar Meu Usuário'}
+            {isSyncing ? 'Verificando…' : 'Conferir meu cadastro'}
           </Button>
         </CardFooter>
       </Card>

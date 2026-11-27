@@ -126,6 +126,10 @@ export async function generatePendingPayments(
       // Prepara dados da rota para cálculo
       const routeForCalculation: RouteForCalculation = {
         ...routeData,
+        stops: routeData.stops,
+        encodedPolyline: routeData.encodedPolyline,
+        distanceMeters: routeData.distanceMeters,
+        duration: routeData.duration,
         driverId,
         driverName: routeData.driverInfo.name,
         completedAt: completedDate,
@@ -256,6 +260,10 @@ export async function generatePaymentForRoute(
 
     const routeForCalculation: RouteForCalculation = {
       ...routeData,
+      stops: routeData.stops,
+      encodedPolyline: routeData.encodedPolyline,
+      distanceMeters: routeData.distanceMeters,
+      duration: routeData.duration,
       driverId,
       driverName: routeData.driverInfo.name,
       completedAt: completedDate,

@@ -4,7 +4,11 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/auth-context';
+import { useOptionalDriverRuntime } from '@/components/driver/driver-runtime';
+import { useOptionalStaff } from '@/components/staff/staff-session';
+import { EarningsRequestError } from '@/lib/earnings/session-request';
+import { nativeStaffEnabled } from '@/lib/staff/mode';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,7 +20,8 @@ import { reportStatusLabels, serializeReportDate, type ReportStatus, type Report
 type Detail = ReportSummary & {
   capabilities: { manage: boolean; reopen: boolean };
   reopenHistory?: Array<{ details: string; reopenedAt: unknown }>;
-  statusHistory?: Array<{ next: keyof typeof reportStatusLabels; at: unknown }>;
+  statusHistory?: Array<{ next: keyof typeof reportStatusLabels; at: unknown; actor?: {name?:string} }>;
+  revision?: string;
   context?: { url?: string; resolution?: string; userAgent?: string };
   logs?: unknown[];
 };
@@ -29,47 +34,72 @@ function displayDate(value: unknown) {
   return date ? new Date(date).toLocaleString('pt-BR') : 'Data indisponível';
 }
 
+function feedbackError(error:unknown,fallback:string) {
+  if (error instanceof EarningsRequestError) {
+    if (error.code==='staff_feedback_revision_conflict') return 'O chamado mudou. Abra os detalhes novamente e confira o status.';
+    if (error.status===403) return 'Sua sessão não permite esta ação no chamado.';
+    if (error.status===404) return 'Chamado indisponível.';
+    if (error.code==='earnings_session_revalidating') return 'Aguarde a confirmação da sessão e tente novamente.';
+  }
+  return fallback;
+}
+
 export function ReportPanel({ mode }: { mode: PanelMode }) {
   const { user } = useAuth();
+  const driver=useOptionalDriverRuntime();
+  const staff=useOptionalStaff();
+  const staffView=mode==='admin' && nativeStaffEnabled;
+  if (staffView && !staff) return null;
+  const identity=staffView && staff ? `${staff.scopeId}:${staff.userId}`:driver?.userId ?? user?.uid ?? 'anonymous';
   return (
     <Suspense fallback={<div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>}>
-      <AuthenticatedReports key={user?.uid ?? 'anonymous'} mode={mode} />
+      <AuthenticatedReports key={identity} mode={mode} staff={staffView ? staff:null} />
     </Suspense>
   );
 }
 
-function AuthenticatedReports({ mode }: { mode: PanelMode }) {
-  const { user, loading: authLoading } = useAuth();
+function AuthenticatedReports({mode,staff}:{mode:PanelMode;staff:ReturnType<typeof useOptionalStaff>}) {
+  const {user,loading:authLoading}=useAuth();
+  const driver=useOptionalDriverRuntime();
+  const nativeRequest=staff?.request ?? (driver?.native ? driver.request:undefined);
+  const staffView=!!staff;
+  const detailEndpoint=staffView ? '/api/staff/feedbacks':'/api/driver/feedbacks';
+  const commandEndpoint=staff ? detailEndpoint:detailEndpoint+'/admin';
   const reportIdFromUrl = useSearchParams().get('report');
-  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user, mode === 'mine');
+  const { reports, loading, load, error, filters, counts, updateFilters, next, previous } = useReportList(user,mode==='mine',nativeRequest,!!staff);
   const [selected, setSelected] = useState<Detail | null>(null);
   const [problem, setProblem] = useState('');
   const [details, setDetails] = useState('');
   const [updating, setUpdating] = useState(false);
   const detailRequest = useRef<AbortController | null>(null);
+  const changeRequest = useRef<AbortController | null>(null);
+  useEffect(()=>()=>changeRequest.current?.abort(),[]);
   const command = useRef<{ key: string; id: string } | null>(null);
 
   const openReport = useCallback(async (id: string) => {
-    if (!user) return;
+    if (!user && !nativeRequest) return;
     detailRequest.current?.abort();
     const controller = new AbortController();
     detailRequest.current = controller;
     setProblem('');
     try {
-      const token = await user.getIdToken();
-      const response = await fetch(`/api/feedbacks/${encodeURIComponent(id)}${mode === 'mine' ? '?scope=mine' : ''}`, {
-        headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível abrir o chamado.');
+      const suffix='/'+encodeURIComponent(id)+(mode==='mine'?'?scope=mine':'');
+      let data;
+      if (nativeRequest) data=await nativeRequest<{report:Detail}>(detailEndpoint+suffix,{signal:controller.signal});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks'+suffix,{headers:{Authorization:'Bearer '+token},signal:controller.signal});
+        data=await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível abrir o chamado.');
+      }
       if (!controller.signal.aborted) {
         setSelected(data.report);
         setDetails('');
       }
     } catch (error) {
-      if (!controller.signal.aborted) setProblem(error instanceof Error ? error.message : 'Chamado indisponível.');
+      if (!controller.signal.aborted) setProblem(staffView ? feedbackError(error,'Não foi possível abrir o chamado.') : error instanceof Error ? error.message : 'Chamado indisponível.');
     }
-  }, [mode, user]);
+  }, [mode,user,nativeRequest,staffView,detailEndpoint]);
 
   useEffect(() => {
     setSelected(null);
@@ -79,33 +109,47 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
   }, [openReport, reportIdFromUrl]);
 
   async function updateReport(update: ReportCommand) {
-    if (!user || !selected || updating) return;
+    if ((!user && !nativeRequest) || !selected || changeRequest.current) return;
+    const controller=new AbortController();
+    changeRequest.current=controller;
     setUpdating(true);
     setProblem('');
-    const key = JSON.stringify([selected.id, update]);
+    const key = JSON.stringify([selected.id,staffView ? selected.revision:null,update]);
     if (command.current?.key !== key) command.current = { key, id: crypto.randomUUID() };
     const requestId = command.current.id;
     try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/feedbacks/admin', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reportId: selected.id, ...update, requestId }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o chamado.');
+      const body=JSON.stringify({reportId:selected.id,...update,requestId,...(staffView ? {revision:selected.revision}:{})});
+      let data;
+      if (nativeRequest) data=await nativeRequest<{report:Detail}>(commandEndpoint,{method:'PATCH',body,signal:controller.signal});
+      else {
+        const token=await user!.getIdToken();
+        const response=await fetch('/api/feedbacks/admin',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body,signal:controller.signal});
+        data=await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível atualizar o chamado.');
+      }
+      if (controller.signal.aborted) return;
       if (command.current?.id === requestId) command.current = null;
       setSelected((current) => current?.id === selected.id ? data.report : current);
       setDetails('');
       void load();
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : 'Não foi possível atualizar o chamado.');
+      if (!controller.signal.aborted) {
+        setProblem(staffView ? feedbackError(error,'Não foi possível atualizar o chamado.')
+          : error instanceof Error ? error.message : 'Não foi possível atualizar o chamado.');
+        if (staffView && error instanceof EarningsRequestError && error.code==='staff_feedback_revision_conflict') {
+          void load();
+        }
+      }
     } finally {
-      setUpdating(false);
+      if (changeRequest.current===controller) {
+        changeRequest.current=null;
+        if (!controller.signal.aborted) setUpdating(false);
+      }
     }
   }
 
-  if (authLoading) return <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>;
-  if (!user) return <div className="p-6"><Link className="underline" href="/login">Entre para acompanhar seus chamados</Link></div>;
+  if (authLoading && !nativeRequest) return <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>;
+  if (!user && !nativeRequest) return <div className="p-6"><Link className="underline" href="/login">Entre para acompanhar seus chamados</Link></div>;
 
   const manage = mode === 'admin' && selected?.capabilities.manage;
   const reopen = selected?.status === 'resolved' && selected.capabilities.reopen;
@@ -120,9 +164,12 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
           </p>
         </div>
       </header>
-      <ReportFilters values={filters} onChange={updateFilters} counts={counts} />
+      <ReportFilters values={filters} onChange={updateFilters} counts={counts} rotaOnly={staffView} />
       {!selected && problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : loading ? (
+      {error ? <div className="space-y-2" role="alert">
+        <p className="text-sm text-destructive">{error}</p>
+        {staffView && <Button variant="outline" onClick={()=>void load()}>Tentar novamente</Button>}
+      </div> : loading ? (
         <div className="grid place-items-center p-8"><Loader2 className="animate-spin" /></div>
       ) : reports.length ? (
         <ul className="space-y-2">
@@ -169,7 +216,7 @@ function AuthenticatedReports({ mode }: { mode: PanelMode }) {
               <section className="space-y-2 text-sm">
                 <h2 className="font-semibold">Histórico de status</h2>
                 {[...selected.statusHistory].reverse().map((entry, index) => (
-                  <p key={index}>{displayDate(entry.at)} · {reportStatusLabels[entry.next]}</p>
+                  <p key={index}>{displayDate(entry.at)} · {reportStatusLabels[entry.next]}{staffView && entry.actor?.name ? ' · '+entry.actor.name:''}</p>
                 ))}
               </section>
             )}

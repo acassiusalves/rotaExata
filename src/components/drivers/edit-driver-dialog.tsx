@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import { Loader2 } from 'lucide-react';
-import { httpsCallable } from 'firebase/functions';
 import {
   Dialog,
   DialogContent,
@@ -15,18 +14,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Driver } from '@/lib/types';
+import { useStaff } from '@/components/staff/staff-session';
 import { useToast } from '@/hooks/use-toast';
-import { functions } from '@/lib/firebase/client';
 
 interface EditDriverDialogProps {
   isOpen: boolean;
   onClose: () => void;
   driver: Driver | null;
-}
-
-interface UpdateDriverProfileResponse {
-  ok: boolean;
-  updatedRoutes: number;
+  revision?:string;
+  onSaved:()=>void;
 }
 
 function formatPhone(value: string): string {
@@ -44,9 +40,10 @@ function normalizePhone(value: string): string {
 export function EditDriverDialog({
   isOpen,
   onClose,
-  driver,
+  driver,revision,onSaved,
 }: EditDriverDialogProps) {
   const { toast } = useToast();
+  const {request}=useStaff();
   const [name, setName] = React.useState('');
   const [phone, setPhone] = React.useState('');
   const [vehicleType, setVehicleType] = React.useState('');
@@ -79,34 +76,20 @@ export function EditDriverDialog({
     setIsSubmitting(true);
 
     try {
-      const updateDriverProfile = httpsCallable<
-        {
-          uid: string;
-          displayName: string;
-          phone: string;
-          vehicle: { type: string; plate: string };
-        },
-        UpdateDriverProfileResponse
-      >(functions, 'updateDriverProfile');
-
-      const result = await updateDriverProfile({
-        uid: driver.id,
-        displayName: name.trim(),
-        phone: normalizePhone(phone),
-        vehicle: {
-          type: vehicleType.trim(),
-          plate: vehiclePlate.trim().toUpperCase(),
-        },
+      const result=await request<{updatedRoutes:number}>('/api/staff/drivers/'+encodeURIComponent(driver.id),{
+        method:'PATCH',body:JSON.stringify({revision,displayName:name.trim(),phone:normalizePhone(phone),
+          vehicle:{type:vehicleType.trim(),plate:vehiclePlate.trim().toUpperCase()}}),
       });
 
       toast({
         title: 'Motorista atualizado!',
         description:
-          result.data.updatedRoutes > 0
-            ? `Cadastro salvo e ${result.data.updatedRoutes} rota(s) ativa(s) receberam os dados novos.`
+          result.updatedRoutes > 0
+            ? `Cadastro salvo e ${result.updatedRoutes} rota(s) ativa(s) receberam os dados novos.`
             : 'Cadastro salvo com sucesso.',
       });
 
+      onSaved();
       onClose();
     } catch (error: any) {
       console.error('Error updating driver profile:', error);
