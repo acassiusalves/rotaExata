@@ -27,6 +27,7 @@ interface SortableStopProps {
   onRemoveFromRoute?: (stop: PlaceValue, index: number) => void;
   onDeleteStop?: (stop: PlaceValue, index: number) => void;
   onShowInfo?: (stop: PlaceValue, index: number) => void;
+  readOnly?: boolean;
   dragDelay?: number; // ms (mesmo do PointerSensor)
 }
 
@@ -40,6 +41,7 @@ function SortableStop({
   onRemoveFromRoute,
   onDeleteStop,
   onShowInfo,
+  readOnly = false,
   dragDelay = 200,
 }: SortableStopProps) {
   const {
@@ -51,6 +53,7 @@ function SortableStop({
   } = useSortable({
     id: `${routeKey}-${stop.id ?? stop.placeId ?? index}`,
     data: { routeKey, index, stop },
+    disabled: readOnly,
   });
 
   const style = {
@@ -142,26 +145,26 @@ function SortableStop({
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <div className="flex flex-col">
-            <button
+            {!readOnly && onRemoveFromRoute && <button
               onClick={() => {
-                onRemoveFromRoute?.(stop, index);
+                onRemoveFromRoute(stop, index);
                 setContextMenuOpen(false);
               }}
               className="flex items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer"
             >
               <XCircle className="mr-2 h-4 w-4" />
               Remover da Rota
-            </button>
-            <button
+            </button>}
+            {!readOnly && onDeleteStop && <button
               onClick={() => {
-                onDeleteStop?.(stop, index);
+                onDeleteStop(stop, index);
                 setContextMenuOpen(false);
               }}
               className="flex items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer text-destructive"
             >
               <Trash2 className="mr-2 h-4 w-4" />
               Excluir o Ponto
-            </button>
+            </button>}
             <button
               onClick={() => {
                 onShowInfo?.(stop, index);
@@ -189,6 +192,7 @@ interface RouteTimelineProps {
   onRemoveFromRoute?: (stop: PlaceValue, index: number) => void;
   onDeleteStop?: (stop: PlaceValue, index: number) => void;
   onShowInfo?: (stop: PlaceValue, index: number) => void;
+  readOnly?: boolean;
   dragDelay?: number;
 }
 
@@ -235,21 +239,24 @@ export function RouteTimeline({
   onRemoveFromRoute,
   onDeleteStop,
   onShowInfo,
+  readOnly = false,
   dragDelay = 200,
 }: RouteTimelineProps) {
-  // If empty route, show a drop zone
-  if (stops.length === 0) {
-    return <EmptyRouteDropZone routeKey={routeKey} color={color} />;
-  }
-
   // Generate unique IDs that include routeKey to force re-render when moving between routes
   const stopIds = stops.map((s, i) => `${routeKey}-${s.id ?? s.placeId ?? i}`);
 
   // Create a droppable zone for the entire timeline
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `${routeKey}-timeline`,
+    disabled: readOnly || !stops.length,
     data: { routeKey, index: stops.length }, // Drop at the end by default
   });
+
+  if (!stops.length) {
+    return readOnly ? <span className="text-sm text-muted-foreground">Sem paradas</span>
+      : <EmptyRouteDropZone routeKey={routeKey} color={color} />;
+  }
+
 
   return (
     <div
@@ -292,6 +299,7 @@ export function RouteTimeline({
               onRemoveFromRoute={onRemoveFromRoute}
               onDeleteStop={onDeleteStop}
               onShowInfo={onShowInfo}
+              readOnly={readOnly}
               dragDelay={dragDelay}
             />
           );

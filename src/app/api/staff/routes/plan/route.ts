@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { assertEditorResources,requireStaffEditor } from '@/lib/server/staff/editor-access';
 import { staffEditorSurfaceSchema } from '@/lib/staff/access';
 import { applyStaffPlanBatch,isStaffPlanReplay } from '@/lib/server/staff/route-plan';
-import { projectStaffEvidencePlace } from '@/lib/server/staff/route-projection';
+import { projectStaffEvidencePlace,projectStaffPlace } from '@/lib/server/staff/route-projection';
 import { staffPlanBatchSchema } from '@/lib/staff/route-plan-contract';
 import { EarningsError,earningsErrorResponse,readJsonBody } from '@/lib/server/earnings/transport';
 import { privateJson } from '@/lib/server/earnings/store';
@@ -23,6 +23,7 @@ export async function POST(request:Request) {
     const result=await applyStaffPlanBatch(db,actor,body);
     return privateJson({
       ...result,
+      ...(result.unassignedStops ? {unassignedStops:result.unassignedStops.map(projectStaffPlace)}:{}),
       existingRoutes:result.existingRoutes.map(route=>({...route,stops:route.stops.map(stop=>projectStaffEvidencePlace(route.routeId,stop)),
         removedStops:route.removedStops.map(stop=>projectStaffEvidencePlace(route.routeId,stop))})),
       createdRoutes:result.createdRoutes.map(route=>({...route,stops:route.stops.map(stop=>projectStaffEvidencePlace(route.routeId,stop))})),

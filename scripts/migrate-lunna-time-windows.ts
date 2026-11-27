@@ -105,7 +105,7 @@ async function migrateTimeWindows() {
       const ordersMap = new Map<string, LunnaOrder>();
       ordersSnapshot.docs.forEach(doc => {
         const data = doc.data() as LunnaOrder;
-        ordersMap.set(data.number, { id: doc.id, ...data });
+        ordersMap.set(data.number, Object.assign({ id: doc.id }, data));
       });
 
       console.log(`   📋 Encontrados ${ordersMap.size} pedidos correspondentes`);

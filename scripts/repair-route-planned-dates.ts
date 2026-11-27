@@ -136,7 +136,7 @@ async function loadServices(serviceFilter: string | null): Promise<Map<string, S
   if (serviceFilter) {
     const byIdSnap = await db.collection('services').doc(serviceFilter).get();
     if (byIdSnap.exists) {
-      const service = { id: byIdSnap.id, ...(byIdSnap.data() as ServiceLike) };
+      const service = Object.assign({ id: byIdSnap.id }, byIdSnap.data() as ServiceLike);
       services.set(service.id, service);
       if (service.code) services.set(`code:${service.code}`, service);
       return services;
@@ -145,7 +145,7 @@ async function loadServices(serviceFilter: string | null): Promise<Map<string, S
     const byCodeSnap = await db.collection('services').where('code', '==', serviceFilter).limit(1).get();
     if (!byCodeSnap.empty) {
       const doc = byCodeSnap.docs[0];
-      const service = { id: doc.id, ...(doc.data() as ServiceLike) };
+      const service = Object.assign({ id: doc.id }, doc.data() as ServiceLike);
       services.set(service.id, service);
       if (service.code) services.set(`code:${service.code}`, service);
       return services;
@@ -156,7 +156,7 @@ async function loadServices(serviceFilter: string | null): Promise<Map<string, S
 
   const servicesSnap = await db.collection('services').where('source', '==', 'lunna').get();
   for (const doc of servicesSnap.docs) {
-    const service = { id: doc.id, ...(doc.data() as ServiceLike) };
+    const service = Object.assign({ id: doc.id }, doc.data() as ServiceLike);
     services.set(service.id, service);
     if (service.code) services.set(`code:${service.code}`, service);
   }
@@ -232,7 +232,7 @@ async function main() {
   let exactTimeOnlyMismatch = 0;
 
   for (const routeDoc of routeDocs) {
-    const route = { id: routeDoc.id, ...(routeDoc.data() as RouteLike) };
+    const route = Object.assign({ id: routeDoc.id }, routeDoc.data() as RouteLike);
 
     if (!includeDrafts && route.status && !REPORT_RELEVANT_STATUSES.has(route.status)) {
       skippedByStatus++;

@@ -33,7 +33,7 @@ export default function LoginPage() {
   const { toast } = useToast();
 
   // Verifica se está em lockout
-  const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
+  const isLockedOut = lockoutUntil != null && Date.now() < lockoutUntil;
 
   // Timer para atualizar UI durante lockout
   React.useEffect(() => {

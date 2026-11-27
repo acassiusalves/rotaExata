@@ -31,7 +31,9 @@ try {
   impersonationApp = getApp(IMPERSONATION_APP_NAME);
 } catch (error) {
   // Se não existir, criar nova
-  impersonationApp = initializeApp(getFirebaseOptions(), IMPERSONATION_APP_NAME);
+  const options = getFirebaseOptions();
+  if (!options) throw new Error('A configuração do Firebase está indisponível.');
+  impersonationApp = initializeApp(options, IMPERSONATION_APP_NAME);
 }
 
 impersonationAuth = getAuth(impersonationApp);

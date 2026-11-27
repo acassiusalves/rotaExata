@@ -15,15 +15,13 @@ import {
 import {
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@/components/ui/tabs';
+import { RoutePlanningTabs } from '@/components/routes/route-planning-tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   List,
   Wand2,
-  User,
   Check,
   Truck,
   Calendar,
@@ -121,6 +119,7 @@ interface RouteData {
   routeTime: string;
   isExistingRoute?: boolean;
   currentRouteId?: string; // ID da rota atual para filtrar
+  draftRouteId?: string;
   period?: 'Matutino' | 'Vespertino' | 'Noturno'; // Período para filtrar rotas
   routeName?: string; // Nome da rota para exibir
   existingRouteData?: {
@@ -392,7 +391,7 @@ export default function OrganizeRoutePage() {
       return () => clearInterval(interval);
     }
   }, []);
-  const [isOptimizing, setIsOptimizing] = React.useState({ A: false, B: false });
+  const [isOptimizing, setIsOptimizing] = React.useState<Record<string, boolean>>({ A: false, B: false });
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState<{ [key: string]: boolean }>({});
 
@@ -401,8 +400,8 @@ export default function OrganizeRoutePage() {
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
-  const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
-  const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+  const [routeNames, setRouteNames] = React.useState<Record<string, string>>({ A: 'Rota 1', B: 'Rota 2' });
+  const [assignedDrivers, setAssignedDrivers] = React.useState<Record<string, string | null>>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   // Firestore IDs para rotas A e B (quando salvas como draft no contexto de serviço)
   const [serviceRouteIds, setServiceRouteIds] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
@@ -649,7 +648,7 @@ export default function OrganizeRoutePage() {
 
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [activeStop, setActiveStop] = React.useState<PlaceValue | null>(null);
-  const [activeRouteKey, setActiveRouteKey] = React.useState<'A' | 'B' | null>(null);
+  const [activeRouteKey, setActiveRouteKey] = React.useState<string | null>(null);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
 
   // Timeline column resize state
@@ -4789,22 +4788,7 @@ export default function OrganizeRoutePage() {
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
-                <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                  <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" disabled className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium opacity-50 cursor-not-allowed">
-                      <Wand2 className="mr-2 h-4 w-4" />
-                      Organizar
-                    </TabsTrigger>
-                    <TabsTrigger value="assign" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <User className="mr-2 h-4 w-4" />
-                      Atribuir
-                    </TabsTrigger>
-                    <TabsTrigger value="review" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <Check className="mr-2 h-4 w-4" />
-                      Revisar
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
+                <RoutePlanningTabs />
               </div>
             </div>
           </div>
@@ -4908,7 +4892,7 @@ export default function OrganizeRoutePage() {
                                     <TableCell className="py-4 px-4 text-slate-700 dark:text-slate-300">{calculateFreightCost(routeItem.data.distanceMeters)}</TableCell>
                                     <TableCell className="py-4 px-4">
                                         <RouteTimeline
-                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map(s => s.id ?? s.placeId).join('-')}`}
+                                        key={`timeline-${routeItem.key}-${(pendingEdits[routeItem.key] || routeItem.data.stops).map((s: PlaceValue) => s.id ?? s.placeId).join('-')}`}
                                         routeKey={routeItem.key}
                                         stops={pendingEdits[routeItem.key] || routeItem.data.stops}
                                         originalStops={pendingEdits[routeItem.key] ? routeItem.data.stops : undefined}
@@ -5351,6 +5335,8 @@ export default function OrganizeRoutePage() {
             bairro: '',
             cidade: '',
             notes: '',
+            lat: null,
+            lng: null,
           });
         }
         setIsEditStopDialogOpen(open);

@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { format, subDays, startOfMonth, endOfMonth, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import type { DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -121,7 +122,7 @@ export function DatePickerWithPresets({
     onDateRangeChange?.(range.start, range.end);
   };
 
-  const handleDateSelect = (range: { from: Date | undefined; to: Date | undefined } | undefined) => {
+  const handleDateSelect = (range: DateRange | undefined) => {
     // Quando range é undefined, significa que o usuário clicou no mesmo dia já selecionado
     // Neste caso, queremos selecionar apenas esse dia (ao invés de desselecionar)
     if (!range && selectedRange.from) {
@@ -137,7 +138,7 @@ export function DatePickerWithPresets({
       // Se clicou no mesmo dia duas vezes (from e to são o mesmo dia), considerar como seleção de um único dia
       const isSameDay = range.to && startOfDay(range.from).getTime() === startOfDay(range.to).getTime();
 
-      setSelectedRange(range);
+      setSelectedRange({ from: range.from, to: range.to });
 
       // Se apenas uma data foi selecionada (from sem to), ou se é o mesmo dia
       if (!range.to || isSameDay) {

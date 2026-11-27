@@ -177,8 +177,7 @@ export async function performDriverRouteAction(request: Request, uid: string, au
       const updatedStop = wasPreviouslyFinalized
         ? { ...mutation.updatedStop, completedAt:retainedTime, ...(assist ? {}:{editedByDriver:true}),editedAt:now }
         : mutation.updatedStop;
-      const updatedStops = [...mutation.stops];
-      updatedStops[mutation.index] = updatedStop;
+      const updatedStops = mutation.stops.map((stop,index)=>index===mutation.index ? updatedStop:stop);
       tx.update(routeRef, { stops: updatedStops, currentStopIndex: mutation.index + 1, updatedAt: now, ...markRoute });
       if (prior !== 'completed' && input.patch.deliveryStatus === 'completed') tx.update(userRef, { totalDeliveries: FieldValue.increment(1) });
 

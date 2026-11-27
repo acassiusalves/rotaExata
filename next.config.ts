@@ -63,9 +63,7 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  generateBuildId: async () => buildId,
   eslint: {
     ignoreDuringBuilds: true,
   },

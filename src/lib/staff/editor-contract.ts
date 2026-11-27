@@ -34,7 +34,7 @@ export const staffArrangementSchema=z.object({
 
 export const staffEditorCommandSchema=z.discriminatedUnion('kind',[
   z.object({...staffWriteFields,kind:z.literal('arrange'),routeId:routeDocumentId,
-    routes:z.array(staffArrangementSchema).max(40)}).strict(),
+    routes:z.array(staffArrangementSchema).max(40),unassignedStops:z.array(place).max(400).optional()}).strict(),
   z.object({...staffWriteFields,kind:z.literal('add-manual-stop'),routeId:routeDocumentId,stop:staffManualStopSchema}).strict(),
   z.object({...staffWriteFields,kind:z.literal('route-pool'),routeId:routeDocumentId,stops:z.array(place).max(400)}).strict(),
   z.object({...staffWriteFields,kind:z.literal('delete-draft'),routeId:routeDocumentId}).strict(),

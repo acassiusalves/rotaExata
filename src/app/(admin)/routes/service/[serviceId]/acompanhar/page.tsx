@@ -1,7 +1,6 @@
 
 'use client';
 
-import { draftMetricReader, routeGeometryKey, storedRouteMetrics } from '@/lib/service-draft-metrics';
 import { isSourceDriverAssignable } from '@/lib/dispatch-driver';
 import type { Timestamp } from 'firebase/firestore';
 import * as React from 'react';
@@ -17,15 +16,13 @@ import {
 import {
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@/components/ui/tabs';
+import { RoutePlanningTabs } from '@/components/routes/route-planning-tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   List,
   Wand2,
-  User,
   Check,
   Truck,
   Calendar,
@@ -103,6 +100,9 @@ import {
 } from '@dnd-kit/sortable';
 import { RouteTimeline } from '@/components/routes/route-timeline';
 import { useToast } from '@/hooks/use-toast';
+import { commitRoutePoolMove } from '@/components/staff/route-pool-move';
+import { useFollowRouteSnapshots } from '@/components/staff/use-follow-route-snapshots';
+import { followRouteKey } from '@/lib/follow-route-snapshot';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
@@ -118,7 +118,6 @@ import {
 import {
   findSingleStopByIdentity,
   RouteStructureConflictError,
-  rebasePlannedStops,
 } from '@/lib/route-stop-reconciliation';
 import {
   buildRouteStopTransferIntents,
@@ -129,6 +128,7 @@ import {
   findStopIndexByIdentity,
   getStopIdentityKey,
   hasStopWithSameIdentity,
+  isClosedPlanningRoute,
   removeStopWithSameIdentity,
   upsertStopInCollection,
 } from '@/lib/route-stop-utils';
@@ -200,12 +200,6 @@ type AdditionalRouteEntry = {
   driverInfo?: any;
   plannedDate?: Date;
 };
-
-const sameIdentitySequence = (left: PlaceValue[], right: PlaceValue[]) => (
-  left.length === right.length && left.every((item, index) => (
-    getStopIdentityKey(item) === getStopIdentityKey(right[index])
-  ))
-);
 
 const createEmptyServiceForm = () => ({
   customerName: '',
@@ -552,7 +546,7 @@ const EditableRouteName: React.FC<{
 };
 
 export default function ServiceAcompanharPage() {
-  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, unlinkStop, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, plan:saveRoutePlanBatchAtomically, saveExisting:saveExistingRoutePlansAtomically, user, draftKey, sendNotice, native } = useRouteEditor();
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, unlinkStop, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, plan:saveRoutePlanBatchAtomically, saveExisting:saveExistingRoutePlansAtomically, user, draftKey, sendNotice, movePoolStop, native } = useRouteEditor();
   const router = useRouter();
   const params = useParams();
   const serviceId = params.serviceId as string;
@@ -594,8 +588,9 @@ export default function ServiceAcompanharPage() {
   const rememberPersistedStops = React.useCallback((id: string, stops: PlaceValue[]) => {
     persistedStopsRef.current[id] = stops;
   }, []);
+  const snapshotConflicts = React.useRef(new Map<string, { key: string; base: PlaceValue[] }>());
   const getPersistedStops = React.useCallback((id: string, fallback: PlaceValue[]) => (
-    persistedStopsRef.current[id] || fallback
+    snapshotConflicts.current.get(id)?.base ?? persistedStopsRef.current[id] ?? fallback
   ), []);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
   const [routeNames, setRouteNames] = React.useState<Record<string, string>>({ A: 'Rota 1', B: 'Rota 2' });
@@ -774,14 +769,6 @@ export default function ServiceAcompanharPage() {
   // State for pending edits (reordering within same route AND cross-route movements)
   // Now supports dynamic route IDs (A, B, and additional route IDs like "8sS7RrygaWfJYL1cegCN")
   const [pendingEdits, setPendingEdits] = React.useState<Record<string, PlaceValue[] | null>>({ A: null, B: null });
-  const routeARef = React.useRef(routeA);
-  const routeBRef = React.useRef(routeB);
-  const dynamicRoutesRef = React.useRef(dynamicRoutes);
-  const pendingEditsRef = React.useRef(pendingEdits);
-  routeARef.current = routeA;
-  routeBRef.current = routeB;
-  dynamicRoutesRef.current = dynamicRoutes;
-  pendingEditsRef.current = pendingEdits;
   const [isApplyingEdits, setIsApplyingEdits] = React.useState(false);
 
   // State for transfer dialog
@@ -2204,290 +2191,6 @@ export default function ServiceAcompanharPage() {
     loadServiceData();
   }, [serviceId, router, toast, rememberPersistedStops, getPersistedStops]);
 
-  // Real-time listener: sincronizar nomes das rotas A e B
-  React.useEffect(() => {
-    const unsubscribes: (() => void)[] = [];
-
-    // Listener para Rota A
-    if (serviceRouteIds.A) {
-      console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da Rota A:', serviceRouteIds.A);
-      const unsubA = onSnapshot(editorRoute(serviceRouteIds.A), (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const newName = data.name || data.code || 'Rota A';
-
-          setRouteNames(prev => {
-            if (prev.A !== newName) {
-              console.log('🔄 [routeNameSync] Nome da Rota A atualizado:', { old: prev.A, new: newName });
-              return { ...prev, A: newName };
-            }
-            return prev;
-          });
-        }
-      });
-      unsubscribes.push(unsubA);
-    }
-
-    // Listener para Rota B
-    if (serviceRouteIds.B) {
-      console.log('👂 [useEffect:routeNameSync] Iniciando listener para nome da Rota B:', serviceRouteIds.B);
-      const unsubB = onSnapshot(editorRoute(serviceRouteIds.B), (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const newName = data.name || data.code || 'Rota B';
-
-          setRouteNames(prev => {
-            if (prev.B !== newName) {
-              console.log('🔄 [routeNameSync] Nome da Rota B atualizado:', { old: prev.B, new: newName });
-              return { ...prev, B: newName };
-            }
-            return prev;
-          });
-        }
-      });
-      unsubscribes.push(unsubB);
-    }
-
-    return () => {
-      console.log('👋 [useEffect:routeNameSync] Parando listeners para nomes das rotas');
-      unsubscribes.forEach(unsub => unsub());
-    };
-  }, [serviceRouteIds.A, serviceRouteIds.B]);
-
-  // Real-time listener: detectar mudanças nas rotas do serviço (Luna adicionando/removendo stops)
-  React.useEffect(() => {
-    if (!routeData?.isService || !routeData?.serviceId) return;
-
-    const serviceId = routeData.serviceId;
-    console.log('👂 [useEffect:serviceListener] Iniciando listener para serviço:', serviceId);
-
-    const routesQuery = serviceRoutes(serviceId);
-
-    const metrics = draftMetricReader(computeRoute);
-    let subscribed = true;
-    const unsubscribe = onSnapshot(routesQuery, (snapshot) => {
-      console.log('👂 [serviceListener] Mudança detectada nas rotas do serviço');
-
-      // Coletar todos os orderNumbers já atribuídos a rotas (de TODAS as rotas no snapshot)
-      const allAssignedOrderNumbers = new Set<string>();
-      snapshot.docs.forEach((routeDoc) => {
-        const routeStops = (routeDoc.data().stops || []) as PlaceValue[];
-        routeStops.forEach(s => {
-          if (s.orderNumber) allAssignedOrderNumbers.add(s.orderNumber);
-        });
-      });
-
-      // Verificar cada rota modificada
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'removed') { metrics.clear(change.doc.id); return; }
-        const routeDoc = change.doc;
-        const data = routeDoc.data();
-        const routeCode = data.code || routeDoc.id;
-        const firestoreStops = dedupeStops((data.stops || []) as PlaceValue[]);
-
-        // Detectar novos stops adicionados diretamente ao array stops (Luna com existingRouteId)
-        // Mapear Firestore ID → routeKey para atualizar o state correto
-        let routeKey: string | null = null;
-        if (serviceRouteIds.A === routeDoc.id) routeKey = 'A';
-        else if (serviceRouteIds.B === routeDoc.id) routeKey = 'B';
-        else {
-          const dynRoute = dynamicRoutesRef.current.find(r => r.firestoreId === routeDoc.id);
-          if (dynRoute) routeKey = dynRoute.key;
-        }
-
-        if (routeKey) {
-          const currentRoute = routeKey === 'A'
-            ? routeARef.current
-            : routeKey === 'B'
-              ? routeBRef.current
-              : dynamicRoutesRef.current.find(route => route.key === routeKey)?.data || null;
-          const updateVisibleRoute = (updater: (previous: RouteInfo | null) => RouteInfo | null) => {
-            if (routeKey === 'A') {
-              setRouteA(updater);
-            } else if (routeKey === 'B') {
-              setRouteB(updater);
-            } else {
-              setDynamicRoutes(previous => previous.map(route => (
-                route.key === routeKey
-                  ? { ...route, data: updater(route.data) || route.data }
-                  : route
-              )));
-            }
-          };
-          const currentStopsCount = currentRoute?.stops?.length || 0;
-          const baseline = getPersistedStops(routeDoc.id, currentRoute?.stops || []);
-
-          const editing = !!pendingEditsRef.current[routeKey];
-          if (!editing || sameIdentitySequence(baseline, firestoreStops)) {
-            const visibleStops = editing ? rebasePlannedStops({
-              baseStops: baseline,
-              plannedStops: currentRoute?.stops || firestoreStops,
-              latestStops: firestoreStops,
-            }) : firestoreStops;
-            rememberPersistedStops(routeDoc.id, firestoreStops);
-            updateVisibleRoute(previous => previous ? {
-              ...previous, stops: visibleStops,
-              ...storedRouteMetrics(data, previous, visibleStops),
-            } : null);
-          }
-          if (editing) {
-            metrics.clear(routeDoc.id);
-          } else {
-            const origin: PlaceValue = data.origin ?? routeData.origin;
-            const key = routeGeometryKey(origin, firestoreStops);
-            const activeKey = routeKey;
-            void metrics.read(routeDoc.id, data, origin, firestoreStops).then(result => {
-              if (!subscribed || !result || pendingEditsRef.current[activeKey]) return;
-              updateVisibleRoute(previous => previous?.status === 'draft' &&
-                routeGeometryKey(origin, previous.stops) === key ? {...previous, ...result} : previous);
-            });
-          }
-
-          if (change.type === 'modified' && firestoreStops.length > currentStopsCount) {
-            const newCount = firestoreStops.length - currentStopsCount;
-            console.log('👂 [serviceListener] Novos stops detectados na rota', routeCode, ':', newCount, 'novo(s)');
-            setTimeout(() => {
-              toast({
-                title: 'Novos pedidos na rota!',
-                description: `${newCount} novo(s) pedido(s) adicionado(s) à ${routeCode} via Luna.`,
-              });
-            }, 0);
-          }
-        }
-
-        // Verificar se unassignedStops mudou (Luna adicionou novos stops)
-        const newUnassigned = (data.unassignedStops || []) as PlaceValue[];
-        if (change.type === 'modified' && newUnassigned.length > 0) {
-          console.log('👂 [serviceListener] Novos stops não atribuídos detectados na rota', routeCode, ':', newUnassigned.length);
-
-          // Adicionar ao estado sem duplicar - verificar contra stops já atribuídos E unassigned existentes
-          setUnassignedStops(prev => {
-            const existingIds = new Set(prev.map(s => String(s.id ?? s.placeId)));
-            const existingOrders = new Set(prev.map(s => s.orderNumber).filter(Boolean));
-            const trulyNew = dedupeStops(newUnassigned).filter(s => {
-              const sid = String(s.id ?? s.placeId);
-              if (existingIds.has(sid)) return false;
-              if (s.orderNumber && existingOrders.has(s.orderNumber)) return false;
-              // Também verificar se o orderNumber já está atribuído a uma rota
-              if (s.orderNumber && allAssignedOrderNumbers.has(s.orderNumber)) return false;
-              return true;
-            });
-
-            if (trulyNew.length > 0) {
-              // Toast fora do setState para evitar "Cannot update component while rendering"
-              setTimeout(() => {
-                toast({
-                  title: 'Novos pedidos recebidos!',
-                  description: `${trulyNew.length} novo(s) pedido(s) adicionado(s) via Luna. Arraste-os para uma rota.`,
-                });
-              }, 0);
-              return dedupeStops([...prev, ...trulyNew]);
-            }
-            return prev;
-          });
-        }
-      });
-    }, (error) => {
-      console.error('❌ [serviceListener] Erro no listener:', error);
-    });
-
-    return () => {
-      subscribed = false;
-      console.log('👂 [serviceListener] Limpando listener do serviço');
-      unsubscribe();
-    };
-  }, [
-    routeData?.isService,
-    routeData?.serviceId,
-    routeData?.origin,
-    computeRoute,
-    serviceRouteIds.A,
-    serviceRouteIds.B,
-    rememberPersistedStops,
-    getPersistedStops,
-    toast,
-  ]);
-
-  // Real-time listener: detectar mudanças no serviço (novos stops adicionados ao allStops)
-  React.useEffect(() => {
-    if (!routeData?.isService || !routeData?.serviceId) return;
-
-    const serviceId = routeData.serviceId;
-    const serviceRef = editorService(serviceId);
-
-    let previousAllStopsCount: number | null = null;
-
-    const unsubscribe = onSnapshot(serviceRef, async (docSnap) => {
-      if (!docSnap.exists()) return;
-
-      const data = docSnap.data();
-      const currentAllStops = (data.allStops || []) as PlaceValue[];
-
-      // Na primeira vez, apenas registrar a contagem
-      if (previousAllStopsCount === null) {
-        previousAllStopsCount = currentAllStops.length;
-        return;
-      }
-
-      // Detectar se novos stops foram adicionados ao serviço
-      if (currentAllStops.length > previousAllStopsCount) {
-        const newCount = currentAllStops.length - previousAllStopsCount;
-        console.log('👂 [serviceDocListener] Novos stops detectados no serviço:', newCount);
-
-        // Buscar stops atribuídos a rotas existentes do Firestore (IDs e orderNumbers)
-        const routeStopIds = new Set<string>();
-        const routeStopOrders = new Set<string>();
-        try {
-          const routesSnap = await getDocs(serviceRoutes(serviceId));
-          routesSnap.forEach(rd => {
-            const stops = (rd.data().stops || []) as PlaceValue[];
-            stops.forEach(s => {
-              routeStopIds.add(String(s.id ?? s.placeId));
-              if (s.orderNumber) routeStopOrders.add(s.orderNumber);
-            });
-          });
-        } catch (err) {
-          console.error('❌ [serviceDocListener] Erro ao buscar rotas:', err);
-        }
-
-        setUnassignedStops(prev => {
-          const existingIds = new Set([
-            ...prev.map(s => String(s.id ?? s.placeId)),
-            ...Array.from(routeStopIds),
-          ]);
-          const existingOrders = new Set([
-            ...prev.map(s => s.orderNumber).filter(Boolean),
-            ...Array.from(routeStopOrders),
-          ]);
-
-          const trulyNew = dedupeStops(currentAllStops).filter(s => {
-            const sid = String(s.id ?? s.placeId);
-            if (existingIds.has(sid)) return false;
-            if (s.orderNumber && existingOrders.has(s.orderNumber)) return false;
-            return true;
-          });
-
-          if (trulyNew.length > 0) {
-            setTimeout(() => {
-              toast({
-                title: 'Novos pedidos no serviço!',
-                description: `${trulyNew.length} novo(s) pedido(s) adicionado(s) ao serviço via Luna. Arraste-os para uma rota.`,
-              });
-            }, 0);
-            return dedupeStops([...prev, ...trulyNew]);
-          }
-          return prev;
-        });
-      }
-
-      previousAllStopsCount = currentAllStops.length;
-    }, (error) => {
-      console.error('❌ [serviceDocListener] Erro no listener:', error);
-    });
-
-    return () => unsubscribe();
-  }, [routeData?.isService, routeData?.serviceId]);
-
   const geocodeAddress = React.useCallback(
     (address: string): Promise<PlaceValue | null> => {
       return new Promise((resolve) => {
@@ -3313,6 +3016,8 @@ export default function ServiceAcompanharPage() {
 
     const activeRouteKey = active.data.current?.routeKey as string | 'unassigned';
     const overRouteKey = over.data.current?.routeKey as string;
+    if (isClosedPlanningRoute(getRoute(activeRouteKey)?.status) ||
+        isClosedPlanningRoute(getRoute(overRouteKey)?.status)) return;
 
     addDebugLog('DRAG_END', 'Processing drag operation', {
       activeRouteKey,
@@ -3356,10 +3061,9 @@ export default function ServiceAcompanharPage() {
         return;
       }
 
-      // Add to target route
-      const newTargetStops = targetRoute
-        ? [...targetRoute.stops, stopToMove]
-        : [stopToMove];
+      const firestoreRouteId = getFirestoreRouteId(overRouteKey);
+      const draftStops = pendingEdits[overRouteKey] ?? targetRoute?.stops ?? [];
+      const newTargetStops = [...draftStops, stopToMove];
       const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
       console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
 
@@ -3385,12 +3089,16 @@ export default function ServiceAcompanharPage() {
         console.error('❌ [handleDragEnd] computeRoute retornou null - salvando sem polyline');
       }
 
-      const firestoreRouteId = getFirestoreRouteId(overRouteKey);
       const metrics: RouteMetrics | undefined = newRouteInfo ? {
         encodedPolyline: newRouteInfo.encodedPolyline,
         distanceMeters: newRouteInfo.distanceMeters,
         duration: newRouteInfo.duration,
       } : undefined;
+
+      if (native && firestoreRouteId && targetRoute) {
+        await persistPoolMove('allocate', overRouteKey, firestoreRouteId, targetRoute, stopToMove, newTargetStops, metrics);
+        return;
+      }
 
       try {
         if (firestoreRouteId) {
@@ -3465,8 +3173,8 @@ export default function ServiceAcompanharPage() {
 
       const routeName = getRouteDisplayName(overRouteKey);
       toast({
-        title: 'Serviço adicionado!',
-        description: `O serviço foi adicionado à ${routeName}.${firestoreRouteId ? ' Salvo automaticamente.' : ''}`,
+        title: firestoreRouteId ? 'Serviço adicionado!' : 'Ponto pendente no planejamento',
+        description: firestoreRouteId ? `O serviço foi adicionado à ${routeName}.` : 'Salve a rota para confirmar a alteração.',
       });
 
       return;
@@ -3713,6 +3421,30 @@ export default function ServiceAcompanharPage() {
       }
     }
   };
+
+  useFollowRouteSnapshots({
+    origin: isLoading ? undefined : routeData?.origin,
+    routeId: routeData?.currentRouteId,
+    serviceId: routeData?.serviceId,
+    watch: onSnapshot, compute: computeRoute,
+    getKey: id => followRouteKey(id, routeData?.currentRouteId, serviceRouteIds, [
+      ...dynamicRoutes.map(route => ({ key: route.key, id: route.firestoreId })),
+      ...additionalRoutes.map(route => ({ key: route.id, id: route.id })),
+    ]),
+    getRoute, updateRoute: setRoute,
+    updateName: (key, name) => setRouteNames(previous => previous[key] === name ? previous : { ...previous, [key]: name }),
+    pending: pendingEdits, setPending: setPendingEdits, setPool: setUnassignedStops,
+    localRouteStops: [
+      ...(!routeData?.currentRouteId && !serviceRouteIds.A && routeA ? [routeA.stops] : []),
+      ...(!serviceRouteIds.B && routeB ? [routeB.stops] : []),
+      ...dynamicRoutes.filter(route => !route.firestoreId).map(route => route.data.stops),
+    ],
+    getBase: getPersistedStops, remember: rememberPersistedStops, conflicts: snapshotConflicts.current,
+    onConflict: () => toast({
+      variant: 'destructive', title: 'A rota mudou durante a edição',
+      description: 'Suas edições estão pendentes. Confira as alterações antes de aplicar.',
+    }),
+  });
 
   const applySavedRouteResult = (routeKey: string, result: SavedRoutePlan, metrics?: RouteMetrics) => {
     rememberPersistedStops(result.routeId, result.stops);
@@ -4633,6 +4365,22 @@ export default function ServiceAcompanharPage() {
     return true;
   };
 
+  const persistPoolMove = (
+    kind: 'allocate' | 'return', routeKey: string, routeId: string, target: RouteInfo,
+    stop: PlaceValue, plannedStops: PlaceValue[], metrics?: RouteMetrics,
+  ) => commitRoutePoolMove(movePoolStop, [kind, routeId, stop, {
+    expectedStatus: target.status,
+    baseStops: getPersistedStops(routeId, target.stops),
+    plannedStops, metrics,
+  }], {
+    toast, notify: notifySavedRouteChanges,
+    apply: (saved, updatePool, savedMetrics) => {
+      applySavedRouteResult(routeKey, saved, savedMetrics);
+      setUnassignedStops(updatePool);
+      setPendingEdits(previous => ({ ...previous, [routeKey]: null }));
+    },
+  });
+
   const handleRemoveFromRouteTimeline = async (stop: PlaceValue, _index: number, routeKey: string) => {
     if (!routeData) return;
 
@@ -4657,6 +4405,11 @@ export default function ServiceAcompanharPage() {
       distanceMeters: 0,
       duration: '0s',
     } : undefined;
+
+    if (native && firestoreRouteId) {
+      await persistPoolMove('return', routeKey, firestoreRouteId, targetRoute, stop, plannedStops, metrics);
+      return;
+    }
 
     try {
       if (firestoreRouteId) {
@@ -4702,7 +4455,9 @@ export default function ServiceAcompanharPage() {
       console.error('❌ [handleRemoveFromRoute] Erro ao salvar unassignedStops:', error);
     }
 
-    toast({ title: 'Parada removida!', description: `A parada foi movida para serviços não alocados.${firestoreRouteId ? ' Salvo automaticamente.' : ''}` });
+    toast(firestoreRouteId
+      ? { title: 'Parada removida', description: 'A parada voltou para os avulsos.' }
+      : { title: 'Movimento pendente no planejamento', description: 'Salve a rota para confirmar a alteração.' });
   };
 
   const handleDeleteStopFromTimeline = async (stop: PlaceValue, _index: number, routeKey: string) => {
@@ -5591,7 +5346,6 @@ export default function ServiceAcompanharPage() {
                         try {
                           // handleApplyPendingEdits já processa TODAS as rotas com pendingEdits
                           await handleApplyPendingEdits('A');
-                          toast({ title: 'Todas as edições foram aplicadas com sucesso!' });
                         } catch (err) {
                           console.error('Erro ao aplicar edições:', err);
                           toast({ variant: 'destructive', title: 'Erro ao aplicar edições' });
@@ -5623,18 +5377,7 @@ export default function ServiceAcompanharPage() {
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
-                <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                  <TabsList className="bg-transparent h-auto p-0 gap-1">
-                    <TabsTrigger value="organize" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <Wand2 className="mr-2 h-4 w-4" />
-                      Organizar
-                    </TabsTrigger>
-                    <TabsTrigger value="assign" className="data-[state=active]:bg-white data-[state=active]:dark:bg-slate-900 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 rounded-md text-sm font-medium">
-                      <User className="mr-2 h-4 w-4" />
-                      Atribuir
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
+                <RoutePlanningTabs />
               </div>
             </div>
           </div>
@@ -5679,6 +5422,7 @@ export default function ServiceAcompanharPage() {
                             </TableHeader>
                             <TableBody>
                             {routesForTable.map(routeItem => {
+                                const readOnly = isClosedPlanningRoute(routeItem.data.status);
                                 const isAdditionalRoute = !routeItem.isMainRoute;
                                 const handleVisibilityToggle = isAdditionalRoute
                                   ? () => toggleAdditionalRoute(routeItem.key)
@@ -5713,7 +5457,7 @@ export default function ServiceAcompanharPage() {
                                     <TableCell className="py-4 px-4 font-medium text-slate-900 dark:text-slate-100">
                                         <div className="flex items-center gap-2">
                                           <List className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                                          {isAdditionalRoute ? (
+                                          {isAdditionalRoute || readOnly ? (
                                             <span>{routeItem.name}</span>
                                           ) : (
                                             <EditableRouteName
@@ -5758,6 +5502,7 @@ export default function ServiceAcompanharPage() {
                                         stops={displayedStops}
                                         originalStops={routeHasPendingEdit ? routeItem.data.stops : undefined}
                                         color={routeItem.data.color}
+                                        readOnly={readOnly}
                                         dragDelay={DRAG_DELAY}
                                         onStopClick={(stop) => {
                                             const id = String(stop.id ?? stop.placeId ?? "");
@@ -5791,7 +5536,7 @@ export default function ServiceAcompanharPage() {
                                                 </Button>
                                             )}
                                             {/* Show delete button only for dynamic routes (C, D, E, etc.) */}
-                                            {dynamicRoutes.some(r => r.key === routeItem.key) && (
+                                            {!readOnly && dynamicRoutes.some(r => r.key === routeItem.key) && (
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
@@ -5921,7 +5666,7 @@ export default function ServiceAcompanharPage() {
                           <Select
                             value={assignedDrivers[routeItem.key] || ''}
                             onValueChange={(driverId) => handleAssignDriver(routeItem.key, driverId)}
-                            disabled={isSavingRoute}
+                            disabled={isSavingRoute || isClosedPlanningRoute(routeItem.data.status)}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Escolha um motorista disponível..." />
@@ -5962,7 +5707,7 @@ export default function ServiceAcompanharPage() {
                           Data do Início: {routeData.routeDate ? format(new Date(routeData.routeDate), 'dd/MM/yyyy', { locale: ptBR }) : '--'} às {routeData.routeTime}
                         </div>
                       </CardContent>
-                      <CardFooter className="flex gap-2">
+                      {!isClosedPlanningRoute(routeItem.data.status) && <CardFooter className="flex gap-2">
                         {shouldSaveExistingRoute ? (
                           <Button
                             className="w-full"
@@ -5982,7 +5727,7 @@ export default function ServiceAcompanharPage() {
                             {isSavingRoute ? 'Despachando...' : 'Despachar Rota'}
                           </Button>
                         )}
-                      </CardFooter>
+                      </CardFooter>}
                     </Card>
                   )
                 }) : (
@@ -5990,6 +5735,36 @@ export default function ServiceAcompanharPage() {
                     Nenhuma rota pendente para atribuir.
                   </div>
                 )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="review" className="m-0">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {routesForTable.map(route => {
+                  const stops = getDisplayedStops(route.key, route.data.stops);
+                  const driver = availableDrivers.find(item => item.id === assignedDrivers[route.key]);
+                  return (
+                    <Card key={route.key}>
+                      <CardHeader>
+                        <CardTitle>{route.name}</CardTitle>
+                        <CardDescription>
+                          {isClosedPlanningRoute(route.data.status) ? 'Rota concluída · ' : ''}
+                          {stops.length} paradas · {formatDistance(route.data.distanceMeters)} km · {formatDuration(route.data.duration)}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <p className="text-sm">{driver?.name ?? 'Motorista não atribuído'}</p>
+                        {hasPendingEdit(route.key) && <Badge variant="secondary">Edições pendentes</Badge>}
+                        <ol className="list-decimal space-y-1 pl-5 text-sm">
+                          {stops.map((stop, index) => (
+                            <li key={getStopIdentityKey(stop) ?? index}>{stop.customerName || stop.address}</li>
+                          ))}
+                        </ol>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+                {!routesForTable.length && <p className="text-sm text-muted-foreground">Sem rotas para revisar.</p>}
               </div>
             </TabsContent>
 

@@ -9,9 +9,10 @@ import { useAuth } from '@/hooks/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Toaster } from '@/components/ui/toaster';
 
 export default function AdminLayout({children}:{children:React.ReactNode}) {
-  if (nativeStaffEnabled) return <EarningsShell portal staffLogin><StaffGate><MainLayout>{children}</MainLayout></StaffGate></EarningsShell>;
+  if (nativeStaffEnabled) return <EarningsShell portal staffLogin><StaffGate><MainLayout>{children}</MainLayout><Toaster /></StaffGate></EarningsShell>;
   return <FirebaseAdminLayout>{children}</FirebaseAdminLayout>;
 }
 

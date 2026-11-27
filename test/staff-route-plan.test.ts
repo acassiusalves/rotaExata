@@ -22,3 +22,13 @@ test('transport accepts plan and assignment but excludes financial, session and 
   ]}).success,false);
   assert.equal(staffPlanBatchSchema.safeParse({...base,existingPlans:[base.existingPlans[0],base.existingPlans[0]]}).success,false);
 });
+
+test('a pool move requires the status and exclusively edits its own route',()=>{
+  const move={commandId:base.commandId,poolMove:{kind:'allocate',routeId:'route-one',stopKey:'id:avail'},
+    existingPlans:[{routeId:'route-one',expectedStatus:'draft',baseStops:[{id:'s1'}],plannedStops:[{id:'s1'},{id:'avail'}]}]};
+  assert.equal(staffPlanBatchSchema.safeParse(move).success,true);
+  for (const plan of [{expectedStatus:undefined},{expectedStatus:'completed'},{routeId:'another-route'},
+    {unassignedStops:[]}, {metadata:{name:'alterado'}}]) {
+    assert.equal(staffPlanBatchSchema.safeParse({...move,existingPlans:[{...move.existingPlans[0],...plan}]}).success,false);
+  }
+});

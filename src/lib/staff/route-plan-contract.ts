@@ -37,6 +37,7 @@ const newRoute=z.object({
 export const staffPlanBatchSchema=z.object({
   commandId:z.string().uuid(),existingPlans:z.array(existing).max(40),newRoutes:z.array(newRoute).max(40).optional(),
   transferIntents:z.array(z.object({sourceRouteId:routeDocumentId,targetRouteId:routeDocumentId,stopKey:z.string().max(400)}).strict()).optional(),
+  poolMove:z.object({kind:z.enum(['allocate','return']),routeId:routeDocumentId,stopKey:z.string().min(1).max(400)}).strict().optional(),
   unlink:z.object({
     routeId:routeDocumentId.optional(),routeRevision:routeRevisionSchema.optional(),
     serviceId:routeDocumentId.optional(),serviceRevision:routeRevisionSchema.optional(),
@@ -56,6 +57,13 @@ export const staffPlanBatchSchema=z.object({
   if (new Set(transfers.map(move=>JSON.stringify([move.sourceRouteId,move.stopKey]))).size!==transfers.length ||
       new Set(transfers.map(move=>JSON.stringify([move.targetRouteId,move.stopKey]))).size!==transfers.length) {
     issue('duplicate_stop_transfer');
+  }
+  if (batch.poolMove) {
+    const [plan]=batch.existingPlans;
+    if (ids.length!==1 || plan?.routeId!==batch.poolMove.routeId || !plan.expectedStatus ||
+        plan.metadata || plan.unassignedStops || created.length || transfers.length || batch.unlink || batch.draftDispatch || batch.serviceLink) {
+      issue('invalid_pool_move');
+    }
   }
   if (batch.unlink) {
     const {routeId,routeRevision,serviceId,serviceRevision}=batch.unlink;

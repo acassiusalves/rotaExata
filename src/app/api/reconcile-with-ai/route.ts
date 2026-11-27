@@ -170,8 +170,8 @@ async function updateRouteInFirestore(routeId: string, stops: any[], accessToken
               };
             } else if (typeof value === 'object' && value !== null) {
               // Handle timestamp objects
-              if ('_seconds' in value || 'seconds' in value) {
-                const seconds = value._seconds || value.seconds;
+              const seconds = ('_seconds' in value && value._seconds) || ('seconds' in value && value.seconds);
+              if (typeof seconds === 'number') {
                 acc[key] = { timestampValue: new Date(seconds * 1000).toISOString() };
               }
             }

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { Timestamp } from 'firebase/firestore';
+export type { Timestamp } from 'firebase/firestore';
 
 export type NavItem = {
   title: string;
@@ -77,6 +78,9 @@ export type PlaceValue = {
   modifiedAt?: Timestamp | Date;
   modificationType?: 'address' | 'sequence' | 'data' | 'removed' | 'added';
   originalSequence?: number;
+  isManuallyAdded?: boolean;
+  isNewlyAdded?: boolean;
+  _movedFromRoute?: string;
   // Sistema de numeração sequencial (INTERNO - não visível na UI)
   pointCode?: string; // Formato: {ROUTE_CODE}-{SEQUENCE} (ex: "RT-0001-001", "LN-0011-A-002")
   // Campos específicos para pedidos Lunna

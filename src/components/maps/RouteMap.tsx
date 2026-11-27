@@ -740,7 +740,7 @@ export const RouteMap = React.forwardRef<RouteMapHandle, Props>(function RouteMa
         // Small delay to ensure map is fully rendered
         requestAnimationFrame(() => {
           map.fitBounds(bounds, 100); // 100px padding
-          console.log('🗺️ [RouteMap] Mapa centralizado em:', map.getCenter().toJSON(), 'zoom:', map.getZoom());
+          console.log('🗺️ [RouteMap] Mapa centralizado em:', map.getCenter()?.toJSON(), 'zoom:', map.getZoom());
         });
         hasInitializedBoundsRef.current = true;
         previousCountCheckRef.current = currentCountCheck;

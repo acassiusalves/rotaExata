@@ -1,0 +1,82 @@
+name: Rota Exata CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  quality:
+    name: Rota Exata / TypeScript e testes unitários
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  planning:
+    name: Rota Exata / Planejamento em Firestore e navegador
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm install --global firebase-tools@14.11.1
+      - run: npx playwright install --with-deps chromium
+      - name: Rodar planejamento com dados sintéticos
+        run: >-
+          firebase emulators:exec --project demo-rotaexata-driver --only firestore --config firebase.test.json
+          "npm run test:planning && npm run test:browser"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: rota-exata-planejamento
+          path: |
+            test-results/
+            firestore-debug.log
+          if-no-files-found: ignore
+
+  build:
+    name: Rota Exata / Build e identificação do commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_ROTA_STAFF_AUTH: supabase
+      NEXT_PUBLIC_ROTA_DRIVER_AUTH: supabase
+      NEXT_PUBLIC_FIREBASE_API_KEY: planning-fixture
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: planning-fixture.invalid
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-rotaexata-driver
+      NEXT_PUBLIC_FIREBASE_APP_ID: '1:123456789:web:planning'
+      NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:3497'
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_planning_fixture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/verify-route-build.mjs "$GITHUB_SHA"

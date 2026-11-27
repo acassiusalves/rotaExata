@@ -93,3 +93,23 @@ export const upsertStopInCollection = (
 
   return dedupeStops(nextStops);
 };
+
+export function stopHasExecution(stop: PlaceValue) {
+  return stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed' ||
+    Boolean(stop.arrivedAt || stop.completedAt || stop.photoUrl || stop.attemptPhotoUrl || stop.signatureUrl ||
+      stop.wentToLocation || stop.payments?.length || stop.deliveredItemIds?.length);
+}
+
+export function availableRouteStops(
+  candidates: PlaceValue[],
+  routes: PlaceValue[][],
+  unlinked: PlaceValue[] = [],
+): PlaceValue[] {
+  // A legacy copy cannot make an assigned or archived stop available again.
+  const unavailable = new Set([...routes.flat(), ...unlinked].map(getStopIdentityKey).filter(Boolean));
+  return dedupeStops(candidates.filter(stop => stop && !stop.unlinkedAt && !stopHasExecution(stop) && !unavailable.has(getStopIdentityKey(stop))));
+}
+
+export function isClosedPlanningRoute(status?: string) {
+  return status === 'completed' || status === 'completed_auto' || status === 'finished';
+}

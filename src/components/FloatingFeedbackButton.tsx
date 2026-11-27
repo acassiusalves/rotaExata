@@ -41,30 +41,24 @@ function FeedbackButton() {
   const [capturedLogs, setCapturedLogs] = useState<any[]>([]);
   const { toast } = useToast();
 
-  const originalConsoleError = useRef<any>(null);
-
-  // Hook into console.error to capture latest errors
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    const originalConsoleError = console.error;
+    let active = true;
 
-    originalConsoleError.current = console.error;
-
-    console.error = (...args: any[]) => {
-      // Store the error (limit to last 10)
-      setCapturedLogs(prev => {
-        const newLogs = [...prev, { timestamp: new Date().toISOString(), args: args.map(arg => String(arg)) }];
-        return newLogs.slice(-10);
-      });
-      // Call original
-      if (originalConsoleError.current) {
-        originalConsoleError.current.apply(console, args);
+    const captureError = (...args: unknown[]) => {
+      if (active) {
+        setCapturedLogs(previous => [...previous, {
+          timestamp: new Date().toISOString(),
+          args: args.map(arg => String(arg)),
+        }].slice(-10));
       }
+      originalConsoleError.apply(console, args);
     };
+    console.error = captureError;
 
     return () => {
-      if (originalConsoleError.current) {
-        console.error = originalConsoleError.current;
-      }
+      active = false;
+      if (console.error === captureError) console.error = originalConsoleError;
     };
   }, []);
 

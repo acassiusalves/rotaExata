@@ -1,5 +1,5 @@
 import { staffPlannedPlaceSchema } from './route-contract.ts';
-import { staffPlanBatchSchema } from './route-plan-contract.ts';
+import { staffPlanBatchSchema,type StaffPlanBatch } from './route-plan-contract.ts';
 import type { RoutePlanBatchInput } from '../route-stop-mutations.ts';
 import { driverTimestamp } from '../driver/runtime-contract.ts';
 
@@ -21,7 +21,7 @@ function metadata(data:Record<string,unknown>) {
   };
 }
 
-export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {draftDispatch?:unknown;unlink?:unknown}) {
+export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {draftDispatch?:unknown;unlink?:unknown;poolMove?:StaffPlanBatch['poolMove']}) {
   return staffPlanBatchSchema.parse({
     commandId,
     existingPlans:input.existingPlans.map(plan=>({
@@ -38,6 +38,6 @@ export function staffPlanPayload(commandId:string,input:RoutePlanBatchInput & {d
       data:{...metadata(route.data),routeKey:route.data.routeKey,encodedPolyline:route.data.encodedPolyline,
         distanceMeters:route.data.distanceMeters,duration:route.data.duration},
     })),
-    transferIntents:input.transferIntents,serviceLink:input.serviceLink,draftDispatch:input.draftDispatch,unlink:input.unlink,
+    poolMove:input.poolMove,transferIntents:input.transferIntents,serviceLink:input.serviceLink,draftDispatch:input.draftDispatch,unlink:input.unlink,
   });
 }

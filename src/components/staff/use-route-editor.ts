@@ -14,7 +14,7 @@ import { staffRouteDates } from '@/lib/staff/route-dates';
 import { editorStop,staffPlanPayload } from '@/lib/staff/editor-payload';
 import { staffArrangementSchema,staffManualStopSchema,type StaffEditorRead } from '@/lib/staff/editor-contract';
 import type { PlaceValue,RouteInfo } from '@/lib/types';
-import { resolveRoutePlanMetrics,type RouteMetrics,type ExistingRoutePlan,type RoutePlanBatchInput,type SavedRoutePlanBatch } from '@/lib/route-stop-mutations';
+import { resolveRoutePlanMetrics,type RouteMetrics,type ExistingRoutePlan,type SavedRoutePlanBatch } from '@/lib/route-stop-mutations';
 import { getStopIdentityKey } from '@/lib/route-stop-utils';
 import { RouteStructureConflictError } from '@/lib/route-stop-reconciliation';
 import type { OptimizeDeliveryRoutesInput,OptimizeDeliveryRoutesOutput } from '@/ai/flows/optimize-delivery-routes';
@@ -24,8 +24,12 @@ type ServiceRef={kind:'service';id:string};
 type OrderRef={kind:'order';id:string;revision?:string};
 type LocationRef={kind:'location';id:string};
 export type EditorRef=RouteRef|ServiceRef|OrderRef|LocationRef;
-type PlanInput=RoutePlanBatchInput & {draftDispatch?:unknown;unlink?:unknown};
+type PlanInput=Parameters<typeof staffPlanPayload>[1];
 type PendingDispatch=Map<string,PlanInput>;
+type PoolMove=NonNullable<PlanInput['poolMove']>;
+type PoolPlan=Omit<ExistingRoutePlan,'routeId'|'metadata'>;
+type PoolReceipt={route:SavedRoutePlanBatch['existingRoutes'][number];unassignedStops:PlaceValue[];metrics?:RouteMetrics};
+type PendingPoolMoves=Map<string,{input:PlanInput;pending?:Promise<PoolReceipt>}>;
 type EditorRow=Record<string,any>;
 type EditorSnapshot={id:string;ref:EditorRef;exists:()=>boolean;data:()=>EditorRow};
 type Requester=<T>(path:string,init?:RequestInit)=>Promise<T>;
@@ -74,8 +78,9 @@ const coordinate=({lat,lng}:Pick<PlaceValue,'lat'|'lng'>)=>({lat,lng});
 const metrics=(data:EditorRow)=>typeof data.encodedPolyline==='string' && typeof data.distanceMeters==='number' &&
   typeof data.duration==='string' ? {encodedPolyline:data.encodedPolyline,distanceMeters:data.distanceMeters,duration:data.duration}:undefined;
 
-function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<string,string>,notices:Map<string,string>,dispatches:PendingDispatch,legacyToken:()=>Promise<string|undefined>) {
+function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<string,string>,notices:Map<string,string>,dispatches:PendingDispatch,poolMoves:PendingPoolMoves,legacyToken:()=>Promise<string|undefined>) {
   const editorBody=(body:unknown)=>({surface,body});
+  let planEpoch=0;
   const commitId=(fingerprint:string)=>{
     let id=ids.get(fingerprint);
     if (!id) {
@@ -143,10 +148,12 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
     async function refresh() {
       if (controller.signal.aborted || pending) return;
       pending=true;
+      const readEpoch=planEpoch;
       try {
         if (document.visibilityState==='visible') {
           const response=query.kind==='route'||query.kind==='service' ?
             await read(query,controller.signal) : {record:undefined,records:await listAll(query,controller.signal)};
+          if (readEpoch!==planEpoch) return;
           failures=0;
           const next=JSON.stringify(response);
           if (next!==last && !controller.signal.aborted) {
@@ -193,20 +200,63 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
     const fingerprint=JSON.stringify(input);
     const payload=staffPlanPayload(commitId(fingerprint),input);
     try {
-      const result=staffRouteDates<SavedRoutePlanBatch>(await request('/api/staff/routes/plan',post(editorBody(payload))));
+      const signal=input.poolMove ? AbortSignal.timeout(20_000):undefined;
+      const result=staffRouteDates<SavedRoutePlanBatch>(await request('/api/staff/routes/plan',post(editorBody(payload),'POST',signal)));
       ids.delete(fingerprint);
+      planEpoch++;
       result.existingRoutes.forEach(route=>{
         if (route.noticeId) notices.set(route.routeId,route.noticeId);
       });
       return result;
     } catch(error) {
       if (error instanceof EarningsRequestError && error.status===409) {
-        throw new RouteStructureConflictError(error.code==='staff_stop_execution_exists'
-          ? 'Paradas com visita ou entrega registrada devem permanecer na rota original.'
-          : undefined);
+        const messages:Record<string,string>={
+          staff_stop_execution_exists:'Esta parada tem visita ou entrega registrada.',
+          staff_order_service_conflict:'O vínculo atual do pedido impede este movimento.',
+          staff_route_closed:'Esta rota está fechada para alterações.',
+          staff_service_closed:'Este serviço está concluído.',
+        };
+        throw new RouteStructureConflictError(messages[error.code]);
       }
       throw error;
     }
+  }
+
+  async function movePoolStop(kind:PoolMove['kind'],routeId:string,stop:PlaceValue,plan:PoolPlan):Promise<PoolReceipt> {
+    const stopKey=getStopIdentityKey(stop);
+    if (!stopKey) throw new Error('A parada não tem uma identificação válida.');
+    const key=JSON.stringify([kind,routeId,stopKey]);
+    let entry=poolMoves.get(key);
+    if (!entry) {
+      const expectedStatus=plan.expectedStatus ?? (await readDocument(routeRef(routeId))).data().status;
+      if (!['draft','pending','dispatched','in_progress'].includes(expectedStatus)) {
+        throw new RouteStructureConflictError('Esta rota está fechada para alterações.');
+      }
+      entry=poolMoves.get(key) ?? {input:{poolMove:{kind,routeId,stopKey},existingPlans:[{...plan,routeId,expectedStatus}]}};
+      poolMoves.set(key,entry);
+    }
+    if (entry.pending) return entry.pending;
+    const current=entry;
+    current.pending=(async()=>{
+      try {
+        const result=await saveBatch(current.input);
+        const [route]=result.existingRoutes;
+        if (!route || !result.unassignedStops) throw new Error('A gravação não retornou um recibo completo.');
+        poolMoves.delete(key);
+        return {route,unassignedStops:result.unassignedStops,metrics:result.routeMetrics};
+      } catch(error) {
+        if (error instanceof RouteStructureConflictError ||
+            error instanceof EarningsRequestError && error.status>=400 && error.status<500 &&
+            ![408,429].includes(error.status)) {
+          poolMoves.delete(key);
+          ids.delete(JSON.stringify(current.input));
+        }
+        throw error;
+      } finally {
+        current.pending=undefined;
+      }
+    })();
+    return current.pending;
   }
 
   function buildPlan(reference:EditorRef,data:EditorRow,current:EditorRow):ExistingRoutePlan {
@@ -243,7 +293,9 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
     if (Array.isArray(data.organizedRoutes)) {
       await patch({kind:'arrange',routeId:reference.id,revision:current.revision,routes:data.organizedRoutes.filter((route:EditorRow)=>
         !route.dispatched).map((route:EditorRow)=>({key:route.key,name:route.name,stops:cleanPlaces(route.stops),
-          info:{...metrics(route.info),color:route.info.color}}))});
+          info:{...metrics(route.info),color:route.info.color}})),
+        ...(Array.isArray(data.unassignedStops) ? {unassignedStops:data.unassignedStops.map(editorStop)}:{})});
+
       return;
     }
     if (Array.isArray(data.unassignedStops) && !data.stops) {
@@ -409,6 +461,7 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
       if (!nativeStaffEnabled) return (await loadLegacy()).addNotification(data);
       return {id:noticeIdFrom(notices,data.routeId)};
     },
+    movePoolStop,
     code:async()=>nativeStaffEnabled ? '':(await loadLegacy()).code(),
     plan:saveBatch,
     saveExisting:async(plans:ExistingRoutePlan[])=>(await saveBatch({existingPlans:plans})).existingRoutes,
@@ -423,8 +476,9 @@ export function useRouteEditor() {
   const commandIds=useRef(new Map<string,string>());
   const notices=useRef(new Map<string,string>());
   const dispatches=useRef<PendingDispatch>(new Map());
+  const poolMoves=useRef<PendingPoolMoves>(new Map());
   const legacyUser=nativeStaffEnabled ? null:legacy.user;
-  const transport=useMemo(()=>routeEditor(request,staffEditorSurface(pathname),commandIds.current,notices.current,dispatches.current,
+  const transport=useMemo(()=>routeEditor(request,staffEditorSurface(pathname),commandIds.current,notices.current,dispatches.current,poolMoves.current,
     async()=>legacyUser?.getIdToken()),[request,legacyUser,pathname]);
   const draftKey=actor ? staffWorkspaceKey(actor.userId,actor.scopeId,'newRouteData'):'newRouteData';
   // Activity written by native commands is authoritative, including automated cleanup.

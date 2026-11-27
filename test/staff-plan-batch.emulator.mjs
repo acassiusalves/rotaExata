@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { applyStaffPlanBatch } from '../src/lib/server/staff/route-plan.ts';
 import { getStopIdentityKey } from '../src/lib/route-stop-utils.ts';
 import { readStaffRouteRemovals } from '../src/lib/server/staff/history.ts';
+import { readStaffEditor } from '../src/lib/server/staff/editor-read.ts';
 
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
 
@@ -243,6 +244,141 @@ test('coordinate-only removals write auditable stop IDs',async()=>{
   } finally {
     const logged=(await audit.where('staffAuditOperationId','==',commandId).get()).docs;
     await Promise.all([route,db.doc('rotaStaffCommands/'+commandId),audit.doc('staff-'+commandId),...logged.map(doc=>doc.ref)].map(ref=>ref.delete()));
+    await deleteApp(app);
+  }
+});
+
+async function withPoolFixture(run) {
+  const app=initializeApp({projectId:'demo-rotaexata-driver'},'pool-'+randomUUID());
+  const db=getFirestore(app);
+  const service=db.collection('services').doc();
+  const active=db.collection('routes').doc();
+  const sibling=db.collection('routes').doc();
+  const otherDestination=db.collection('routes').doc();
+  const order=db.collection('orders').doc();
+  const item={id:order.id,placeId:'fixture-pool-address',orderNumber:'S-'+order.id,address:'Rua da parada',lat:-16.6,lng:-49.2};
+  const base={id:'base-stop',placeId:'base-stop',address:'Rua original',lat:-16.61,lng:-49.21};
+  const evidence={id:'old-stop',address:'Rua concluída',placeId:'old-stop',deliveryStatus:'completed'};
+  const actor={userId:'10000000-0000-4000-8000-000000000001',name:'Operador teste'};
+  const move=(destination,kind='allocate')=>({commandId:randomUUID(),
+    poolMove:{kind,routeId:destination.id,stopKey:getStopIdentityKey(item)},
+    existingPlans:[{routeId:destination.id,expectedStatus:'in_progress',
+      baseStops:kind==='allocate'?[{id:base.id}]:[{id:base.id},{orderNumber:item.orderNumber}],
+      plannedStops:kind==='allocate'?[base,item]:[base]}],
+  });
+  try {
+    await Promise.all([
+      service.create({code:'LNS-POOL-TEST',status:'dispatched',routeIds:[active.id,sibling.id,otherDestination.id],allStops:[item]}),
+      active.create({serviceId:service.id,code:'LNS-POOL-TEST-A',status:'in_progress',stops:[base],unassignedStops:[item]}),
+      sibling.create({serviceId:service.id,code:'LNS-POOL-TEST-B',status:'completed',stops:[evidence],unassignedStops:[item]}),
+      otherDestination.create({serviceId:service.id,code:'LNS-POOL-TEST-C',status:'in_progress',stops:[base],unassignedStops:[item]}),
+      order.create({number:item.orderNumber,logisticsStatus:'em_rota',rotaExataServiceId:service.id,rotaExataRouteId:sibling.id,rotaExataRouteCode:'LNS-POOL-TEST-B'}),
+    ]);
+    await run({db,service,active,sibling,otherDestination,order,item,base,evidence,actor,move});
+  } finally { await deleteApp(app); }
+}
+
+test('allocating a service stop clears its availability and corrects the order with a completed sibling untouched',async()=>{
+  await withPoolFixture(async ({db,service,active,sibling,order,item,evidence,actor,move})=>{
+    const body=move(active);
+    const result=await applyStaffPlanBatch(db,actor,body);
+    assert.deepEqual(result.unassignedStops,[]);
+    assert.equal((await active.get()).get('stops')[1].orderNumber,item.orderNumber);
+    assert.equal((await order.get()).get('rotaExataRouteId'),active.id);
+    assert.deepEqual((await sibling.get()).get('stops'),[evidence]);
+    assert.deepEqual((await sibling.get()).get('unassignedStops'),[item]);
+
+    const fresh=await readStaffEditor(db,{kind:'service-routes',id:service.id});
+    assert.ok(fresh.records.every(route=>!route.unassignedStops?.some(stop=>stop.orderNumber===item.orderNumber)));
+    const repeated=await applyStaffPlanBatch(db,actor,body);
+    assert.equal(repeated.replayed,true);
+    assert.deepEqual(repeated.unassignedStops,[]);
+    assert.equal((await active.get()).get('stops').length,2);
+  });
+});
+
+test('returning an unvisited point to the service pool clears its route link but retains the service',async()=>{
+  await withPoolFixture(async ({db,service,active,order,item,actor,move})=>{
+    await applyStaffPlanBatch(db,actor,move(active));
+    const returned=await applyStaffPlanBatch(db,actor,move(active,'return'));
+    assert.equal(returned.unassignedStops[0].orderNumber,item.orderNumber);
+    assert.equal((await active.get()).get('stops').length,1);
+    const linked=await order.get();
+    assert.equal(linked.get('rotaExataRouteId'),null);
+    assert.equal(linked.get('rotaExataServiceId'),service.id);
+    assert.equal(linked.get('logisticsStatus'),'programado');
+  });
+});
+
+test('two destinations cannot reserve the same service point',async()=>{
+  await withPoolFixture(async ({db,active,otherDestination,order,item,actor,move})=>{
+    const results=await Promise.allSettled([
+      applyStaffPlanBatch(db,actor,move(active)),
+      applyStaffPlanBatch(db,actor,move(otherDestination)),
+    ]);
+    assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+    const rejected=results.find(result=>result.status==='rejected');
+    assert.equal(rejected.reason.status,409);
+    const assigned=(await db.getAll(active,otherDestination)).filter(doc=>doc.get('stops').some(stop=>stop.orderNumber===item.orderNumber));
+    assert.equal(assigned.length,1);
+    assert.equal((await order.get()).get('rotaExataRouteId'),assigned[0].id);
+  });
+});
+
+test('allocating a service point rejects an order linked to another service without saving a route change',async()=>{
+  await withPoolFixture(async ({db,active,order,actor,move})=>{
+    await order.update({rotaExataServiceId:'other-service'});
+    const body=move(active);
+    await assert.rejects(applyStaffPlanBatch(db,actor,body),{status:409,code:'staff_order_service_conflict'});
+    assert.equal((await active.get()).get('stops').length,1);
+    assert.equal((await db.doc('rotaStaffCommands/'+body.commandId).get()).exists,false);
+  });
+});
+
+test('a destination closed since the read rejects allocation without consuming the point',async()=>{
+  await withPoolFixture(async ({db,active,order,item,sibling,actor,move})=>{
+    const body=move(active);
+    await active.update({status:'completed'});
+    await assert.rejects(applyStaffPlanBatch(db,actor,body),{status:409,code:'staff_route_closed'});
+    assert.equal((await active.get()).get('unassignedStops')[0].orderNumber,item.orderNumber);
+    assert.equal((await order.get()).get('rotaExataRouteId'),sibling.id);
+    assert.equal((await db.doc('rotaStaffCommands/'+body.commandId).get()).exists,false);
+  });
+});
+
+test('return preserves an already visited stop and evidence in the active route',async()=>{
+  await withPoolFixture(async ({db,active,order,item,base,actor,move})=>{
+    await applyStaffPlanBatch(db,actor,move(active));
+    const visited={...item,arrivedAt:Timestamp.now(),photoUrl:'/api/driver/media/fixture'};
+    await active.update({stops:[base,visited]});
+    const body=move(active,'return');
+    await assert.rejects(applyStaffPlanBatch(db,actor,body),{status:409,code:'staff_stop_execution_exists'});
+    const saved=await active.get();
+    assert.equal(saved.get('stops')[1].photoUrl,visited.photoUrl);
+    assert.deepEqual(saved.get('unassignedStops'),[]);
+    assert.equal((await order.get()).get('rotaExataRouteId'),active.id);
+    assert.equal((await db.doc('rotaStaffCommands/'+body.commandId).get()).exists,false);
+  });
+});
+
+test('standalone manual stops move between their own route and pool',async()=>{
+  const app=initializeApp({projectId:'demo-rotaexata-driver'},'standalone-pool-'+randomUUID());
+  const db=getFirestore(app);
+  const route=db.collection('routes').doc();
+  const actor={userId:randomUUID(),name:'Operador teste'};
+  const point={id:'manual-pool',placeId:'place-manual',lat:-16.6,lng:-49.2,address:'Ponto manual'};
+  const move=(kind,baseStops,plannedStops)=>({commandId:randomUUID(),
+    poolMove:{kind,routeId:route.id,stopKey:getStopIdentityKey(point)},
+    existingPlans:[{routeId:route.id,expectedStatus:'draft',baseStops,plannedStops}]});
+  try {
+    await route.create({status:'draft',stops:[],unassignedStops:[point]});
+    await applyStaffPlanBatch(db,actor,move('allocate',[],[point]));
+    assert.equal((await route.get()).get('stops')[0].id,point.id);
+    const result=await applyStaffPlanBatch(db,actor,move('return',[point],[]));
+    assert.equal(result.unassignedStops[0].id,point.id);
+    assert.deepEqual((await route.get()).get('stops'),[]);
+  } finally {
+    await route.delete();
     await deleteApp(app);
   }
 });

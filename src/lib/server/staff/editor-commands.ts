@@ -66,8 +66,11 @@ export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,val
         }
         const pending=command.routes.map(route=>({...route,dispatched:false}));
         const organizedRoutes=[...saved,...pending];
-        assertDistinctStaffArrangedStops(organizedRoutes);
+        assertDistinctStaffArrangedStops([
+          ...organizedRoutes,...(command.unassignedStops ? [{stops:command.unassignedStops}]:[]),
+        ]);
         tx.update(target,{organizedRoutes,
+          ...(command.unassignedStops ? {unassignedStops:command.unassignedStops}:{}),
           routeNames:Object.fromEntries(organizedRoutes.map(route=>[route.key,route.name])),updatedAt:stamp()});
         break;
       }

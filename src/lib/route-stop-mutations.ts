@@ -84,6 +84,8 @@ export type SavedNewRoutePlan = {
 export type SavedRoutePlanBatch = {
   existingRoutes: SavedRoutePlan[];
   createdRoutes: SavedNewRoutePlan[];
+  unassignedStops?: PlaceValue[];
+  routeMetrics?: RouteMetrics;
 };
 
 export async function notifySavedRoutePlansAndCount(

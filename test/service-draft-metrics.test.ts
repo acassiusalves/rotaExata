@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PlaceValue } from '../src/lib/types.ts';
 import { draftMetricReader, storedRouteMetrics } from '../src/lib/service-draft-metrics.ts';
+import { followRouteKey, reconcileFollowRouteStops } from '../src/lib/follow-route-snapshot.ts';
 
 const point = (lat: number) => ({lat, lng: -49.25} as PlaceValue);
 const origin = point(-16.7), a = point(-16.66), b = point(-16.64);
@@ -32,4 +33,35 @@ test('a late calculation cannot restore a removed or replaced draft itinerary', 
   assert.equal(await reader.read('A', missing, origin, []), null);
   pending.resolve(remaining);
   assert.equal(await obsolete, null);
+});
+
+test('individual and service links identify the same persisted route independently of their slot', () => {
+  const service = {A:'route-1', B:'route-2'};
+  const others = [{key:'C',id:'route-3'}];
+  assert.equal(followRouteKey('route-2','route-2',service,others),'A');
+  assert.equal(followRouteKey('route-2',undefined,service,others),'B');
+  assert.equal(followRouteKey('route-3',undefined,service,others),'C');
+});
+
+test('the visible sequence accepts a replacement and a removal even without more points', () => {
+  const first = {...a,id:'first'};
+  const second = {...b,id:'second'};
+  const replacement = {...b,id:'replacement'};
+  assert.deepEqual(reconcileFollowRouteStops([first,second],[replacement,second],null).stops,[replacement,second]);
+  assert.deepEqual(reconcileFollowRouteStops([replacement,second],[replacement],null).stops,[replacement]);
+});
+
+test('snapshot rebasing keeps a pending sequence with the newest proof and flags a structural conflict', () => {
+  const first = {...a,id:'first'};
+  const second = {...b,id:'second'};
+  const pending = [{...second,_wasMoved:true},first];
+  const visited = {...second,arrivedAt:new Date(),notes:'Chegou'};
+  const compatible = reconcileFollowRouteStops([first,second],[first,visited],pending);
+  assert.equal(compatible.conflict,false);
+  assert.deepEqual(compatible.pending,[{...visited,_wasMoved:true},first]);
+  const replacement = {...b,id:'replacement'};
+  const incompatible = reconcileFollowRouteStops([first,second],[replacement,second],pending);
+  assert.equal(incompatible.conflict,true);
+  assert.deepEqual(incompatible.stops,[replacement,second]);
+  assert.equal(incompatible.pending,pending);
 });
