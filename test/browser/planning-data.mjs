@@ -27,7 +27,7 @@ const second = point('second','Parada Seguinte',-16.699,-49.252);
 const old = {...point('historic','Parada Entregue',-16.7,-49.25),deliveryStatus:'completed'};
 const pool = {...point(orderId,'Pedido Avulso',-16.692,-49.249),orderNumber:'P-TESTE-4902'};
 const replacement = point('luna-replacement','Parada Atualizada pela Luna',-16.687,-49.238);
-const driverName = 'Motorista de teste';
+const driverName = 'Motorista do navegador';
 const plannedDate = new Date('2026-11-27T12:00:00-03:00');
 
 export async function seedPlanningData() {

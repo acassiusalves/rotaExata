@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { assertEditorResources,requireStaffEditor } from '@/lib/server/staff/editor-access';
+import { assertEditorResources,editorCanReadRoute,editorCanReadService,editorRouteTarget,requireStaffEditor } from '@/lib/server/staff/editor-access';
 import { staffEditorSurfaceSchema } from '@/lib/staff/access';
 import { applyStaffPlanBatch,isStaffPlanReplay } from '@/lib/server/staff/route-plan';
 import { projectStaffEvidencePlace,projectStaffPlace } from '@/lib/server/staff/route-projection';
@@ -20,7 +20,10 @@ export async function POST(request:Request) {
       creating:!!body.newRoutes?.length,draftId:body.draftDispatch?.routeId,
       replayedDraft:()=>isStaffPlanReplay(db,actor,body),
     });
-    const result=await applyStaffPlanBatch(db,actor,body);
+    const result=await applyStaffPlanBatch(db,actor,body,{
+      service:id=>editorCanReadService(actor,surface,id),
+      route:document=>editorCanReadRoute(actor,surface,editorRouteTarget(document)),
+    });
     return privateJson({
       ...result,
       ...(result.unassignedStops ? {unassignedStops:result.unassignedStops.map(projectStaffPlace)}:{}),

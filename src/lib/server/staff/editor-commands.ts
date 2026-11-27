@@ -3,10 +3,11 @@ import { FieldValue,type Firestore } from 'firebase-admin/firestore';
 import { factsHash } from '../../../../functions/src/earnings-source-adapter.ts';
 import { staffEditorCommandSchema,type StaffEditorCommand } from '../../staff/editor-contract.ts';
 import { routeDocumentId } from '../../staff/route-contract.ts';
-import { getStopIdentityKey } from '../../route-stop-utils.ts';
+import { availableRouteStops,getStopIdentityKey,poolStopKeys } from '../../route-stop-utils.ts';
 import type { PlaceValue } from '../../types';
 import { EarningsError } from '../earnings/transport.ts';
 import { staffRouteRevision } from './route-commands.ts';
+import { servicePoolState,type PoolVisibility } from './pool-state.ts';
 
 type EditorActor={userId:string;sourceUid?:string;name:string};
 export const staffManualStopPrefix='staff-manual-';
@@ -33,7 +34,7 @@ export function assertDistinctStaffArrangedStops(routes:{stops:Partial<PlaceValu
 
 const activeStatuses=['draft','pending','dispatched','in_progress'];
 
-export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,value:unknown) {
+export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,value:unknown,visibility?:PoolVisibility) {
   const command:StaffEditorCommand=staffEditorCommandSchema.parse(value);
   const collection='routes';
   const entityId=command.routeId;
@@ -81,6 +82,40 @@ export async function applyStaffEditorCommand(db:Firestore,actor:EditorActor,val
           kind:command.kind,entityId,draftCreation:staffRouteRevision(snapshot.createTime),
           createdAt:stamp(),
         });
+        break;
+      }
+      case 'edit-pool-stop': {
+        const serviceId=typeof data.serviceId==='string' ? data.serviceId:undefined;
+        const service=serviceId ? await tx.get(db.collection('services').doc(serviceId)):undefined;
+        if (service && (!service.exists || service.get('status')==='completed')) {
+          throw new EarningsError(409,'staff_service_closed');
+        }
+        const siblings=serviceId ? (await tx.get(db.collection('routes').where('serviceId','==',serviceId))).docs:[snapshot];
+        const {targetPool,members,candidates,mirrors,excluded}=servicePoolState(snapshot,siblings,service,visibility);
+        const existing=availableRouteStops(candidates,mirrors.map(row=>row.stops),excluded)
+          .find(stop=>getStopIdentityKey(stop)===command.stopKey);
+        if (!existing) throw new EarningsError(409,'staff_route_conflict');
+        if (serviceId && existing.orderNumber) {
+          const orders=await tx.get(db.collection('orders').where('number','==',existing.orderNumber));
+          if (orders.docs.filter(order=>order.get('rotaExataServiceId')===serviceId).length!==1) {
+            throw new EarningsError(409,'staff_order_service_conflict');
+          }
+        }
+        const {id:_id,pointCode:_pointCode,orderNumber:_orderNumber,...fields}=command.stop;
+        const edited={...existing,...fields};
+        if (getStopIdentityKey(edited)!==command.stopKey || !edited.lat || !edited.lng) {
+          throw new EarningsError(409,'staff_route_conflict');
+        }
+        const keys=new Set(poolStopKeys(edited));
+        const updateCopies=(copies:PlaceValue[])=>{
+          const index=copies.findIndex(stop=>poolStopKeys(stop).some(key=>keys.has(key)));
+          return index<0 ? [...copies,edited]:copies.map((stop,i)=>index===i ? edited:stop);
+        };
+        tx.update(target,{unassignedStops:updateCopies(targetPool),updatedAt:stamp()});
+        if (service) {
+          const allStops=updateCopies(members);
+          tx.update(service.ref,{allStops,'stats.totalDeliveries':allStops.filter(stop=>!stop.unlinkedAt).length,updatedAt:stamp()});
+        }
         break;
       }
       case 'route-pool': {

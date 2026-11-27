@@ -1,6 +1,7 @@
 import type { PlaceValue } from '@/lib/types';
 
-const normalizeToken = (value?: string | null) => value?.trim().toLowerCase() ?? '';
+const normalizeToken = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase() :
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
 
 export const getStopIdentityKey = (stop: Partial<PlaceValue> | null | undefined): string | null => {
   if (!stop) return null;
@@ -95,19 +96,42 @@ export const upsertStopInCollection = (
 };
 
 export function stopHasExecution(stop: PlaceValue) {
-  return stop.deliveryStatus === 'completed' || stop.deliveryStatus === 'failed' ||
+  return ['arrived', 'completed', 'failed'].includes(stop.deliveryStatus ?? '') ||
     Boolean(stop.arrivedAt || stop.completedAt || stop.photoUrl || stop.attemptPhotoUrl || stop.signatureUrl ||
       stop.wentToLocation || stop.payments?.length || stop.deliveredItemIds?.length);
+}
+
+export function poolStopKeys(stop: Partial<PlaceValue> | null | undefined): string[] {
+  const primary = getStopIdentityKey(stop);
+  const manualId = stop?.orderNumber ? null : getStopIdentityKey({ id: stop?.id });
+  return [...new Set([primary, manualId].filter((key): key is string => Boolean(key)))];
+}
+
+export function excludedPoolStopKeys(copies: PlaceValue[], removed: unknown = []): string[] {
+  const blocked = new Set<string>();
+  if (Array.isArray(removed)) for (const key of removed) {
+    if (typeof key === 'string') blocked.add(key);
+  }
+  for (const stop of copies) {
+    if (stop && (stop.unlinkedAt || stopHasExecution(stop))) poolStopKeys(stop).forEach(key => blocked.add(key));
+  }
+  return [...blocked];
 }
 
 export function availableRouteStops(
   candidates: PlaceValue[],
   routes: PlaceValue[][],
-  unlinked: PlaceValue[] = [],
+  excluded: string[] = [],
 ): PlaceValue[] {
-  // A legacy copy cannot make an assigned or archived stop available again.
-  const unavailable = new Set([...routes.flat(), ...unlinked].map(getStopIdentityKey).filter(Boolean));
-  return dedupeStops(candidates.filter(stop => stop && !stop.unlinkedAt && !stopHasExecution(stop) && !unavailable.has(getStopIdentityKey(stop))));
+  // A legacy copy cannot make an assigned or archived identity available again.
+  const unavailable = new Set([...routes.flatMap(stops => stops.flatMap(poolStopKeys)), ...excludedPoolStopKeys(candidates, excluded)]);
+  return candidates.filter(stop => {
+    if (!stop) return false;
+    const keys = poolStopKeys(stop);
+    if (keys.some(key => unavailable.has(key))) return false;
+    keys.forEach(key => unavailable.add(key));
+    return true;
+  });
 }
 
 export function isClosedPlanningRoute(status?: string) {

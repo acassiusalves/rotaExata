@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { availableRouteStops } from '../src/lib/route-stop-utils.ts';
 import type { PlaceValue } from '../src/lib/types.ts';
 import { draftMetricReader, storedRouteMetrics } from '../src/lib/service-draft-metrics.ts';
 import { followRouteKey, reconcileFollowRouteStops } from '../src/lib/follow-route-snapshot.ts';
@@ -64,4 +65,11 @@ test('snapshot rebasing keeps a pending sequence with the newest proof and flags
   assert.equal(incompatible.conflict,true);
   assert.deepEqual(incompatible.stops,[replacement,second]);
   assert.equal(incompatible.pending,pending);
+});
+
+test('historical proof in a duplicate suppresses the same point and numeric legacy IDs still work', () => {
+  const legacy = {...a,id:7} as unknown as PlaceValue;
+  const pending = {...a,id:'pending'};
+  const historical = {...pending,pointCode:'RT-0050-001',photoUrl:'/api/driver/media/fixture'};
+  assert.deepEqual(availableRouteStops([pending,legacy,historical],[]),[legacy]);
 });

@@ -3,7 +3,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { routeRef, serviceRef, serviceRoutes, type useRouteEditor } from './use-route-editor';
 import type { PlaceValue, RouteInfo } from '@/lib/types';
-import { availableRouteStops, dedupeStops, getStopIdentityKey } from '@/lib/route-stop-utils';
+import { availableRouteStops, dedupeStops, excludedPoolStopKeys, getStopIdentityKey } from '@/lib/route-stop-utils';
 import { reconcileFollowRouteStops } from '@/lib/follow-route-snapshot';
 import { draftMetricReader, routeGeometryKey, storedRouteMetrics } from '@/lib/service-draft-metrics';
 
@@ -35,9 +35,11 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
   const current = useRef(options);
   current.current = options;
   const { origin, routeId, serviceId, watch, compute, pending, conflicts } = options;
+  const resumeMetrics = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     for (const [id, { key }] of conflicts) if (!pending[key]) conflicts.delete(id);
+    resumeMetrics.current?.();
   }, [pending, conflicts]);
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
     const readers: (() => void)[] = [];
     const routes = new Map<string, RouteRow>();
     const metrics = draftMetricReader(compute);
+    const waiting = new Map<string, { key: string; calculate: () => void }>();
     let members: PlaceValue[] = [];
     let serviceRoutesLoaded = !serviceId;
     let previousPoolKeys = new Set<string | null>();
@@ -53,7 +56,7 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
     function updatePool() {
       const assigned = Array.from(routes.values(), row => row.stops ?? []);
       const legacy = Array.from(routes.values()).flatMap(row => row.unassignedStops ?? []);
-      const unlinked = members.filter(stop => stop.unlinkedAt);
+      const unlinked = excludedPoolStopKeys(members);
       const poolMembers = serviceRoutesLoaded ? members : [];
       const serverPool = availableRouteStops([...poolMembers, ...legacy], assigned, unlinked);
       const before = previousPoolKeys;
@@ -96,16 +99,32 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
         status: row.status ?? previous.status,
       } : previous);
 
-      if (draft) { metrics.clear(id); return; }
       const routeOrigin = row.origin && Number.isFinite(row.origin.lat) ? row.origin : origin!;
       const geometry = routeGeometryKey(routeOrigin, incoming);
-      void metrics.read(id, row, routeOrigin, incoming).then(result => {
-        const latest = current.current;
-        if (!active || !result || latest.pending[key] || !routes.has(id)) return;
-        latest.updateRoute(key, previous => previous?.status === 'draft' &&
-          routeGeometryKey(routeOrigin, previous.stops) === geometry ? { ...previous, ...result } : previous);
-      }).catch(error => console.error('Erro ao calcular trajeto do rascunho:', error));
+      const calculate = () => {
+        void metrics.read(id, row, routeOrigin, incoming).then(result => {
+          const latest = current.current;
+          if (!active || !result || latest.pending[key] || !routes.has(id)) return;
+          latest.updateRoute(key, previous => previous?.status === 'draft' &&
+            routeGeometryKey(routeOrigin, previous.stops) === geometry ? { ...previous, ...result } : previous);
+        }).catch(error => console.error('Erro ao calcular trajeto do rascunho:', error));
+      };
+      if (draft) {
+        metrics.clear(id);
+        waiting.set(id, { key, calculate });
+      } else {
+        waiting.delete(id);
+        calculate();
+      }
     }
+
+    resumeMetrics.current = () => {
+      for (const [id, { key, calculate }] of waiting) {
+        if (current.current.pending[key]) continue;
+        waiting.delete(id);
+        calculate();
+      }
+    };
 
     const onError = (error: Error) => console.error('Erro ao sincronizar o planejamento:', error);
     if (routeId) readers.push(watch(routeRef(routeId), doc => {
@@ -121,6 +140,7 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
           if (type === 'removed') {
             if (doc.id !== routeId) routes.delete(doc.id);
             metrics.clear(doc.id);
+            waiting.delete(doc.id);
           } else receive(doc.id, doc.data());
         }
         updatePool();
@@ -130,6 +150,6 @@ export function useFollowRouteSnapshots(options: FollowOptions) {
         updatePool();
       }, onError));
     }
-    return () => { active = false; readers.forEach(unsubscribe => unsubscribe()); };
+    return () => { active = false; resumeMetrics.current = null; readers.forEach(unsubscribe => unsubscribe()); };
   }, [routeId, serviceId, origin, watch, compute]);
 }

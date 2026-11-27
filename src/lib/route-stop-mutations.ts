@@ -27,7 +27,11 @@ export function resolveRoutePlanMetrics(
   if (plannedStops.length === 0) {
     return { encodedPolyline: '', distanceMeters: 0, duration: '0s' };
   }
-  if (computed) return computed;
+  if (computed) return {
+    encodedPolyline: computed.encodedPolyline,
+    distanceMeters: computed.distanceMeters,
+    duration: computed.duration,
+  };
   return undefined;
 }
 

@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { applyStaffPlanBatch } from '../src/lib/server/staff/route-plan.ts';
 import { getStopIdentityKey } from '../src/lib/route-stop-utils.ts';
 import { readStaffRouteRemovals } from '../src/lib/server/staff/history.ts';
+import { applyStaffEditorCommand } from '../src/lib/server/staff/editor-commands.ts';
+import { staffRouteRevision } from '../src/lib/server/staff/route-commands.ts';
 import { readStaffEditor } from '../src/lib/server/staff/editor-read.ts';
 
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8181');
@@ -349,12 +351,12 @@ test('a destination closed since the read rejects allocation without consuming t
 test('return preserves an already visited stop and evidence in the active route',async()=>{
   await withPoolFixture(async ({db,active,order,item,base,actor,move})=>{
     await applyStaffPlanBatch(db,actor,move(active));
-    const visited={...item,arrivedAt:Timestamp.now(),photoUrl:'/api/driver/media/fixture'};
+    const visited={...item,deliveryStatus:'arrived'};
     await active.update({stops:[base,visited]});
     const body=move(active,'return');
     await assert.rejects(applyStaffPlanBatch(db,actor,body),{status:409,code:'staff_stop_execution_exists'});
     const saved=await active.get();
-    assert.equal(saved.get('stops')[1].photoUrl,visited.photoUrl);
+    assert.equal(saved.get('stops')[1].deliveryStatus,'arrived');
     assert.deepEqual(saved.get('unassignedStops'),[]);
     assert.equal((await order.get()).get('rotaExataRouteId'),active.id);
     assert.equal((await db.doc('rotaStaffCommands/'+body.commandId).get()).exists,false);
@@ -381,4 +383,92 @@ test('standalone manual stops move between their own route and pool',async()=>{
     await route.delete();
     await deleteApp(app);
   }
+});
+
+test('a confirmed service pool address correction is what the allocation persists',async()=>{
+  await withPoolFixture(async ({db,service,active,item,actor,move})=>{
+    const stored={...item,lat:0,lng:0,expectedValue:315};
+    await service.update({allStops:[stored]});
+    await active.update({unassignedStops:[stored]});
+    const revised={...item,address:'Endereço corrigido',lat:-16.77,lng:-49.19};
+    const target=await active.get();
+    await applyStaffEditorCommand(db,actor,{
+      commandId:randomUUID(),kind:'edit-pool-stop',routeId:active.id,revision:staffRouteRevision(target.updateTime),
+      stopKey:getStopIdentityKey(item),stop:revised,
+    });
+    const body=move(active);
+    body.existingPlans[0].plannedStops[1]=revised;
+    const result=await applyStaffPlanBatch(db,actor,body);
+    const saved=result.existingRoutes[0].stops[1];
+    assert.equal(saved.address,revised.address);
+    assert.equal(saved.lat,revised.lat);
+    assert.equal(saved.expectedValue,315);
+    assert.deepEqual((await service.get()).get('allStops'),[{...stored,...revised}]);
+  });
+});
+
+test('unlink protects a manual point from revival through a completed sibling mirror',async()=>{
+  await withPoolFixture(async ({db,service,active,sibling,otherDestination,base,actor})=>{
+    const point={id:'manual-under-service',placeId:'hand-entered',address:'Avulso manual',lat:-16.6,lng:-49.2};
+    await service.update({allStops:[point]});
+    await active.update({stops:[base,point],unassignedStops:[]});
+    await sibling.update({unassignedStops:[point]});
+    await otherDestination.update({unassignedStops:[]});
+    const [source,member]=await db.getAll(active,service);
+    await applyStaffPlanBatch(db,actor,{
+      commandId:randomUUID(),existingPlans:[{routeId:active.id,baseStops:[base,point],plannedStops:[base]}],
+      unlink:{routeId:active.id,serviceId:service.id,routeRevision:staffRouteRevision(source.updateTime),
+        serviceRevision:staffRouteRevision(member.updateTime),stopKey:getStopIdentityKey(point)},
+    });
+    const records=(await readStaffEditor(db,{kind:'service-routes',id:service.id})).records;
+    assert.ok(records.every(route=>!(route.unassignedStops ?? []).some(item=>item.id===point.id)));
+    await assert.rejects(applyStaffPlanBatch(db,actor,{
+      commandId:randomUUID(),poolMove:{kind:'allocate',routeId:active.id,stopKey:getStopIdentityKey(point)},
+      existingPlans:[{routeId:active.id,expectedStatus:'in_progress',baseStops:[base],plannedStops:[base,point]}],
+    }),{status:409});
+    assert.deepEqual((await sibling.get()).get('unassignedStops'),[point]);
+  });
+});
+
+test('a newly created service route cannot claim a point allocated by another route draft',async()=>{
+  await withPoolFixture(async ({db,service,active,item,actor,move})=>{
+    await active.update({status:'draft'});
+    const allocation=move(active);
+    allocation.existingPlans[0].expectedStatus='draft';
+    await applyStaffPlanBatch(db,actor,allocation);
+    const next=db.collection('routes').doc();
+    const driver=db.collection('users').doc();
+    await driver.set({role:'driver',name:'Motorista de teste'});
+    const order=(await db.collection('orders').where('number','==',item.orderNumber).get()).docs[0];
+    assert.equal(order.get('rotaExataRouteId'),null);
+    const origin={id:'origin',placeId:'origin',address:'Origem',lat:-16.6,lng:-49.21};
+    const dispatch={commandId:randomUUID(),existingPlans:[],serviceLink:{serviceId:service.id,routeIds:[next.id]},
+      newRoutes:[{routeId:next.id,plannedStops:[item],data:{status:'dispatched',name:'Nova rota',driverId:driver.id,
+        plannedDate:new Date().toISOString(),origin,encodedPolyline:'',distanceMeters:0,duration:'0s'}}]};
+    await assert.rejects(applyStaffPlanBatch(db,actor,dispatch),{status:409});
+    assert.equal((await next.get()).exists,false);
+    assert.equal((await order.ref.get()).get('rotaExataRouteId'),null);
+  });
+});
+
+test('allocation and replay show the same remaining service pool as a route reload, scoped to readable records',async()=>{
+  await withPoolFixture(async ({db,service,active,sibling,item,actor,move})=>{
+    const other={id:'service-member',placeId:'service-place',lat:-16.71,lng:-49.21,address:'Outro avulso do serviço'};
+    const mirrored={...other,id:'private-mirror',placeId:'another-place'};
+    await service.update({allStops:[item,other]});
+    await sibling.update({unassignedStops:[item,mirrored]});
+    const body=move(active);
+    const first=await applyStaffPlanBatch(db,actor,body);
+    const replayed=await applyStaffPlanBatch(db,actor,body);
+    const loaded=await readStaffEditor(db,{kind:'route',id:active.id});
+    assert.deepEqual(first.unassignedStops.map(stop=>stop.id),[other.id,mirrored.id]);
+    assert.deepEqual(replayed.unassignedStops.map(stop=>stop.id),first.unassignedStops.map(stop=>stop.id));
+    assert.deepEqual(loaded.record.unassignedStops.map(stop=>stop.id),first.unassignedStops.map(stop=>stop.id));
+
+    const restricted={service:()=>false,route:doc=>doc.id===active.id};
+    const allowed=await readStaffEditor(db,{kind:'route',id:active.id},undefined,restricted);
+    assert.deepEqual(allowed.record.unassignedStops,[]);
+    const allowedReplay=await applyStaffPlanBatch(db,actor,body,restricted);
+    assert.deepEqual(allowedReplay.unassignedStops,[]);
+  });
 });

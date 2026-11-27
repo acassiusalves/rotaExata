@@ -9,8 +9,9 @@ import { staffPlanBatchSchema,type StaffPlanBatch } from '../../staff/route-plan
 import { assertDistinctStaffArrangedStops,normalizedStaffStopId,staffManualStopId,staffManualStopPrefix } from './editor-commands.ts';
 import { staffRouteRevision } from './route-commands.ts';
 import type { PlaceValue } from '../../types';
-import { availableRouteStops,getStopIdentityKey,removeStopWithSameIdentity,stopHasExecution,upsertStopInCollection } from '../../route-stop-utils.ts';
+import { availableRouteStops,getStopIdentityKey,poolStopKeys,removeStopWithSameIdentity,stopHasExecution } from '../../route-stop-utils.ts';
 import { EarningsError } from '../earnings/transport.ts';
+import { servicePoolState,storedPlaces as places,type PoolVisibility } from './pool-state.ts';
 
 type Operator={userId:string;name:string;sourceUid?:string;scopeId?:string};
 type Receipt={
@@ -132,23 +133,16 @@ function preserveRemovedExecution(result:SavedRoutePlanBatch) {
   }
 }
 
-const places=(document:DocumentSnapshot|undefined,field:string):PlaceValue[]=>{
-  const value=document?.get(field);
-  return Array.isArray(value) ? value.filter(stop=>stop && typeof stop==='object'):[];
-};
-
-async function poolRouteState(db:Firestore,tx:Transaction,target:DocumentSnapshot,service?:DocumentSnapshot) {
-  const candidates=places(target,'unassignedStops');
-  const members=places(service,'allStops');
+async function poolRouteState(
+  db:Firestore,tx:Transaction,target:DocumentSnapshot,service?:DocumentSnapshot,visibility?:PoolVisibility,
+) {
   const siblings=service ? (await tx.get(db.collection('routes').where('serviceId','==',service.id))).docs:[target];
-  const stops=siblings.map(doc=>places(doc,'stops'));
-  const unlinked=members.filter(stop=>stop.unlinkedAt);
-  return {candidates,members,siblings,stops,unlinked};
+  return servicePoolState(target,siblings,service,visibility);
 }
 
 async function preparePoolMove(
   db:Firestore,tx:Transaction,batch:StaffPlanBatch,target:DocumentSnapshot,service:DocumentSnapshot|undefined,
-  writes:Array<()=>void>,
+  writes:Array<()=>void>,visibility?:PoolVisibility,
 ) {
   const move=batch.poolMove!;
   const allocate=move.kind==='allocate';
@@ -157,17 +151,19 @@ async function preparePoolMove(
   if (status!==plan.expectedStatus) throw new EarningsError(409,'staff_route_conflict');
   if (service?.get('status')==='completed') throw new EarningsError(409,'staff_service_closed');
 
-  const {candidates,members,siblings,stops,unlinked}=await poolRouteState(db,tx,target,service);
+  const {targetPool,members,candidates,mirrors,excluded}=await poolRouteState(db,tx,target,service,visibility);
   const hasKey=(stop:Partial<PlaceValue>)=>getStopIdentityKey(stop)===move.stopKey;
   const matches=places(target,'stops').filter(hasKey);
-  const otherAssigned=siblings.some((doc,index)=>doc.id!==target.id && stops[index].some(hasKey));
-  const existing=matches.length===1 ? matches[0]:undefined;
-  const member=members.find(hasKey);
-  const legacyCandidate=[...candidates,...siblings.flatMap(doc=>places(doc,'unassignedStops'))]
-    .find(stop=>hasKey(stop) && !stop.unlinkedAt);
-  const focus=allocate ? (member && !member.unlinkedAt ? member:legacyCandidate) :existing;
-  if (focus && stopHasExecution(focus)) throw new EarningsError(409,'staff_stop_execution_exists');
-  if (!focus || focus.unlinkedAt || unlinked.some(hasKey) || otherAssigned || (allocate && matches.length)) {
+  const chosen=allocate ? candidates.find(hasKey) : matches.length===1 ? matches[0]:undefined;
+  const keys=new Set(chosen ? poolStopKeys(chosen):[move.stopKey]);
+  const samePoint=(stop:PlaceValue)=>poolStopKeys(stop).some(key=>keys.has(key));
+  const otherAssigned=mirrors.some(row=>row.doc.id!==target.id && row.stops.some(samePoint));
+  const allCopies=[...members,...mirrors.flatMap(row=>[...row.stops,...row.pool])];
+  if (allCopies.some(stop=>samePoint(stop) && stopHasExecution(stop))) {
+    throw new EarningsError(409,'staff_stop_execution_exists');
+  }
+  const focus=chosen;
+  if (!focus || focus.unlinkedAt || excluded.some(key=>keys.has(key)) || otherAssigned || (allocate && places(target,'stops').some(samePoint))) {
     throw new EarningsError(409,'staff_route_conflict');
   }
   // The batch may reorder the other stops. Its only addition or removal must be the requested point.
@@ -187,7 +183,7 @@ async function preparePoolMove(
       !doc.get('rotaExataServiceId') && (doc.id===focus.id || doc.get('rotaExataRouteId')===target.id));
     const order=matching[0];
     const linked=order?.get('rotaExataRouteId');
-    if (matching.length!==1 || (linked && linked!==target.id && (!allocate || !siblings.some(doc=>doc.id===linked)))) {
+    if (matching.length!==1 || (linked && linked!==target.id && (!allocate || !mirrors.some(({doc})=>doc.id===linked)))) {
       throw new EarningsError(409,'staff_order_service_conflict');
     }
     if (['entregue','falha'].includes(order.get('logisticsStatus'))) {
@@ -202,24 +198,25 @@ async function preparePoolMove(
     }
   }
 
-  const rawPool=allocate ? removeStopWithSameIdentity(candidates,focus):upsertStopInCollection(candidates,focus);
+  const remainingPool=targetPool.filter(stop=>!samePoint(stop));
+  const rawPool=allocate ? remainingPool:[...remainingPool,focus];
   const orderNumbers=target.get('lunnaOrderIds');
   const recorded=Array.isArray(orderNumbers) ? orderNumbers:[];
   const orderNumber=focus.orderNumber;
   const nextOrderNumbers=allocate && active ? [...new Set([...recorded,orderNumber])]:recorded.filter(id=>id!==orderNumber);
-  const nextStops=stops.map((list,index)=>siblings[index].id!==target.id ? list:
-    allocate ? [...list,focus]:removeStopWithSameIdentity(list,focus));
+  const nextStops=mirrors.map(({doc,stops})=>doc.id!==target.id ? stops:
+    allocate ? [...stops,focus]:removeStopWithSameIdentity(stops,focus));
   const planned=allocate ? plan.plannedStops.find(hasKey):undefined;
   const matchingGeometry=!planned || (planned.lat===focus.lat && planned.lng===focus.lng);
   const metrics=(matchingGeometry ? plan.metrics : undefined) ?? {encodedPolyline:'',distanceMeters:0,duration:'0s'};
   return {
     added:allocate ? focus:undefined,metrics,
     metadata:{unassignedStops:rawPool,...(orderNumber && (active || Array.isArray(orderNumbers)) ? {lunnaOrderIds:nextOrderNumbers}:{})},
-    available:availableRouteStops(rawPool,nextStops,unlinked),
+    available:availableRouteStops(allocate ? candidates:[focus,...candidates],nextStops,excluded),
   };
 }
 
-async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by:string,writes:Array<()=>void>) {
+async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by:string,writes:Array<()=>void>,visibility?:PoolVisibility) {
   const routeIds=batch.existingPlans.map(plan=>plan.routeId);
   const serviceId=batch.serviceLink?.serviceId;
   const routeDocs=routeIds.length ? await tx.getAll(...routeIds.map(id=>db.collection('routes').doc(id))):[];
@@ -290,7 +287,7 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
     });
   }
 
-  const pool=batch.poolMove ? await preparePoolMove(db,tx,batch,routeDocs[0],services.get(routeDocs[0].get('serviceId')),writes):undefined;
+  const pool=batch.poolMove ? await preparePoolMove(db,tx,batch,routeDocs[0],services.get(routeDocs[0].get('serviceId')),writes,visibility):undefined;
   const existingPlans=batch.existingPlans.map((plan,index)=>{
     const linked=services.get(routeDocs[index].get('serviceId'));
     const latest=routeDocs[index].get('stops') ?? [];
@@ -356,6 +353,24 @@ async function canonicalPlan(db:Firestore,tx:Transaction,batch:StaffPlanBatch,by
   return {plans,pool};
 }
 
+function verifyNewServiceAssignments(
+  routeId:string,stops:PlaceValue[],siblings:DocumentSnapshot[],result:SavedRoutePlanBatch,plans:RoutePlanBatchInput,service:DocumentSnapshot,
+) {
+  const prospective=new Map(result.existingRoutes.map(route=>[route.routeId,route.stops]));
+  const blocked=new Set(servicePoolState(undefined,siblings,service).excluded);
+  const reserved=new Set(siblings.filter(doc=>doc.id!==routeId).flatMap(doc=>{
+    const stored=places(doc,'stops');
+    const pending=prospective.get(doc.id);
+    return (pending ? [...pending,...stored.filter(stop=>stop.unlinkedAt)]:stored).flatMap(poolStopKeys);
+  }));
+  result.createdRoutes.forEach((route,index)=>{
+    if (route.routeId!==routeId && plans.newRoutes?.[index]?.data.serviceId===service.id) {
+      route.stops.flatMap(poolStopKeys).forEach(key=>reserved.add(key));
+    }
+  });
+  if (stops.some(stop=>poolStopKeys(stop).some(key=>reserved.has(key) || blocked.has(key)))) throw new EarningsError(409,'staff_route_conflict');
+}
+
 async function applyDispatchLinks(
   db:Firestore,tx:Transaction,batch:StaffPlanBatch,result:SavedRoutePlanBatch,plans:RoutePlanBatchInput,writes:Array<()=>void>,
 ) {
@@ -364,7 +379,7 @@ async function applyDispatchLinks(
       dispatch:plans.newRoutes![index].data.status==='dispatched'})),
     ...result.existingRoutes.map((route,index)=>({route,newRoute:null,dispatch:batch.existingPlans[index].metadata?.status==='dispatched'})),
   ];
-  const serviceLinks=new Map<string,{dispatched:boolean;created:number}>();
+  const serviceLinks=new Map<string,{dispatched:boolean;created:number;service:DocumentSnapshot;siblings:DocumentSnapshot[]}>();
   const assignedNumbers=new Set<string>();
   for (const {route,newRoute,dispatch} of dispatches) {
     if (!dispatch && !newRoute) continue;
@@ -378,7 +393,16 @@ async function applyDispatchLinks(
     }
     if (typeof data.serviceId!=='string') continue;
     const serviceId=data.serviceId;
-    const state=serviceLinks.get(serviceId) ?? {dispatched:false,created:0};
+    let state=serviceLinks.get(serviceId);
+    if (!state) {
+      const [service,siblings]=await Promise.all([
+        tx.get(db.collection('services').doc(serviceId)),
+        tx.get(db.collection('routes').where('serviceId','==',serviceId).select('stops','unassignedStops')),
+      ]);
+      if (!service.exists || service.get('status')==='completed') throw new EarningsError(409,'staff_service_closed');
+      state={dispatched:false,created:0,service,siblings:siblings.docs};
+    }
+    verifyNewServiceAssignments(route.routeId,route.stops,state.siblings,result,plans,state.service);
     state.dispatched ||= dispatch;
     state.created+=newRoute ? 1:0;
     serviceLinks.set(serviceId,state);
@@ -401,14 +425,11 @@ async function applyDispatchLinks(
       }
     }
   }
-  for (const [serviceId,summary] of serviceLinks) {
-    const target=db.collection('services').doc(serviceId);
-    const service=await tx.get(target);
-    if (!service.exists || service.get('status')==='completed') throw new EarningsError(409,'staff_service_closed');
+  for (const {service,created,dispatched} of serviceLinks.values()) {
     const value=service.get('routeIds');
-    const count=(Array.isArray(value) ? new Set(value).size:0)+summary.created;
-    writes.push(()=>tx.update(target,{
-      'stats.totalRoutes':count,...(summary.dispatched && ['organizing','dispatched'].includes(service.get('status')) ?
+    const count=(Array.isArray(value) ? new Set(value).size:0)+created;
+    writes.push(()=>tx.update(service.ref,{
+      'stats.totalRoutes':count,...(dispatched && ['organizing','dispatched'].includes(service.get('status')) ?
         {status:'dispatched'}:{}),updatedAt:FieldValue.serverTimestamp(),
     }));
   }
@@ -431,14 +452,17 @@ async function applyUnlink(
     throw new EarningsError(409,'staff_route_conflict');
   }
   const stop=removed[0];
+  const keys=new Set(poolStopKeys(stop));
+  const samePoint=(item:PlaceValue)=>poolStopKeys(item).some(key=>keys.has(key));
   if (service) {
     const siblings=await tx.get(db.collection('routes').where('serviceId','==',service.id));
     if (siblings.docs.some(doc=>doc.id!==route?.id && (doc.get('stops') ?? []).some((item:PlaceValue)=>
-        !item.unlinkedAt && getStopIdentityKey(item)===unlink.stopKey))) throw new EarningsError(409,'staff_order_still_on_route');
-    const next=all.filter(item=>item.unlinkedAt || getStopIdentityKey(item)!==unlink.stopKey);
+        !item.unlinkedAt && samePoint(item)))) throw new EarningsError(409,'staff_order_still_on_route');
+    const next=all.filter(item=>item.unlinkedAt || !samePoint(item));
     const orderIds=service.get('lunnaOrderIds');
     writes.push(()=>tx.update(service.ref,{
       allStops:next,'stats.totalDeliveries':next.filter(item=>!item.unlinkedAt).length,
+      unlinkedPoolStopKeys:FieldValue.arrayUnion(...keys),
       ...(Array.isArray(orderIds) ? {lunnaOrderIds:orderIds.filter(id=>id!==stop.orderNumber)}:{}),
       updatedAt:FieldValue.serverTimestamp(),
     }));
@@ -448,7 +472,7 @@ async function applyUnlink(
     const available=route.get('unassignedStops');
     writes.push(()=>tx.update(route.ref,{
       ...(Array.isArray(orderIds) ? {lunnaOrderIds:orderIds.filter(id=>id!==stop.orderNumber)}:{}),
-      ...(Array.isArray(available) ? {unassignedStops:available.filter(item=>getStopIdentityKey(item)!==unlink.stopKey)}:{}),
+      ...(Array.isArray(available) ? {unassignedStops:available.filter(item=>!samePoint(item))}:{}),
       updatedAt:FieldValue.serverTimestamp(),
     }));
   }
@@ -510,7 +534,7 @@ function auditStopChanges(db:Firestore,tx:Transaction,actor:Operator,batch:Staff
   }
 }
 
-async function replayPlan(db:Firestore,tx:Transaction,prior:Receipt,poolMove:StaffPlanBatch['poolMove']) {
+async function replayPlan(db:Firestore,tx:Transaction,prior:Receipt,poolMove:StaffPlanBatch['poolMove'],visibility?:PoolVisibility) {
   const ids=[...prior.existingRoutes.map(route=>route.routeId),...prior.createdRoutes];
   const docs=ids.length ? await tx.getAll(...ids.map(id=>db.collection('routes').doc(id))):[];
   const stopsById=new Map(docs.map(doc=>[doc.id,places(doc,'stops').filter(stop=>!stop.unlinkedAt)]));
@@ -519,8 +543,8 @@ async function replayPlan(db:Firestore,tx:Transaction,prior:Receipt,poolMove:Sta
   if (poolMove && docs[0].exists) {
     const serviceId=docs[0].get('serviceId');
     const service=serviceId ? await tx.get(db.collection('services').doc(serviceId)):undefined;
-    const {candidates,stops,unlinked}=await poolRouteState(db,tx,docs[0],service);
-    unassignedStops=availableRouteStops(candidates,stops,unlinked);
+    const {candidates,mirrors,excluded}=await poolRouteState(db,tx,docs[0],service,visibility);
+    unassignedStops=availableRouteStops(candidates,mirrors.map(row=>row.stops),excluded);
     const encodedPolyline=docs[0].get('encodedPolyline');
     const distanceMeters=docs[0].get('distanceMeters');
     const duration=docs[0].get('duration');
@@ -537,7 +561,7 @@ async function replayPlan(db:Firestore,tx:Transaction,prior:Receipt,poolMove:Sta
   };
 }
 
-export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unknown):Promise<SavedRoutePlanBatch & {replayed:boolean}> {
+export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unknown,visibility?:PoolVisibility):Promise<SavedRoutePlanBatch & {replayed:boolean}> {
   const batch=staffPlanBatchSchema.parse(value);
   const fingerprint=factsHash({actor:actor.userId,batch});
   const receipt=db.collection('rotaStaffCommands').doc(batch.commandId);
@@ -547,11 +571,11 @@ export async function applyStaffPlanBatch(db:Firestore,actor:Operator,value:unkn
       if (previous.exists) {
         const row=previous.data() as Receipt;
         if (row.fingerprint!==fingerprint) throw new EarningsError(409,'staff_command_conflict');
-        return await replayPlan(db,tx,row,batch.poolMove);
+        return await replayPlan(db,tx,row,batch.poolMove,visibility);
       }
       const by=actor.sourceUid ?? actor.userId;
       const writes:Array<()=>void>=[];
-      const {plans,pool}=await canonicalPlan(db,tx,batch,by,writes);
+      const {plans,pool}=await canonicalPlan(db,tx,batch,by,writes,visibility);
       const result=await transactionGateway(db,tx,writes).saveRoutePlanBatchAtomically(plans);
       preserveRemovedExecution(result);
       if (batch.unlink) await applyUnlink(db,tx,batch.unlink,result,writes);

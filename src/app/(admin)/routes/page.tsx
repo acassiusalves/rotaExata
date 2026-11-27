@@ -67,7 +67,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useRouter } from 'next/navigation';
-import { useRouteSearch } from './layout';
+import { useRouteSearch } from '@/components/routes/route-search-context';
 import { LunnaBadge } from '@/components/routes/lunna-badge';
 import { Pagination } from '@/components/ui/pagination';
 

@@ -6,20 +6,18 @@ import { availableRouteStops } from '../../route-stop-utils.ts';
 import type { PlaceValue } from '../../types';
 import type { StaffEditorRead } from '../../staff/editor-contract.ts';
 
-function places(document:DocumentSnapshot,field:string):PlaceValue[] {
-  const value=document.get(field);
-  return Array.isArray(value) ? value.filter(stop=>stop && typeof stop==='object'):[];
-}
+import { servicePoolState,storedPlaces as places,type PoolVisibility } from './pool-state.ts';
 
-function route(document:DocumentSnapshot,assigned?:PlaceValue[][],unlinked:PlaceValue[]=[]) {
+function route(document:DocumentSnapshot,assigned?:PlaceValue[][],excluded:string[]=[],pool?:PlaceValue[]) {
   if (!document.exists) return null;
   const projected=projectStaffRoute(document.id,document.data()!,staffRouteRevision(document.updateTime));
   const arranged=document.get('organizedRoutes');
   const draftAssignments = projected.status==='draft' && Array.isArray(arranged)
     ? arranged.map(row=>Array.isArray(row?.stops) ? row.stops as PlaceValue[]:[])
     : undefined;
-  const available=projected.unassignedStops ?
-    availableRouteStops(places(document,'unassignedStops'),assigned ?? draftAssignments ?? [places(document,'stops')],unlinked):undefined;
+  const candidates=pool ?? (projected.unassignedStops ? places(document,'unassignedStops'):undefined);
+  const available=candidates ?
+    availableRouteStops(candidates,assigned ?? draftAssignments ?? [places(document,'stops')],excluded):undefined;
   return {...projected,stops:projected.stops.filter(stop=>!stop.unlinkedAt),
     ...(available ? {unassignedStops:available.map(projectStaffPlace)}:{})};
 }
@@ -29,18 +27,18 @@ function service(document:DocumentSnapshot) {
   return {...projected,allStops:projected.allStops?.filter(stop=>!stop.unlinkedAt)};
 }
 
-export async function readStaffEditor(db:Firestore,read:StaffEditorRead,cursor?:string) {
+export async function readStaffEditor(db:Firestore,read:StaffEditorRead,cursor?:string,visibility?:PoolVisibility) {
   switch (read.kind) {
     case 'route': {
       const document=await db.collection('routes').doc(read.id).get();
       const serviceId=document.get('serviceId');
-      if (typeof serviceId!=='string' || !places(document,'unassignedStops').length) return {record:route(document)};
+      if (typeof serviceId!=='string') return {record:route(document)};
       const [siblings,serviceDocument]=await Promise.all([
-        db.collection('routes').where('serviceId','==',serviceId).select('stops').get(),
+        db.collection('routes').where('serviceId','==',serviceId).select('stops','unassignedStops','status','serviceId').get(),
         db.collection('services').doc(serviceId).get(),
       ]);
-      return {record:route(document,siblings.docs.map(doc=>places(doc,'stops')),
-        places(serviceDocument,'allStops').filter(stop=>stop.unlinkedAt))};
+      const pool=servicePoolState(document,siblings.docs,serviceDocument,visibility);
+      return {record:route(document,pool.mirrors.map(row=>row.stops),pool.excluded,pool.candidates)};
     }
     case 'service': return {record:service(await db.collection('services').doc(read.id).get())};
     case 'service-routes': {
@@ -50,12 +48,12 @@ export async function readStaffEditor(db:Firestore,read:StaffEditorRead,cursor?:
         return {records:page.docs.map(doc=>route(doc)),cursor:page.cursor};
       }
       const [siblings,serviceDocument]=await Promise.all([
-        cursor || page.cursor ? query.select('stops').get().then(result=>result.docs):page.docs,
+        cursor || page.cursor ? query.select('stops','unassignedStops').get().then(result=>result.docs):page.docs,
         db.collection('services').doc(read.id).get(),
       ]);
-      const assigned=siblings.map(doc=>places(doc,'stops'));
-      const unlinked=places(serviceDocument,'allStops').filter(stop=>stop.unlinkedAt);
-      return {records:page.docs.map(doc=>route(doc,assigned,unlinked)),cursor:page.cursor};
+      const pool=servicePoolState(page.docs[0],siblings,serviceDocument);
+      const assigned=pool.mirrors.map(row=>row.stops);
+      return {records:page.docs.map(doc=>route(doc,assigned,pool.excluded)),cursor:page.cursor};
     }
     case 'scheduled': {
       const start=Date.parse(read.date+'T00:00:00-03:00');

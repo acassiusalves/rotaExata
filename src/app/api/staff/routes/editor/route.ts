@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { assertEditorResources,editorCanReadRoute,requireStaffEditor } from '@/lib/server/staff/editor-access';
+import { assertEditorResources,editorCanReadRoute,editorCanReadService,editorRouteTarget,requireStaffEditor } from '@/lib/server/staff/editor-access';
 import { staffCursorInput } from '@/lib/server/staff/query-page';
 import { readStaffEditor } from '@/lib/server/staff/editor-read';
 import { applyStaffEditorCommand } from '@/lib/server/staff/editor-commands';
@@ -19,7 +19,10 @@ export async function POST(request:Request) {
     const {actor,db}=await requireStaffEditor(request,surface);
     if (body.kind==='route') await assertEditorResources(db,actor,surface,{routeIds:[body.id]});
     if (body.kind==='service' || body.kind==='service-routes') await assertEditorResources(db,actor,surface,{serviceId:body.id});
-    const result=await readStaffEditor(db,body,parsed.data.cursor);
+    const result=await readStaffEditor(db,body,parsed.data.cursor,{
+      service:id=>editorCanReadService(actor,surface,id),
+      route:document=>editorCanReadRoute(actor,surface,editorRouteTarget(document)),
+    });
     if ((body.kind==='service-routes'||body.kind==='active'||body.kind==='scheduled') && 'records' in result) {
       return privateJson({...result,records:result.records?.filter(route=>route && editorCanReadRoute(actor,surface,route))});
     }
@@ -40,6 +43,9 @@ export async function PATCH(request:Request) {
     const {surface,body}=parsed.data;
     const {actor,db}=await requireStaffEditor(request,surface);
     await assertEditorResources(db,actor,surface,{routeIds:[body.routeId]});
-    return privateJson(await applyStaffEditorCommand(db,actor,body));
+    return privateJson(await applyStaffEditorCommand(db,actor,body,{
+      service:id=>editorCanReadService(actor,surface,id),
+      route:document=>editorCanReadRoute(actor,surface,editorRouteTarget(document)),
+    }));
   } catch(error) {return earningsErrorResponse(error);}
 }

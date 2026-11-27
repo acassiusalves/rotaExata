@@ -99,8 +99,9 @@ import {
 import { RouteTimeline } from '@/components/routes/route-timeline';
 import { useToast } from '@/hooks/use-toast';
 import { commitRoutePoolMove } from '@/components/staff/route-pool-move';
-import { availableRouteStops, isClosedPlanningRoute } from '@/lib/route-stop-utils';
+import { availableRouteStops, getStopIdentityKey, isClosedPlanningRoute, upsertStopInCollection } from '@/lib/route-stop-utils';
 import { editorPlannedStop } from '@/lib/staff/editor-payload';
+import { resolveRoutePlanMetrics } from '@/lib/route-stop-mutations';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutocompleteInput } from '@/components/maps/AutocompleteInput';
@@ -436,6 +437,8 @@ export default function OrganizeRoutePage() {
   const draftMoveVersion = React.useRef(0);
   const draftWrites = React.useRef<Promise<void>>(Promise.resolve());
   const savedDraftPlan = React.useRef<string>();
+  const dispatchedDraftKeys = React.useRef(new Set<string>());
+  const draftSourceKeys = React.useRef(new Set<string | null>());
   const markDraftMove = () => {
     if (!routeData?.isDraft) return;
     draftMoveVersion.current++;
@@ -474,8 +477,8 @@ export default function OrganizeRoutePage() {
   const [routeA, setRouteA] = React.useState<RouteInfo | null>(null);
   const [routeB, setRouteB] = React.useState<RouteInfo | null>(null);
   const [unassignedStops, setUnassignedStops] = React.useState<PlaceValue[]>([]);
-  const [routeNames, setRouteNames] = React.useState({ A: 'Rota 1', B: 'Rota 2' });
-  const [assignedDrivers, setAssignedDrivers] = React.useState<{ A: string | null, B: string | null }>({ A: null, B: null });
+  const [routeNames, setRouteNames] = React.useState<Record<string,string>>({ A: 'Rota 1', B: 'Rota 2' });
+  const [assignedDrivers, setAssignedDrivers] = React.useState<Record<string,string | null>>({ A: null, B: null });
   const [availableDrivers, setAvailableDrivers] = React.useState<Driver[]>([]);
   const [highlightedStops, setHighlightedStops] = React.useState<string[]>([]);
   const [driverLocation, setDriverLocation] = React.useState<{lat: number; lng: number; heading?: number} | null>(null);
@@ -925,6 +928,7 @@ export default function OrganizeRoutePage() {
             }
 
             const draftData = draftSnap.data();
+            draftSourceKeys.current = new Set((draftData.stops ?? []).map(getStopIdentityKey));
             console.log('📄 Rascunho carregado do Firestore:', draftData);
 
             // Atualizar routeData com dados do Firestore
@@ -941,6 +945,8 @@ export default function OrganizeRoutePage() {
             // Verificar se já tem rotas organizadas salvas
             if (Array.isArray(draftData.organizedRoutes)) {
               console.log('📊 Restaurando rotas organizadas:', draftData.organizedRoutes.length);
+              dispatchedDraftKeys.current = new Set(draftData.organizedRoutes
+                .filter((entry: DraftArrangement) => entry.dispatched).map((entry: DraftArrangement) => entry.key));
               const assigned = draftData.organizedRoutes.map((entry: DraftArrangement) => entry.stops);
               const available = availableRouteStops(draftData.unassignedStops ?? draftData.stops ?? [], assigned);
               savedDraftPlan.current = draftArrangementFingerprint(draftRef.id, draftData.organizedRoutes, available);
@@ -1161,7 +1167,7 @@ export default function OrganizeRoutePage() {
   React.useEffect(() => {
     // Funciona tanto para rotas draft quanto para rotas existentes (Lunna)
     const routeId = routeData?.draftRouteId || routeData?.currentRouteId;
-    if (!routeId) return;
+    if (isLoading || !routeId) return;
 
     const routeRef = editorRoute(routeId);
 
@@ -1170,12 +1176,13 @@ export default function OrganizeRoutePage() {
 
       const data = snapshot.data();
       const persistedPool: PlaceValue[] = data.unassignedStops ?? [];
-      const candidates: PlaceValue[] = routeData?.isDraft ? [...(data.stops ?? []), ...persistedPool] : persistedPool;
-      const dispatched: PlaceValue[][] = Array.isArray(data.organizedRoutes)
-        ? data.organizedRoutes.filter((entry: DraftArrangement) => entry.dispatched).map((entry: DraftArrangement) => entry.stops)
-        : [];
-      const newStops = availableRouteStops(candidates, [
-        ...dispatched, routeA?.stops ?? [], routeB?.stops ?? [], unassignedStops,
+      const original: PlaceValue[] = routeData?.isDraft ? data.stops ?? [] : [];
+      const newlyImported = original.filter(stop => !draftSourceKeys.current.has(getStopIdentityKey(stop)));
+      if (routeData?.isDraft) draftSourceKeys.current = new Set(original.map(getStopIdentityKey));
+      const arranged: PlaceValue[][] = Array.isArray(data.organizedRoutes)
+        ? data.organizedRoutes.map((entry: DraftArrangement) => entry.stops) : [];
+      const newStops = availableRouteStops([...newlyImported, ...persistedPool], [
+        ...arranged, routeA?.stops ?? [], routeB?.stops ?? [], unassignedStops,
         ...dynamicRoutes.map(route => route.data.stops),
       ]);
 
@@ -1192,7 +1199,7 @@ export default function OrganizeRoutePage() {
     });
 
     return () => unsubscribe();
-  }, [routeData?.draftRouteId, routeData?.currentRouteId, routeData?.isDraft, routeA, routeB, dynamicRoutes, unassignedStops]);
+  }, [isLoading, routeData?.draftRouteId, routeData?.currentRouteId, routeData?.isDraft, routeA, routeB, dynamicRoutes, unassignedStops]);
 
   const geocodeAddress = React.useCallback(
     (address: string): Promise<PlaceValue | null> => {
@@ -1789,7 +1796,7 @@ export default function OrganizeRoutePage() {
 
       if (native && overRouteKey === 'A' && routeData.isExistingRoute && routeData.currentRouteId && targetRoute) {
         await persistPoolMove('allocate', overRouteKey, routeData.currentRouteId, targetRoute, stopToMove,
-          [...targetRoute.stops, stopToMove], routeData.origin);
+          [...(pendingEdits[overRouteKey] ?? targetRoute.stops), stopToMove], routeData.origin);
         return;
       }
 
@@ -2013,8 +2020,14 @@ export default function OrganizeRoutePage() {
       '#bf07e4', // Roxo - Icone address 4.svg
       '#000000', // Preto - Icone address 5.svg
     ];
-    const nextRouteIndex = dynamicRoutes.length;
-    const nextRouteLetter = String.fromCharCode(67 + nextRouteIndex); // C, D, E, F, etc.
+    const used = new Set([...dispatchedDraftKeys.current, ...dynamicRoutes.map(route => route.key)]);
+    const keys = [
+      ...Array.from({ length: 24 }, (_, index) => String.fromCharCode(67 + index)),
+      ...Array.from({ length: 26 }, (_, index) => 'A' + String.fromCharCode(65 + index)),
+    ];
+    const nextRouteIndex = keys.findIndex(key => !used.has(key));
+    if (nextRouteIndex === -1) return;
+    const nextRouteLetter = keys[nextRouteIndex];
     const color = routeColors[nextRouteIndex % routeColors.length];
 
     const newRoute = {
@@ -2114,8 +2127,9 @@ export default function OrganizeRoutePage() {
       }
 
       const draftRef = editorRoute(routeData.draftRouteId);
-      const arrangement = { organizedRoutes, routeNames, unassignedStops };
-      const fingerprint = draftArrangementFingerprint(draftRef.id, organizedRoutes, unassignedStops);
+      const available = availableRouteStops(unassignedStops, organizedRoutes.map(route => route.stops));
+      const arrangement = { organizedRoutes, routeNames, unassignedStops: available };
+      const fingerprint = draftArrangementFingerprint(draftRef.id, organizedRoutes, available);
       if (fingerprint === savedDraftPlan.current) return;
       const save = draftWrites.current.catch(() => {}).then(async () => {
         if (fingerprint === savedDraftPlan.current) return;
@@ -2230,14 +2244,14 @@ export default function OrganizeRoutePage() {
     }
   };
   
-  const handleDispatchRoute = async (routeKey: 'A' | 'B') => {
+  const handleDispatchRoute = async (routeKey: string) => {
     if (!routeData) return;
 
-    const routeToSave = routeKey === 'A' ? routeA : routeB;
-    const routeName = routeNames[routeKey];
+    const routeToSave = getRoute(routeKey);
+    const routeName = routeNames[routeKey] ?? dynamicRoutes.find(route => route.key === routeKey)?.name ?? `Rota ${routeKey}`;
     const driverId = assignedDrivers[routeKey];
 
-    if (!routeToSave) {
+    if (!routeToSave?.stops.length) {
         toast({ variant: 'destructive', title: 'Erro', description: 'Rota não encontrada para despacho.' });
         return;
     }
@@ -2333,7 +2347,7 @@ export default function OrganizeRoutePage() {
                     // Verificar se TODAS as rotas foram despachadas
                     const allDispatched = updatedRoutes.every((r: any) => r.dispatched);
 
-                    if (allDispatched) {
+                    if (allDispatched && !unassignedStops.length) {
                         // Todas as rotas despachadas - deletar o rascunho
                         await deleteDoc(draftRef);
                         console.log('✅ [handleDispatchRoute] Todas rotas despachadas - Draft deletado:', routeData.draftRouteId);
@@ -2353,12 +2367,10 @@ export default function OrganizeRoutePage() {
             }
         }
 
-        // Remove the dispatched route from state
-        if (routeKey === 'A') {
-            setRouteA(null);
-        } else {
-            setRouteB(null);
-        }
+        dispatchedDraftKeys.current.add(routeKey);
+        if (routeKey === 'A') setRouteA(null);
+        else if (routeKey === 'B') setRouteB(null);
+        else setDynamicRoutes(previous => previous.filter(route => route.key !== routeKey));
 
     } catch (error) {
         console.error('Erro ao salvar rota:', error);
@@ -2739,8 +2751,8 @@ export default function OrganizeRoutePage() {
     kind: 'allocate' | 'return', routeKey: string, routeId: string, target: RouteInfo,
     stop: PlaceValue, plannedStops: PlaceValue[], origin: PlaceValue,
   ) => {
-    const metrics = plannedStops.length ? (await computeRoute(origin, plannedStops)) ?? undefined
-      : { encodedPolyline: '', distanceMeters: 0, duration: '0s' };
+    const draft = pendingEdits[routeKey];
+    const metrics = resolveRoutePlanMetrics(plannedStops, await computeRoute(origin, plannedStops));
     await commitRoutePoolMove(movePoolStop, [kind, routeId, stop, {
       expectedStatus: target.status, baseStops: target.stops, plannedStops, metrics,
     }], {
@@ -2748,6 +2760,7 @@ export default function OrganizeRoutePage() {
       apply: (saved, updatePool, savedMetrics) => {
         setRoute(routeKey, previous => previous ? { ...previous, ...savedMetrics, stops: saved.stops } : previous);
         setUnassignedStops(updatePool);
+        setPendingEdits(previous => previous[routeKey] === draft ? { ...previous, [routeKey]: null } : previous);
       },
     });
   };
@@ -2762,11 +2775,12 @@ export default function OrganizeRoutePage() {
     // Remove the stop from the route and add to unassigned
     const newStops = targetRoute.stops.filter((_, i) => i !== index);
     if (native && routeKey === 'A' && routeData.isExistingRoute && routeData.currentRouteId) {
-      await persistPoolMove('return', routeKey, routeData.currentRouteId, targetRoute, stop, newStops, routeData.origin);
+      await persistPoolMove('return', routeKey, routeData.currentRouteId, targetRoute, stop,
+        (pendingEdits[routeKey] ?? targetRoute.stops).filter(item => item.id !== stop.id), routeData.origin);
       return;
     }
     markDraftMove();
-    setUnassignedStops(prev => [...prev, stop]);
+    setUnassignedStops(prev => upsertStopInCollection(prev, stop));
 
     if (newStops.length === 0) {
       // If no stops left, clear the route
@@ -3220,7 +3234,7 @@ export default function OrganizeRoutePage() {
                 )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
+                        <Button aria-label="Adicionar ao planejamento" variant="outline" size="icon" className="border-slate-300 dark:border-slate-600">
                             <Plus className="h-4 w-4" />
                         </Button>
                     </DropdownMenuTrigger>

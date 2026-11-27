@@ -210,6 +210,25 @@ test('draft availability survives a reload and remains after dispatching the arr
   expect(saved.get('driverId')).toBe(driverId);
   expect(saved.get('stops').map(item=>item.id)).toEqual([second.id]);
   expect((await draft.get()).get('unassignedStops').map(item=>item.id)).toEqual([first.id]);
+
+  await page.reload();
+  await page.getByRole('button',{name:'Adicionar ao planejamento',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Adicionar uma rota',exact:true}).click();
+  await page.getByRole('button',{name:'Serviços não alocados',exact:true}).click();
+  await drag(page,page.getByText(first.customerName,{exact:true}),page.getByText('Arraste pontos para cá',{exact:true}));
+  await expect(stop(page,first.customerName)).toBeVisible();
+  await tab(page,'Atribuir').click();
+  await page.getByRole('tabpanel').getByRole('combobox').first().click();
+  await page.getByRole('option',{name:new RegExp(driverName)}).click();
+  await tab(page,'Revisar').click();
+  const nextDispatch = page.waitForResponse(response => response.url().endsWith('/api/staff/routes/plan') &&
+    response.request().postDataJSON().body.draftDispatch?.key === 'C');
+  await page.getByRole('button',{name:'Despachar Rota',exact:true}).click();
+  const next = await nextDispatch;
+  expect(next.status()).toBe(200);
+  const [nextRoute] = (await next.json()).createdRoutes;
+  expect(nextRoute.stops.map(item=>item.id)).toEqual([first.id]);
+  expect((await draft.get()).exists).toBe(false);
 });
 
 test('service assignment only changes the stored driver after the explicit save', async ({ page, planning }) => {
@@ -228,4 +247,44 @@ test('service assignment only changes the stored driver after the explicit save'
   await page.getByRole('button',{name:'Salvar Alterações',exact:true}).first().click();
   expect((await saved).status()).toBe(200);
   expect((await active.get()).get('driverId')).toBe(driverId);
+});
+
+test('a draft recalculates the latest geometry after cancelling local edits', async ({ page, planning }) => {
+  const { active, first, second, replacement } = planning;
+  await active.update({status:'draft'});
+  await page.goto(pages.route);
+  await drag(page,stop(page,second.customerName),stop(page,first.customerName));
+  await expect(page.getByRole('button',{name:'Cancelar Todas'})).toBeVisible();
+  await active.update({stops:[replacement,second],distanceMeters:0,duration:'0s',encodedPolyline:''});
+  await expect(page.getByText('A rota mudou durante a edição',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Cancelar Todas'}).click();
+  await expect(stop(page,replacement.customerName)).toBeVisible();
+  await expect(page.getByRole('row').filter({hasText:'Planejamento A'}).getByText('1.23 km',{exact:true})).toBeVisible();
+});
+
+test('an allocation receipt preserves a later local reorder', async ({ page, planning }) => {
+  const { active, first, second, pool } = planning;
+  await page.goto(pages.route);
+  let committed, release;
+  const pendingCommit = new Promise(resolve=>{committed=resolve;});
+  const hold = new Promise(resolve=>{release=resolve;});
+  await page.route('**/api/staff/routes/plan',async route=>{
+    const response=await route.fetch();
+    committed(response.status());
+    await hold;
+    await route.fulfill({response});
+  });
+  try {
+    await drag(page,available(page,pool.customerName),stop(page,first.customerName));
+    expect(await pendingCommit).toBe(200);
+    await drag(page,stop(page,second.customerName),stop(page,first.customerName));
+    await expect(page.getByRole('button',{name:'Cancelar Todas'})).toBeVisible();
+  } finally {
+    release();
+  }
+  await expect(page.getByText('Ponto salvo na rota',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Cancelar Todas'})).toBeVisible();
+  expect((await active.get()).get('stops').map(item=>item.id)).toEqual([first.id,second.id,pool.id]);
+  await page.getByRole('button',{name:'Cancelar Todas'}).click();
+  await expect(stop(page,pool.customerName)).toBeVisible();
 });

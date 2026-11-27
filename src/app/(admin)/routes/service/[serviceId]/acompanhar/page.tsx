@@ -546,7 +546,7 @@ const EditableRouteName: React.FC<{
 };
 
 export default function ServiceAcompanharPage() {
-  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, unlinkStop, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, plan:saveRoutePlanBatchAtomically, saveExisting:saveExistingRoutePlansAtomically, user, draftKey, sendNotice, movePoolStop, native } = useRouteEditor();
+  const { readDocument:getDoc, readList:getDocs, watch:onSnapshot, update:updateDoc, remove:deleteDoc, createRoute:createEditorRoute, createServicePair, unlinkStop, requestLocation:requestDriverLocation, batch:createEditorBatch, call:callEditor, sequence:optimizeDeliveryRoutes, computeRoute, defaultOrigin:carregarOrigemPadrao, plan:saveRoutePlanBatchAtomically, saveExisting:saveExistingRoutePlansAtomically, user, draftKey, sendNotice, movePoolStop, editPoolStop, native } = useRouteEditor();
   const router = useRouter();
   const params = useParams();
   const serviceId = params.serviceId as string;
@@ -769,6 +769,8 @@ export default function ServiceAcompanharPage() {
   // State for pending edits (reordering within same route AND cross-route movements)
   // Now supports dynamic route IDs (A, B, and additional route IDs like "8sS7RrygaWfJYL1cegCN")
   const [pendingEdits, setPendingEdits] = React.useState<Record<string, PlaceValue[] | null>>({ A: null, B: null });
+  const livePendingEdits = React.useRef(pendingEdits);
+  livePendingEdits.current = pendingEdits;
   const [isApplyingEdits, setIsApplyingEdits] = React.useState(false);
 
   // State for transfer dialog
@@ -2521,7 +2523,7 @@ export default function ServiceAcompanharPage() {
     }
 
     if (geocoded) {
-      const updatedStop = {
+      const updatedStop: PlaceValue = {
         ...geocodedStopEdit(stopToEdit.stop, geocoded, lat != null && lng != null),
         customerName: editService.customerName,
         phone: editService.phone,
@@ -2543,6 +2545,22 @@ export default function ServiceAcompanharPage() {
             description: 'Recarregue a rota e abra novamente a parada antes de salvar.',
           });
           return;
+        }
+        const editablePoolRouteId = routeData?.currentRouteId ?? [
+          !isClosedPlanningRoute(routeA?.status) ? serviceRouteIds.A : null,
+          !isClosedPlanningRoute(routeB?.status) ? serviceRouteIds.B : null,
+          ...dynamicRoutes.filter(route => !isClosedPlanningRoute(route.data.status)).map(route => route.firestoreId),
+        ].find(Boolean);
+        if (native && editablePoolRouteId) {
+          try {
+            await editPoolStop(editablePoolRouteId, stopToEdit.stop, updatedStop);
+          } catch (error) {
+            console.error('Erro ao salvar o endereço do avulso:', error);
+            toast({ variant: 'destructive', title: 'Falha ao salvar o endereço',
+              description: 'Confira se o ponto ainda está disponível e tente novamente.' });
+            return;
+          }
+          updatedStop.orderNumber = stopToEdit.stop.orderNumber;
         }
         updatedStops[resolvedIndex] = updatedStop;
         const dedupedUpdatedStops = dedupeStops(updatedStops);
@@ -2570,7 +2588,7 @@ export default function ServiceAcompanharPage() {
         }
 
         try {
-          await syncUnassignedStopsInFirestore(dedupedUpdatedStops);
+          if (!native || !editablePoolRouteId) await syncUnassignedStopsInFirestore(dedupedUpdatedStops);
         } catch (error) {
           console.error('Erro ao atualizar unassignedStops no Firestore:', error);
           toast({
@@ -3064,6 +3082,10 @@ export default function ServiceAcompanharPage() {
       const firestoreRouteId = getFirestoreRouteId(overRouteKey);
       const draftStops = pendingEdits[overRouteKey] ?? targetRoute?.stops ?? [];
       const newTargetStops = [...draftStops, stopToMove];
+      if (native && firestoreRouteId && targetRoute) {
+        await persistPoolMove('allocate', overRouteKey, firestoreRouteId, targetRoute, stopToMove, newTargetStops, routeData.origin);
+        return;
+      }
       const updatedUnassignedStops = removeStopWithSameIdentity(unassignedStops, stopToMove);
       console.log('📝 [handleDragEnd] Nova lista de stops:', newTargetStops.length, 'paradas');
 
@@ -3094,11 +3116,6 @@ export default function ServiceAcompanharPage() {
         distanceMeters: newRouteInfo.distanceMeters,
         duration: newRouteInfo.duration,
       } : undefined;
-
-      if (native && firestoreRouteId && targetRoute) {
-        await persistPoolMove('allocate', overRouteKey, firestoreRouteId, targetRoute, stopToMove, newTargetStops, metrics);
-        return;
-      }
 
       try {
         if (firestoreRouteId) {
@@ -4365,21 +4382,26 @@ export default function ServiceAcompanharPage() {
     return true;
   };
 
-  const persistPoolMove = (
+  const persistPoolMove = async (
     kind: 'allocate' | 'return', routeKey: string, routeId: string, target: RouteInfo,
-    stop: PlaceValue, plannedStops: PlaceValue[], metrics?: RouteMetrics,
-  ) => commitRoutePoolMove(movePoolStop, [kind, routeId, stop, {
-    expectedStatus: target.status,
-    baseStops: getPersistedStops(routeId, target.stops),
-    plannedStops, metrics,
-  }], {
-    toast, notify: notifySavedRouteChanges,
-    apply: (saved, updatePool, savedMetrics) => {
-      applySavedRouteResult(routeKey, saved, savedMetrics);
-      setUnassignedStops(updatePool);
-      setPendingEdits(previous => ({ ...previous, [routeKey]: null }));
-    },
-  });
+    stop: PlaceValue, plannedStops: PlaceValue[], origin: PlaceValue,
+  ) => {
+    const baseStops = getPersistedStops(routeId, target.stops);
+    const draft = pendingEdits[routeKey];
+    const metrics = resolveRoutePlanMetrics(plannedStops, await computeRoute(origin, plannedStops));
+    await commitRoutePoolMove(movePoolStop, [kind, routeId, stop, {
+      expectedStatus: target.status, baseStops, plannedStops, metrics,
+    }], {
+      toast, notify: notifySavedRouteChanges,
+      apply: (saved, updatePool, savedMetrics) => {
+        applySavedRouteResult(routeKey, saved, savedMetrics);
+        setUnassignedStops(updatePool);
+        const laterDraft = livePendingEdits.current[routeKey];
+        if (laterDraft && laterDraft !== draft) snapshotConflicts.current.set(routeId, { key: routeKey, base: baseStops });
+        setPendingEdits(previous => previous[routeKey] === draft ? { ...previous, [routeKey]: null } : previous);
+      },
+    });
+  };
 
   const handleRemoveFromRouteTimeline = async (stop: PlaceValue, _index: number, routeKey: string) => {
     if (!routeData) return;
@@ -4393,6 +4415,11 @@ export default function ServiceAcompanharPage() {
     const firestoreRouteId = getFirestoreRouteId(routeKey);
     console.log('🔄 [handleRemoveFromRoute] Removendo stop da rota', routeKey, '→ Firestore ID:', firestoreRouteId, '| Stop:', stop.orderNumber || stop.customerName);
 
+    if (native && firestoreRouteId) {
+      await persistPoolMove('return', routeKey, firestoreRouteId, targetRoute, stop, plannedStops, routeData.origin);
+      return;
+    }
+
     const routeInfo = plannedStops.length > 0
       ? await computeRoute(routeData.origin, plannedStops)
       : null;
@@ -4405,11 +4432,6 @@ export default function ServiceAcompanharPage() {
       distanceMeters: 0,
       duration: '0s',
     } : undefined;
-
-    if (native && firestoreRouteId) {
-      await persistPoolMove('return', routeKey, firestoreRouteId, targetRoute, stop, plannedStops, metrics);
-      return;
-    }
 
     try {
       if (firestoreRouteId) {
@@ -5960,7 +5982,9 @@ export default function ServiceAcompanharPage() {
               </div>
               <div className="space-y-2">
                   <Label htmlFor="orderNumber">Nº Pedido</Label>
-                  <Input id="orderNumber" value={editService.orderNumber} onChange={handleEditServiceChange} placeholder="Ex: 12345" />
+                  <Input id="orderNumber" value={editService.orderNumber} onChange={handleEditServiceChange} placeholder="Ex: 12345"
+                    readOnly={native && stopToEdit?.routeKey === 'unassigned' &&
+                      Boolean(routeData?.currentRouteId || serviceRouteIds.A || serviceRouteIds.B || dynamicRoutes.some(route => route.firestoreId))} />
               </div>
             </div>
 

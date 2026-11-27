@@ -3,9 +3,10 @@ import type { useToast } from '@/hooks/use-toast';
 import type { RouteMetrics, SavedRoutePlan } from '@/lib/route-stop-mutations';
 import { EarningsRequestError } from '@/lib/earnings/session-request';
 import { RouteStructureConflictError } from '@/lib/route-stop-reconciliation';
-import { getStopIdentityKey, removeStopWithSameIdentity, upsertStopInCollection } from '@/lib/route-stop-utils';
+import { availableRouteStops, removeStopWithSameIdentity } from '@/lib/route-stop-utils';
 import type { PlaceValue } from '@/lib/types';
 import { createElement } from 'react';
+import { ZodError } from 'zod';
 import type { useRouteEditor } from './use-route-editor';
 
 type Move = ReturnType<typeof useRouteEditor>['movePoolStop'];
@@ -22,11 +23,9 @@ export async function commitRoutePoolMove(
   const [kind, , stop] = input;
   try {
     const { route, unassignedStops, metrics } = await move(...input);
-    const stopKey = getStopIdentityKey(stop);
-    const available = unassignedStops.find(item => getStopIdentityKey(item) === stopKey);
-    options.apply(route, previous => available
-      ? upsertStopInCollection(previous, available)
-      : removeStopWithSameIdentity(previous, stop), metrics);
+    options.apply(route, previous => availableRouteStops(
+      [...unassignedStops, ...removeStopWithSameIdentity(previous, stop)], [route.stops],
+    ), metrics);
     options.toast({ title: kind === 'allocate' ? 'Ponto salvo na rota' : 'Ponto devolvido aos avulsos' });
     void options.notify(route).catch(error => console.error('Erro ao notificar motorista:', error));
   } catch (error) {
@@ -35,8 +34,8 @@ export async function commitRoutePoolMove(
         description: 'Confira a rota atual e repita a alteração.' });
       return;
     }
-    if (error instanceof EarningsRequestError && error.status >= 400 && error.status < 500 &&
-        ![408, 429].includes(error.status)) {
+    if (error instanceof ZodError || (error instanceof EarningsRequestError && error.status >= 400 && error.status < 500 &&
+        ![408, 429].includes(error.status))) {
       options.toast({ variant: 'destructive', title: 'Movimento rejeitado',
         description: 'Confira o acesso e recarregue a rota antes de repetir a alteração.' });
       return;

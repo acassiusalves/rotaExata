@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo,useRef } from 'react';
+import { ZodError } from 'zod';
 import { usePathname } from 'next/navigation';
 import { staffEditorSurface,type StaffEditorSurface } from '@/lib/staff/access';
 import { useOptionalStaff } from './staff-session';
@@ -245,7 +246,7 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
         poolMoves.delete(key);
         return {route,unassignedStops:result.unassignedStops,metrics:result.routeMetrics};
       } catch(error) {
-        if (error instanceof RouteStructureConflictError ||
+        if (error instanceof RouteStructureConflictError || error instanceof ZodError ||
             error instanceof EarningsRequestError && error.status>=400 && error.status<500 &&
             ![408,429].includes(error.status)) {
           poolMoves.delete(key);
@@ -270,6 +271,17 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
       post(editorBody({...command,commandId:commitId(fingerprint)}),'PATCH'));
     ids.delete(fingerprint);
     return result;
+  }
+
+  async function editPoolStop(routeId:string,original:PlaceValue,edited:PlaceValue) {
+    const stopKey=getStopIdentityKey(original);
+    if (!stopKey) throw new RouteStructureConflictError();
+    const current=(await readDocument(routeRef(routeId),true)).data();
+    const {_originalStopKey:_,...stop}=editorStop({
+      ...edited,id:String(original.id),pointCode:original.pointCode,orderNumber:original.orderNumber,
+    });
+    await patch({kind:'edit-pool-stop',routeId,revision:current.revision,stopKey,stop});
+    planEpoch++;
   }
 
   async function addManualStop(draftId:string,stop:PlaceValue) {
@@ -461,7 +473,7 @@ function routeEditor(request:Requester,surface:StaffEditorSurface|null,ids:Map<s
       if (!nativeStaffEnabled) return (await loadLegacy()).addNotification(data);
       return {id:noticeIdFrom(notices,data.routeId)};
     },
-    movePoolStop,
+    movePoolStop,editPoolStop,
     code:async()=>nativeStaffEnabled ? '':(await loadLegacy()).code(),
     plan:saveBatch,
     saveExisting:async(plans:ExistingRoutePlan[])=>(await saveBatch({existingPlans:plans})).existingRoutes,
